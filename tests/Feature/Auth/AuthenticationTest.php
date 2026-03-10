@@ -100,4 +100,32 @@ class AuthenticationTest extends TestCase
         $this->assertGuest();
         $response->assertSessionHasErrors('email');
     }
+
+    public function test_inactive_client_with_active_session_is_logged_out_on_protected_routes(): void
+    {
+        $user = User::factory()->create([
+            'role' => 'client',
+        ]);
+
+        $client = Client::create([
+            'user_id' => $user->id,
+            'name' => 'Cliente Sessao',
+            'business_name' => null,
+            'address' => 'Rua Sessao',
+            'phone' => '+351 980000000',
+            'is_active' => true,
+        ]);
+
+        $this->actingAs($user);
+
+        $client->update([
+            'is_active' => false,
+        ]);
+
+        $response = $this->get(route('dashboard'));
+
+        $this->assertGuest();
+        $response->assertRedirect(route('login'));
+        $response->assertSessionHasErrors('email');
+    }
 }
