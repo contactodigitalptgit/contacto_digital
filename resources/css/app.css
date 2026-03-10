@@ -438,9 +438,143 @@
         @apply py-3;
     }
 
+    .dash-recent-header {
+        @apply mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between;
+    }
+
+    .dash-recent-subtitle {
+        @apply mt-1 text-sm;
+        color: var(--text-muted);
+    }
+
+    .dash-link-button {
+        @apply inline-flex items-center rounded-xl border px-3 py-2 text-sm font-medium transition;
+        border-color: var(--card-border);
+        background: var(--pill-bg);
+        color: var(--pill-text);
+    }
+
+    .dash-link-button:hover {
+        filter: brightness(1.03);
+    }
+
+    .dash-recent-clients {
+        @apply space-y-2;
+    }
+
+    .dash-recent-client-item {
+        @apply flex flex-col gap-3 rounded-xl border px-3 py-3 sm:flex-row sm:items-center sm:justify-between;
+        border-color: var(--line-color);
+        background: var(--table-row-bg);
+    }
+
+    .dash-recent-client-main {
+        @apply flex min-w-0 items-center gap-3;
+    }
+
+    .dash-recent-avatar {
+        @apply inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-xs font-bold uppercase;
+        background: color-mix(in srgb, var(--accent) 16%, var(--pill-bg));
+        color: var(--accent-strong);
+        border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--card-border));
+    }
+
+    .dash-recent-name {
+        @apply truncate text-sm font-semibold;
+        color: var(--text-main);
+    }
+
+    .dash-recent-business {
+        @apply truncate text-xs;
+        color: var(--text-muted);
+    }
+
+    .dash-recent-meta {
+        @apply flex items-center justify-between gap-2 sm:justify-end;
+    }
+
+    .dash-recent-events {
+        @apply text-xs font-medium;
+        color: var(--text-soft);
+    }
+
+    .dash-client-preview-link {
+        @apply text-xs font-semibold transition;
+        color: var(--accent-strong);
+    }
+
+    .dash-client-preview-link:hover {
+        color: var(--accent);
+    }
+
+    .dash-recent-empty {
+        @apply rounded-xl border px-3 py-8 text-center text-sm;
+        border-color: var(--line-color);
+        background: var(--table-row-bg);
+        color: var(--text-muted);
+    }
+
+    .dash-preview-banner {
+        @apply flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between;
+    }
+
     .dash-muted {
         @apply text-sm;
         color: var(--text-muted);
+    }
+
+    .profile-page {
+        @apply mx-auto w-full max-w-7xl px-4 py-6 sm:px-6 lg:px-8;
+    }
+
+    .profile-stack {
+        @apply mx-auto w-full max-w-4xl space-y-6;
+    }
+
+    .profile-card {
+        @apply rounded-2xl border p-5;
+        background: var(--card-bg);
+        border-color: var(--card-border);
+        box-shadow: var(--card-shadow);
+    }
+
+    .profile-section-title {
+        @apply text-lg font-semibold;
+        color: var(--text-main);
+    }
+
+    .profile-section-text {
+        @apply mt-1 text-sm;
+        color: var(--text-soft);
+    }
+
+    .profile-modal-text {
+        @apply mt-2 text-sm;
+        color: var(--text-soft);
+    }
+
+    .profile-inline-link {
+        @apply underline transition;
+        color: var(--accent-strong);
+    }
+
+    .profile-inline-link:hover {
+        color: var(--accent);
+    }
+
+    .profile-success-text {
+        @apply mt-2 text-sm font-medium;
+        color: var(--success);
+    }
+
+    .profile-danger-btn {
+        @apply inline-flex items-center rounded-xl px-4 py-2 text-xs font-semibold uppercase tracking-widest text-white transition;
+        background: linear-gradient(135deg, #ef4444, #dc2626);
+        box-shadow: 0 8px 16px rgba(220, 38, 38, 0.24);
+    }
+
+    .profile-danger-btn:hover {
+        filter: brightness(1.05);
     }
 
     .status-pill {
@@ -838,10 +972,23 @@
         color: var(--text-main);
     }
 
-    .app-mobile-theme-toggle {
-        @apply mb-1 inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition;
-        color: var(--text-soft);
-        background: var(--theme-toggle-bg);
+    .app-mobile-header-actions {
+        @apply flex flex-col items-end gap-1;
+    }
+
+    .app-mobile-user-trigger {
+        @apply inline-flex max-w-[11rem] items-center gap-2 rounded-lg border px-2 py-1 text-sm font-semibold transition;
+        border-color: var(--card-border);
+        background: var(--pill-bg);
+        color: var(--pill-text);
+    }
+
+    .app-mobile-user-trigger:hover {
+        filter: brightness(1.03);
+    }
+
+    .app-mobile-user-name {
+        @apply truncate;
     }
 
     .app-mobile-pwa-actions {
@@ -868,18 +1015,8 @@
         color: var(--success);
     }
 
-    .app-mobile-theme-toggle:hover {
-        background: var(--theme-toggle-hover);
-    }
-
-    .app-mobile-user {
-        @apply block text-sm font-medium;
-        color: var(--text-main);
-    }
-
-    .app-mobile-logout {
-        @apply text-xs font-medium;
-        color: #ef4444;
+    .app-mobile-dropdown {
+        min-width: 14rem;
     }
 
     .dash-page-title {

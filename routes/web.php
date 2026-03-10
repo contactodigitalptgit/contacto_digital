@@ -33,6 +33,8 @@ Route::middleware(['auth', 'active.client', 'admin'])
     ->group(function (): void {
         Route::patch('clients/{client}/status', [ClientController::class, 'toggleStatus'])
             ->name('clients.toggle-status');
+        Route::get('clients/{client}/dashboard', [ClientController::class, 'dashboard'])
+            ->name('clients.dashboard');
         Route::patch('events/{event}/status', [EventController::class, 'toggleStatus'])
             ->name('events.toggle-status');
         Route::resource('clients', ClientController::class);

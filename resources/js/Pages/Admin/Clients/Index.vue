@@ -2,7 +2,7 @@
 import Modal from '@/Components/Modal.vue';
 import { confirmAction, showErrorToast, showSuccessToast } from '@/lib/swal';
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout.vue';
-import { Head, router, useForm } from '@inertiajs/vue3';
+import { Head, Link, router, useForm } from '@inertiajs/vue3';
 import { ref } from 'vue';
 
 interface ClientItem {
@@ -223,6 +223,24 @@ const deleteClient = async (client: ClientItem) => {
                         </div>
 
                         <div class="admin-clients-actions">
+                            <Link
+                                :href="route('admin.clients.dashboard', client.id)"
+                                class="admin-client-icon-btn"
+                                title="Ver dashboard do cliente"
+                                aria-label="Ver dashboard do cliente"
+                            >
+                                <svg
+                                    class="h-4 w-4"
+                                    viewBox="0 0 24 24"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    stroke-width="2"
+                                >
+                                    <path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6-10-6-10-6Z" />
+                                    <circle cx="12" cy="12" r="2.8" />
+                                </svg>
+                            </Link>
+
                             <button
                                 type="button"
                                 class="admin-client-icon-btn"
@@ -344,6 +362,24 @@ const deleteClient = async (client: ClientItem) => {
                                 </td>
                                 <td>
                                     <div class="admin-clients-actions">
+                                        <Link
+                                            :href="route('admin.clients.dashboard', client.id)"
+                                            class="admin-client-icon-btn"
+                                            title="Ver dashboard do cliente"
+                                            aria-label="Ver dashboard do cliente"
+                                        >
+                                            <svg
+                                                class="h-4 w-4"
+                                                viewBox="0 0 24 24"
+                                                fill="none"
+                                                stroke="currentColor"
+                                                stroke-width="2"
+                                            >
+                                                <path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6-10-6-10-6Z" />
+                                                <circle cx="12" cy="12" r="2.8" />
+                                            </svg>
+                                        </Link>
+
                                         <button
                                             type="button"
                                             class="admin-client-icon-btn"

@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Models\Client;
+use App\Models\Event;
 use App\Models\User;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -89,6 +90,34 @@ class ClientController extends Controller
                 'phone' => $client->phone,
                 'email' => $client->user->email,
             ],
+        ]);
+    }
+
+    public function dashboard(Client $client): Response
+    {
+        $client->load([
+            'events' => fn ($query) => $query
+                ->where('is_active', true)
+                ->orderBy('event_date'),
+        ]);
+
+        return Inertia::render('Dashboard', [
+            'type' => 'client',
+            'client' => [
+                'id' => $client->id,
+                'name' => $client->name,
+                'business_name' => $client->business_name,
+                'address' => $client->address,
+                'phone' => $client->phone,
+            ],
+            'events' => $client->events->map(fn (Event $event): array => [
+                'id' => $event->id,
+                'title' => $event->title,
+                'description' => $event->description,
+                'event_date' => $event->event_date->toISOString(),
+            ]),
+            'previewMode' => true,
+            'previewBackUrl' => route('admin.clients.index'),
         ]);
     }
 

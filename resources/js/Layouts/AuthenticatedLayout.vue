@@ -203,7 +203,7 @@ onUnmounted(() => {
                         <Link :href="route('dashboard')">
                             <ApplicationLogo class="app-mobile-logo" />
                         </Link>
-                        <div class="text-right">
+                        <div class="app-mobile-header-actions">
                             <div class="app-mobile-pwa-actions">
                                 <button
                                     v-if="canInstallPwa"
@@ -228,48 +228,109 @@ onUnmounted(() => {
                                     PWA
                                 </span>
                             </div>
-                            <button
-                                type="button"
-                                class="app-mobile-theme-toggle"
-                                @click="toggleTheme"
+
+                            <Dropdown
+                                align="right"
+                                width="48"
+                                content-classes="app-header-dropdown app-mobile-dropdown"
                             >
-                                <svg
-                                    v-if="isDarkTheme"
-                                    class="h-4 w-4"
-                                    viewBox="0 0 24 24"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    stroke-width="1.8"
-                                >
-                                    <circle cx="12" cy="12" r="4" />
-                                    <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" />
-                                </svg>
-                                <svg
-                                    v-else
-                                    class="h-4 w-4"
-                                    viewBox="0 0 24 24"
-                                    fill="none"
-                                    stroke="currentColor"
-                                    stroke-width="1.8"
-                                >
-                                    <path d="M21 12.79A9 9 0 1 1 11.21 3a7 7 0 0 0 9.79 9.79z" />
-                                </svg>
-                                {{ isDarkTheme ? 'Claro' : 'Escuro' }}
-                            </button>
-                            <Link
-                                :href="route('profile.edit')"
-                                class="app-mobile-user"
-                            >
-                                {{ $page.props.auth.user.name }}
-                            </Link>
-                            <Link
-                                :href="route('logout')"
-                                method="post"
-                                as="button"
-                                class="app-mobile-logout"
-                            >
-                                Sair
-                            </Link>
+                                <template #trigger>
+                                    <button
+                                        type="button"
+                                        class="app-mobile-user-trigger"
+                                    >
+                                        <span class="dash-user-dot"></span>
+                                        <span class="app-mobile-user-name">
+                                            {{ $page.props.auth.user.name }}
+                                        </span>
+                                        <svg
+                                            class="h-4 w-4"
+                                            viewBox="0 0 20 20"
+                                            fill="currentColor"
+                                        >
+                                            <path
+                                                fill-rule="evenodd"
+                                                d="M5.23 7.21a.75.75 0 011.06.02L10 11.13l3.71-3.9a.75.75 0 011.08 1.04l-4.25 4.46a.75.75 0 01-1.08 0L5.21 8.27a.75.75 0 01.02-1.06z"
+                                                clip-rule="evenodd"
+                                            />
+                                        </svg>
+                                    </button>
+                                </template>
+
+                                <template #content>
+                                    <div class="app-header-dropdown-section">
+                                        <p class="text-sm font-semibold text-current">
+                                            {{ $page.props.auth.user.name }}
+                                        </p>
+                                        <p class="text-xs opacity-75">
+                                            {{ $page.props.auth.user.email }}
+                                        </p>
+                                    </div>
+
+                                    <button
+                                        v-if="canInstallPwa"
+                                        type="button"
+                                        class="app-header-dropdown-item"
+                                        @click="runPwaInstall"
+                                    >
+                                        <span>Instalar app</span>
+                                    </button>
+
+                                    <button
+                                        v-if="updateAvailable"
+                                        type="button"
+                                        class="app-header-dropdown-item"
+                                        @click="updatePwa"
+                                    >
+                                        <span>Atualizar app</span>
+                                    </button>
+
+                                    <button
+                                        type="button"
+                                        class="app-header-dropdown-item"
+                                        @click="toggleTheme"
+                                    >
+                                        <svg
+                                            v-if="isDarkTheme"
+                                            class="h-4 w-4"
+                                            viewBox="0 0 24 24"
+                                            fill="none"
+                                            stroke="currentColor"
+                                            stroke-width="1.8"
+                                        >
+                                            <circle cx="12" cy="12" r="4" />
+                                            <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" />
+                                        </svg>
+                                        <svg
+                                            v-else
+                                            class="h-4 w-4"
+                                            viewBox="0 0 24 24"
+                                            fill="none"
+                                            stroke="currentColor"
+                                            stroke-width="1.8"
+                                        >
+                                            <path d="M21 12.79A9 9 0 1 1 11.21 3a7 7 0 0 0 9.79 9.79z" />
+                                        </svg>
+                                        <span>{{ isDarkTheme ? 'Tema claro' : 'Tema escuro' }}</span>
+                                    </button>
+
+                                    <Link
+                                        :href="route('profile.edit')"
+                                        class="app-header-dropdown-item"
+                                    >
+                                        Perfil
+                                    </Link>
+
+                                    <Link
+                                        :href="route('logout')"
+                                        method="post"
+                                        as="button"
+                                        class="app-header-dropdown-item is-danger"
+                                    >
+                                        Sair
+                                    </Link>
+                                </template>
+                            </Dropdown>
                         </div>
                     </div>
                 </div>

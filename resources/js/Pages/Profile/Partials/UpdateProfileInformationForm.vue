@@ -1,13 +1,10 @@
 <script setup lang="ts">
 import InputError from '@/Components/InputError.vue';
-import InputLabel from '@/Components/InputLabel.vue';
-import PrimaryButton from '@/Components/PrimaryButton.vue';
-import TextInput from '@/Components/TextInput.vue';
 import { Link, useForm, usePage } from '@inertiajs/vue3';
 
 defineProps<{
-    mustVerifyEmail?: Boolean;
-    status?: String;
+    mustVerifyEmail?: boolean;
+    status?: string;
 }>();
 
 const user = usePage().props.auth.user;
@@ -21,27 +18,29 @@ const form = useForm({
 <template>
     <section>
         <header>
-            <h2 class="text-lg font-medium text-gray-900">
-                Profile Information
+            <h2 class="profile-section-title">
+                Informações do perfil
             </h2>
 
-            <p class="mt-1 text-sm text-gray-600">
-                Update your account's profile information and email address.
+            <p class="profile-section-text">
+                Atualize os dados da sua conta e o endereço de e-mail.
             </p>
         </header>
 
         <form
+            class="mt-6 space-y-4"
             @submit.prevent="form.patch(route('profile.update'))"
-            class="mt-6 space-y-6"
         >
-            <div>
-                <InputLabel for="name" value="Name" />
+            <div class="dash-modal-field">
+                <label class="dash-modal-label" for="profile_name">
+                    Nome
+                </label>
 
-                <TextInput
-                    id="name"
-                    type="text"
-                    class="mt-1 block w-full"
+                <input
+                    id="profile_name"
                     v-model="form.name"
+                    class="dash-modal-input"
+                    type="text"
                     required
                     autofocus
                     autocomplete="name"
@@ -50,14 +49,16 @@ const form = useForm({
                 <InputError class="mt-2" :message="form.errors.name" />
             </div>
 
-            <div>
-                <InputLabel for="email" value="Email" />
+            <div class="dash-modal-field">
+                <label class="dash-modal-label" for="profile_email">
+                    E-mail
+                </label>
 
-                <TextInput
-                    id="email"
-                    type="email"
-                    class="mt-1 block w-full"
+                <input
+                    id="profile_email"
                     v-model="form.email"
+                    class="dash-modal-input"
+                    type="email"
                     required
                     autocomplete="username"
                 />
@@ -66,28 +67,35 @@ const form = useForm({
             </div>
 
             <div v-if="mustVerifyEmail && user.email_verified_at === null">
-                <p class="mt-2 text-sm text-gray-800">
-                    Your email address is unverified.
+                <p class="profile-section-text">
+                    Seu e-mail ainda não foi verificado.
                     <Link
                         :href="route('verification.send')"
                         method="post"
                         as="button"
-                        class="rounded-md text-sm text-gray-600 underline hover:text-gray-900 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
+                        class="profile-inline-link"
                     >
-                        Click here to re-send the verification email.
+                        Clique aqui para reenviar o e-mail de verificação.
                     </Link>
                 </p>
 
                 <div
                     v-show="status === 'verification-link-sent'"
-                    class="mt-2 text-sm font-medium text-green-600"
+                    class="profile-success-text"
                 >
-                    A new verification link has been sent to your email address.
+                    Novo link de verificação enviado para seu e-mail.
                 </div>
             </div>
 
             <div class="flex items-center gap-4">
-                <PrimaryButton :disabled="form.processing">Save</PrimaryButton>
+                <button
+                    type="submit"
+                    class="dash-action-button dash-action-button-inline"
+                    :disabled="form.processing"
+                    :class="{ 'opacity-60': form.processing }"
+                >
+                    Salvar
+                </button>
 
                 <Transition
                     enter-active-class="transition ease-in-out"
@@ -97,9 +105,9 @@ const form = useForm({
                 >
                     <p
                         v-if="form.recentlySuccessful"
-                        class="text-sm text-gray-600"
+                        class="profile-section-text"
                     >
-                        Saved.
+                        Salvo.
                     </p>
                 </Transition>
             </div>

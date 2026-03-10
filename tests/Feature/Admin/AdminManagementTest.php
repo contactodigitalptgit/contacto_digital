@@ -6,6 +6,7 @@ use App\Models\Client;
 use App\Models\Event;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Inertia\Testing\AssertableInertia;
 use Tests\TestCase;
 
 class AdminManagementTest extends TestCase
@@ -92,6 +93,46 @@ class AdminManagementTest extends TestCase
             'title' => 'Evento de Teste',
             'is_active' => true,
         ]);
+    }
+
+    public function test_admin_can_view_client_dashboard_preview(): void
+    {
+        $admin = User::factory()->create([
+            'role' => 'admin',
+        ]);
+
+        $clientUser = User::factory()->create([
+            'role' => 'client',
+        ]);
+
+        $client = Client::create([
+            'user_id' => $clientUser->id,
+            'name' => 'Cliente Preview',
+            'business_name' => 'Empresa Preview',
+            'address' => 'Rua Preview',
+            'phone' => '+351 925000000',
+            'is_active' => true,
+        ]);
+
+        Event::create([
+            'client_id' => $client->id,
+            'title' => 'Evento Preview',
+            'description' => 'Descricao',
+            'event_date' => now()->addDays(2),
+            'is_active' => true,
+        ]);
+
+        $response = $this
+            ->actingAs($admin)
+            ->get(route('admin.clients.dashboard', $client));
+
+        $response->assertOk();
+        $response->assertInertia(fn (AssertableInertia $page) => $page
+            ->component('Dashboard')
+            ->where('type', 'client')
+            ->where('previewMode', true)
+            ->where('client.name', 'Cliente Preview')
+            ->where('events.0.title', 'Evento Preview'));
     }
 
     public function test_admin_can_toggle_event_status_without_deleting_data(): void

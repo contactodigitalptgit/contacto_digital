@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import Modal from '@/Components/Modal.vue';
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout.vue';
-import { Head, useForm } from '@inertiajs/vue3';
+import { Head, Link, useForm } from '@inertiajs/vue3';
 import { computed, ref } from 'vue';
 
 interface Stats {
@@ -46,6 +46,8 @@ const props = defineProps<{
     upcomingEvents?: AdminEvent[];
     client?: ClientData;
     events?: ClientEvent[];
+    previewMode?: boolean;
+    previewBackUrl?: string;
 }>();
 
 const formatDate = (date: string) =>
@@ -132,6 +134,16 @@ const submitCreateClient = () => {
         },
     });
 };
+
+const getClientInitials = (name: string) => {
+    const parts = name
+        .trim()
+        .split(/\s+/)
+        .filter(Boolean)
+        .slice(0, 2);
+
+    return parts.map((part) => part[0]?.toUpperCase() ?? '').join('') || 'CL';
+};
 </script>
 
 <template>
@@ -146,102 +158,71 @@ const submitCreateClient = () => {
 
         <div class="dash-page">
             <div v-if="props.type === 'admin'" class="dash-grid">
-                <section class="dash-card dash-card-full">
-                    <h3 class="dash-card-title">Visão Geral do Mês</h3>
-
-                    <div class="dash-chart-wrap">
-                        <svg
-                            viewBox="0 0 560 180"
-                            preserveAspectRatio="none"
-                            class="h-52 w-full"
-                        >
-                            <defs>
-                                <linearGradient
-                                    id="chartFill"
-                                    x1="0%"
-                                    y1="0%"
-                                    x2="0%"
-                                    y2="100%"
-                                >
-                                    <stop offset="0%" stop-color="#2c8bff" stop-opacity="0.35" />
-                                    <stop offset="100%" stop-color="#2c8bff" stop-opacity="0.02" />
-                                </linearGradient>
-                            </defs>
-
-                            <path
-                                :d="chartAreaPath"
-                                fill="url(#chartFill)"
-                            />
-                            <path
-                                :d="chartPath"
-                                fill="none"
-                                stroke="#1f7cf4"
-                                stroke-width="4"
-                                stroke-linecap="round"
-                            />
-
-                            <circle
-                                v-if="lastChartPoint"
-                                :cx="lastChartPoint.x"
-                                :cy="lastChartPoint.y"
-                                r="6"
-                                fill="#0ea5a4"
-                                stroke="#ffffff"
-                                stroke-width="3"
-                            />
-                        </svg>
-
-                        <span class="dash-chart-badge">
-                            #{{ String(props.stats?.events ?? 0).padStart(5, '0') }}
-                        </span>
-                    </div>
-
-                    <div class="dash-axis">
-                        <span v-for="label in monthLabels" :key="label">{{ label }}</span>
-                    </div>
-
-                    <p class="dash-legend">Visão Geral do Mês</p>
-                </section>
 
                 <section class="dash-card">
-                    <div class="mb-2 flex items-center justify-between">
-                        <h3 class="dash-card-title mb-0">Clientes Recentes</h3>
-                        <button
-                            type="button"
-                            @click="openCreateClientModal"
-                            class="dash-action-button dash-action-button-inline"
-                        >
-                            Novo Cliente
-                        </button>
+                    <div class="dash-recent-header">
+                        <div>
+                            <h3 class="dash-card-title mb-0">Clientes Recentes</h3>
+                            <p class="dash-recent-subtitle">
+                                {{ props.recentClients?.length ?? 0 }} cliente(s) recente(s)
+                            </p>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <Link
+                                :href="route('admin.clients.index')"
+                                class="dash-link-button"
+                            >
+                                Gerenciar
+                            </Link>
+                            <button
+                                type="button"
+                                @click="openCreateClientModal"
+                                class="dash-action-button dash-action-button-inline"
+                            >
+                                Novo Cliente
+                            </button>
+                        </div>
                     </div>
 
-                    <ul class="dash-list">
+                    <ul class="dash-recent-clients">
                         <li
                             v-for="client in props.recentClients ?? []"
                             :key="client.id"
-                            class="dash-list-item"
+                            class="dash-recent-client-item"
                         >
-                            <div class="flex items-start justify-between gap-3">
-                                <div>
-                                    <p class="dash-main-text font-semibold">{{ client.name }}</p>
-                                    <p class="dash-muted-text text-sm">
+                            <div class="dash-recent-client-main">
+                                <span class="dash-recent-avatar">
+                                    {{ getClientInitials(client.name) }}
+                                </span>
+                                <div class="min-w-0">
+                                    <p class="dash-recent-name">{{ client.name }}</p>
+                                    <p class="dash-recent-business">
                                         {{ client.business_name || 'Sem nome comercial' }}
                                     </p>
-                                    <p class="dash-muted-text text-xs">
-                                        {{ client.events_count }} evento(s)
-                                    </p>
                                 </div>
-                                <span
-                                    class="status-pill"
-                                    :class="client.events_count > 0 ? 'success' : 'neutral'"
-                                >
-                                    {{ client.events_count > 0 ? 'Ativo' : 'Novo' }}
-                                </span>
                             </div>
-                        </li>
+
+                    <div class="dash-recent-meta">
+                        <span
+                            class="status-pill"
+                            :class="client.events_count > 0 ? 'success' : 'neutral'"
+                        >
+                            {{ client.events_count > 0 ? 'Ativo' : 'Novo' }}
+                        </span>
+                        <span class="dash-recent-events">
+                            {{ client.events_count }} evento(s)
+                        </span>
+                        <Link
+                            :href="route('admin.clients.dashboard', client.id)"
+                            class="dash-client-preview-link"
+                        >
+                            Ver dashboard
+                        </Link>
+                    </div>
+                </li>
                         <li
                             v-if="!(props.recentClients?.length)"
-                            class="dash-list-item dash-muted-text text-sm"
+                            class="dash-recent-empty"
                         >
                             Nenhum cliente cadastrado.
                         </li>
@@ -251,14 +232,13 @@ const submitCreateClient = () => {
                 <div class="dash-stack">
 
                     <section class="dash-card">
-                        <h3 class="dash-card-title">Total Projetos</h3>
                         <div class="dash-kpi-grid">
                             <div class="dash-kpi-item">
                                 <span>Clientes</span>
                                 <strong>{{ props.stats?.clients ?? 0 }}</strong>
                             </div>
                             <div class="dash-kpi-item">
-                                <span>Total Eventos</span>
+                                <span>Eventos</span>
                                 <strong>{{ props.stats?.events ?? 0 }}</strong>
                             </div>
                         </div>
@@ -267,6 +247,26 @@ const submitCreateClient = () => {
             </div>
 
             <div v-else class="grid gap-6 lg:grid-cols-2">
+                <section
+                    v-if="props.previewMode"
+                    class="dash-card dash-card-full"
+                >
+                    <div class="dash-preview-banner">
+                        <div>
+                            <h3 class="dash-card-title mb-0">Visualização do Cliente</h3>
+                            <p class="dash-recent-subtitle">
+                                Você está vendo o dashboard de {{ props.client?.name }} como administrador.
+                            </p>
+                        </div>
+                        <Link
+                            :href="props.previewBackUrl || route('admin.clients.index')"
+                            class="dash-link-button"
+                        >
+                            Voltar para clientes
+                        </Link>
+                    </div>
+                </section>
+
                 <section class="dash-card">
                     <h3 class="dash-card-title">Dados do Cliente</h3>
                     <dl class="space-y-3 text-sm">
