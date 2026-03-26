@@ -518,6 +518,378 @@
         @apply flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between;
     }
 
+    .event-dashboard-header {
+        @apply flex w-full flex-col gap-3 sm:flex-row sm:items-center sm:justify-between;
+    }
+
+    .event-dashboard-header-top {
+        @apply mb-2 flex flex-wrap items-center gap-2;
+    }
+
+    .event-dashboard-page-kicker {
+        @apply inline-flex rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.24em];
+        color: var(--accent-strong);
+        background: color-mix(in srgb, var(--accent) 10%, var(--table-row-bg) 90%);
+        border: 1px solid color-mix(in srgb, var(--accent) 18%, var(--line-color));
+    }
+
+    .event-dashboard-page-badge {
+        @apply inline-flex rounded-full px-3 py-1 text-xs font-semibold;
+        color: var(--success);
+        background: color-mix(in srgb, var(--success) 10%, var(--table-row-bg) 90%);
+        border: 1px solid color-mix(in srgb, var(--success) 22%, var(--line-color));
+    }
+
+    .event-dashboard-subtitle {
+        @apply mt-1 text-sm;
+        color: var(--text-muted);
+    }
+
+    .event-dashboard-grid {
+        @apply grid gap-6;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .event-dashboard-section {
+        @apply overflow-hidden;
+    }
+
+    .event-dashboard-hero {
+        @apply overflow-hidden;
+    }
+
+    .event-dashboard-hero-shell {
+        @apply grid gap-6;
+        grid-template-columns: minmax(0, 1.45fr) minmax(20rem, 0.95fr);
+    }
+
+    .event-dashboard-hero-copy {
+        @apply flex flex-col gap-5;
+    }
+
+    .event-dashboard-label {
+        @apply text-xs font-semibold uppercase tracking-[0.24em];
+        color: var(--accent-strong);
+    }
+
+    .event-dashboard-description {
+        @apply max-w-3xl text-sm leading-6;
+        color: var(--text-soft);
+    }
+
+    .event-dashboard-meta-grid {
+        @apply grid gap-3 sm:grid-cols-2;
+    }
+
+    .event-dashboard-meta-card {
+        @apply rounded-2xl border px-4 py-4 text-sm;
+        border-color: var(--line-color);
+        background:
+            linear-gradient(180deg, color-mix(in srgb, var(--table-row-bg) 88%, white 12%), var(--table-row-bg));
+    }
+
+    .dark .event-dashboard-meta-card {
+        background:
+            linear-gradient(180deg, color-mix(in srgb, var(--table-row-bg) 92%, white 8%), var(--table-row-bg));
+    }
+
+    .event-dashboard-meta-card span {
+        @apply block text-[11px] font-semibold uppercase tracking-wide;
+        color: var(--text-muted);
+    }
+
+    .event-dashboard-meta-card strong {
+        @apply mt-2 block text-sm font-semibold;
+        color: var(--text-main);
+    }
+
+    .event-dashboard-highlight-grid {
+        @apply grid gap-3;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        align-self: stretch;
+    }
+
+    .event-dashboard-highlight-card {
+        @apply flex h-full flex-col rounded-2xl border px-4 py-4;
+        border-color: var(--line-color);
+        background: var(--table-row-bg);
+    }
+
+    .event-dashboard-highlight-card-featured {
+        grid-column: span 2;
+        border-color: color-mix(in srgb, var(--accent) 38%, var(--line-color));
+        background: linear-gradient(
+            135deg,
+            color-mix(in srgb, var(--accent) 16%, var(--card-bg) 84%),
+            color-mix(in srgb, var(--accent-strong) 12%, var(--card-bg) 88%)
+        );
+        box-shadow: 0 22px 44px -28px color-mix(in srgb, var(--accent) 42%, transparent);
+    }
+
+    .event-dashboard-highlight-label {
+        @apply text-[11px] font-semibold uppercase tracking-wide;
+        color: var(--text-muted);
+    }
+
+    .event-dashboard-highlight-value {
+        @apply mt-3 block text-3xl font-bold leading-none;
+        color: var(--text-main);
+    }
+
+    .event-dashboard-highlight-helper {
+        @apply mt-3 text-sm leading-6;
+        color: var(--text-soft);
+    }
+
+    .event-dashboard-filter-actions {
+        @apply flex flex-wrap items-center gap-2;
+    }
+
+    .event-dashboard-filter-summary {
+        @apply mt-5 flex flex-col gap-4 rounded-2xl border p-4 lg:flex-row lg:items-center lg:justify-between;
+        border-color: var(--line-color);
+        background: color-mix(in srgb, var(--table-row-bg) 90%, var(--card-bg) 10%);
+    }
+
+    .event-dashboard-filter-chip-list {
+        @apply flex flex-wrap gap-2;
+    }
+
+    .event-dashboard-filter-chip {
+        @apply inline-flex flex-col rounded-2xl border px-3 py-2 text-xs;
+        border-color: color-mix(in srgb, var(--accent) 18%, var(--line-color));
+        background: color-mix(in srgb, var(--accent) 8%, var(--table-row-bg) 92%);
+    }
+
+    .event-dashboard-filter-chip span {
+        @apply font-semibold uppercase tracking-wide;
+        color: var(--text-muted);
+    }
+
+    .event-dashboard-filter-chip strong {
+        @apply mt-1 text-sm font-semibold;
+        color: var(--text-main);
+    }
+
+    .event-dashboard-filter-empty {
+        @apply text-sm;
+        color: var(--text-muted);
+    }
+
+    .event-dashboard-filter-result {
+        @apply rounded-2xl border px-4 py-3 text-right;
+        min-width: 12rem;
+        border-color: color-mix(in srgb, var(--accent) 18%, var(--line-color));
+        background: color-mix(in srgb, var(--accent) 8%, var(--table-row-bg) 92%);
+    }
+
+    .event-dashboard-filter-result span {
+        @apply block text-[11px] font-semibold uppercase tracking-wide;
+        color: var(--text-muted);
+    }
+
+    .event-dashboard-filter-result strong {
+        @apply mt-2 block text-2xl font-bold;
+        color: var(--text-main);
+    }
+
+    .event-dashboard-filter-grid {
+        @apply mt-5 grid gap-4;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .event-dashboard-field {
+        @apply space-y-1;
+    }
+
+    .event-dashboard-summary-grid {
+        @apply grid gap-4;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+
+    .event-dashboard-summary-card {
+        @apply rounded-2xl border px-4 py-4;
+        border-color: var(--line-color);
+        background: var(--table-row-bg);
+    }
+
+    .event-dashboard-summary-card-featured {
+        grid-column: span 2;
+        border-color: color-mix(in srgb, var(--accent) 32%, var(--line-color));
+        background: linear-gradient(
+            135deg,
+            color-mix(in srgb, var(--accent) 14%, var(--table-row-bg) 86%),
+            color-mix(in srgb, var(--accent-strong) 10%, var(--table-row-bg) 90%)
+        );
+    }
+
+    .event-dashboard-summary-label {
+        @apply text-[11px] font-semibold uppercase tracking-wide;
+        color: var(--text-muted);
+    }
+
+    .event-dashboard-summary-value {
+        @apply mt-2 block text-2xl font-bold;
+        color: var(--text-main);
+    }
+
+    .event-dashboard-summary-helper {
+        @apply mt-2 text-sm leading-6;
+        color: var(--text-soft);
+    }
+
+    .event-dashboard-breakdown-list {
+        @apply space-y-3;
+    }
+
+    .event-dashboard-breakdown-item {
+        @apply flex flex-col gap-4 rounded-2xl border px-4 py-4 lg:flex-row lg:items-center lg:justify-between;
+        border-color: var(--line-color);
+        background: var(--table-row-bg);
+    }
+
+    .event-dashboard-breakdown-main {
+        @apply flex items-start gap-4;
+    }
+
+    .event-dashboard-rank {
+        @apply inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl text-sm font-bold;
+        color: var(--accent-strong);
+        background: color-mix(in srgb, var(--accent) 14%, var(--card-bg) 86%);
+        border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--line-color));
+    }
+
+    .event-dashboard-breakdown-head {
+        @apply flex flex-wrap items-center gap-2;
+    }
+
+    .event-dashboard-breakdown-title {
+        @apply text-sm font-semibold;
+        color: var(--text-main);
+    }
+
+    .event-dashboard-breakdown-badge {
+        @apply inline-flex rounded-full px-2.5 py-1 text-[11px] font-semibold;
+        color: var(--accent-strong);
+        background: color-mix(in srgb, var(--accent) 8%, var(--card-bg) 92%);
+        border: 1px solid color-mix(in srgb, var(--accent) 18%, var(--line-color));
+    }
+
+    .event-dashboard-breakdown-subtitle {
+        @apply mt-1 text-xs;
+        color: var(--text-muted);
+    }
+
+    .event-dashboard-breakdown-track {
+        @apply mt-3 h-2 w-full overflow-hidden rounded-full;
+        background: color-mix(in srgb, var(--line-color) 60%, transparent);
+    }
+
+    .event-dashboard-breakdown-fill {
+        @apply block h-full rounded-full;
+        background: linear-gradient(90deg, var(--accent), var(--accent-strong));
+    }
+
+    .event-dashboard-chip-list {
+        @apply mt-3 flex flex-wrap gap-2;
+    }
+
+    .event-dashboard-chip {
+        @apply inline-flex max-w-full rounded-full px-2.5 py-1 text-xs;
+        color: var(--accent-strong);
+        background: color-mix(in srgb, var(--accent) 10%, var(--table-row-bg) 90%);
+        border: 1px solid color-mix(in srgb, var(--accent) 18%, var(--line-color));
+    }
+
+    .event-dashboard-breakdown-side {
+        @apply grid gap-3 sm:grid-cols-2 lg:grid-cols-1;
+        min-width: 11rem;
+    }
+
+    .event-dashboard-breakdown-stat {
+        @apply rounded-2xl border px-3 py-3;
+        border-color: color-mix(in srgb, var(--accent) 12%, var(--line-color));
+        background: color-mix(in srgb, var(--accent) 6%, var(--card-bg) 94%);
+    }
+
+    .event-dashboard-breakdown-stat span {
+        @apply block text-[11px] font-semibold uppercase tracking-wide;
+        color: var(--text-muted);
+    }
+
+    .event-dashboard-breakdown-stat strong {
+        @apply mt-2 block text-base font-semibold;
+        color: var(--text-main);
+    }
+
+    .event-dashboard-empty {
+        @apply rounded-2xl border px-4 py-10 text-center text-sm;
+        border-color: var(--line-color);
+        background: var(--table-row-bg);
+        color: var(--text-muted);
+    }
+
+    .event-dashboard-table-toolbar {
+        @apply mt-5 flex flex-col gap-3 border-y py-4 lg:flex-row lg:items-center lg:justify-between;
+        border-color: var(--line-color);
+    }
+
+    .event-dashboard-mobile-rows {
+        @apply space-y-3;
+    }
+
+    .event-dashboard-row-card {
+        @apply rounded-2xl border p-4;
+        border-color: var(--line-color);
+        background: var(--table-row-bg);
+    }
+
+    .event-dashboard-row-top {
+        @apply flex items-start justify-between gap-3;
+    }
+
+    .event-dashboard-row-grid {
+        @apply mt-4 grid grid-cols-2 gap-3;
+    }
+
+    .event-dashboard-row-label {
+        @apply text-[11px] font-semibold uppercase tracking-wide;
+        color: var(--text-muted);
+    }
+
+    .event-dashboard-row-value {
+        @apply mt-1 text-sm;
+        color: var(--text-main);
+    }
+
+    .event-dashboard-table tbody tr:hover td {
+        background: color-mix(in srgb, var(--table-row-bg) 86%, var(--accent) 14%);
+    }
+
+    .event-dashboard-table-title {
+        @apply text-sm font-semibold;
+        color: var(--text-main);
+    }
+
+    .event-dashboard-table-subtitle {
+        @apply mt-1 text-xs;
+        color: var(--text-muted);
+    }
+
+    .event-dashboard-table-text {
+        color: var(--text-soft);
+    }
+
+    .event-dashboard-table-strong {
+        @apply font-semibold;
+        color: var(--text-main);
+    }
+
+    .event-dashboard-pagination {
+        @apply mt-5 flex flex-col gap-3 border-t pt-4 sm:flex-row sm:items-center sm:justify-between;
+        border-color: var(--line-color);
+    }
+
     .dash-muted {
         @apply text-sm;
         color: var(--text-muted);
@@ -858,6 +1230,28 @@
         color: var(--text-muted);
     }
 
+    .admin-event-report-summary {
+        @apply mt-3 flex flex-wrap items-center gap-2 text-[11px] font-semibold uppercase tracking-wide;
+        color: var(--text-muted);
+    }
+
+    .admin-event-report-summary span {
+        @apply rounded-full px-2.5 py-1;
+        color: var(--accent-strong);
+        background: color-mix(in srgb, var(--accent) 10%, var(--table-row-bg) 90%);
+        border: 1px solid color-mix(in srgb, var(--accent) 18%, var(--line-color));
+    }
+
+    .admin-event-report-meta {
+        @apply mt-2 text-xs;
+        color: var(--text-muted);
+    }
+
+    .admin-event-report-empty {
+        @apply mt-2 text-xs italic;
+        color: var(--text-muted);
+    }
+
     .admin-events-text {
         color: var(--text-soft);
     }
@@ -1049,6 +1443,11 @@
         color: var(--text-main);
     }
 
+    .admin-event-modal-subtitle {
+        @apply mt-1 text-sm;
+        color: var(--text-muted);
+    }
+
     .dash-modal-close {
         @apply rounded-lg p-2 transition;
         color: var(--text-muted);
@@ -1089,9 +1488,41 @@
         border-color: var(--accent);
     }
 
+    .dash-modal-input[type='file'] {
+        @apply px-3 py-2;
+    }
+
+    .dash-modal-input[type='file']::file-selector-button {
+        @apply mr-3 rounded-lg border-0 px-3 py-2 text-sm font-semibold transition;
+        color: white;
+        background: linear-gradient(135deg, var(--accent), var(--accent-strong));
+    }
+
+    .dash-modal-input[type='file']::file-selector-button:hover {
+        filter: brightness(1.04);
+    }
+
     .dash-modal-error {
         @apply text-xs;
         color: #ef4444;
+    }
+
+    .admin-event-input-hint {
+        @apply mt-2 text-xs leading-5;
+        color: var(--text-muted);
+    }
+
+    .admin-event-import-highlight {
+        @apply mb-5 rounded-2xl border p-4;
+        border-color: color-mix(in srgb, var(--accent) 24%, var(--line-color));
+        background:
+            linear-gradient(135deg, color-mix(in srgb, var(--accent) 12%, transparent), transparent 58%),
+            color-mix(in srgb, var(--card-bg) 92%, var(--accent) 8%);
+    }
+
+    .admin-event-import-highlight-title {
+        @apply text-sm font-semibold;
+        color: var(--text-main);
     }
 
     .dash-modal-actions {
@@ -1118,6 +1549,27 @@
         .dash-grid {
             grid-template-columns: 1fr;
         }
+
+        .event-dashboard-grid {
+            grid-template-columns: 1fr;
+        }
+
+        .event-dashboard-hero-shell {
+            grid-template-columns: 1fr;
+        }
+
+        .event-dashboard-filter-grid {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .event-dashboard-summary-grid {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .event-dashboard-breakdown-side {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            min-width: 0;
+        }
     }
 
     @media (max-width: 768px) {
@@ -1132,6 +1584,47 @@
         .dash-search {
             min-width: 0;
             @apply flex-1;
+        }
+
+        .event-dashboard-highlight-grid {
+            grid-template-columns: 1fr;
+        }
+
+        .event-dashboard-highlight-card-featured {
+            grid-column: auto;
+        }
+
+        .event-dashboard-filter-summary {
+            @apply items-stretch;
+        }
+
+        .event-dashboard-filter-result {
+            min-width: 0;
+            @apply text-left;
+        }
+
+        .event-dashboard-filter-grid {
+            grid-template-columns: 1fr;
+        }
+
+        .event-dashboard-summary-grid {
+            grid-template-columns: 1fr;
+        }
+
+        .event-dashboard-summary-card-featured {
+            grid-column: auto;
+        }
+
+        .event-dashboard-breakdown-main {
+            @apply flex-col gap-3;
+        }
+
+        .event-dashboard-breakdown-side {
+            grid-template-columns: 1fr;
+        }
+
+        .event-dashboard-row-grid {
+            grid-template-columns: 1fr;
         }
     }
 }

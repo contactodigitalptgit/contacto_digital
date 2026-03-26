@@ -3,6 +3,7 @@
 use App\Http\Controllers\Admin\ClientController;
 use App\Http\Controllers\Admin\EventController;
 use App\Http\Controllers\DashboardController;
+use App\Http\Controllers\EventDashboardController;
 use App\Http\Controllers\ProfileController;
 use Illuminate\Foundation\Application;
 use Illuminate\Support\Facades\Route;
@@ -25,6 +26,8 @@ Route::middleware(['auth', 'active.client'])->group(function () {
     Route::get('/profile', [ProfileController::class, 'edit'])->name('profile.edit');
     Route::patch('/profile', [ProfileController::class, 'update'])->name('profile.update');
     Route::delete('/profile', [ProfileController::class, 'destroy'])->name('profile.destroy');
+    Route::get('/events/{event}/dashboard', [EventDashboardController::class, 'show'])
+        ->name('events.dashboard');
 });
 
 Route::middleware(['auth', 'active.client', 'admin'])
@@ -37,6 +40,10 @@ Route::middleware(['auth', 'active.client', 'admin'])
             ->name('clients.dashboard');
         Route::patch('events/{event}/status', [EventController::class, 'toggleStatus'])
             ->name('events.toggle-status');
+        Route::get('events/{event}/dashboard', [EventDashboardController::class, 'preview'])
+            ->name('events.dashboard');
+        Route::post('events/{event}/reports', [EventController::class, 'storeReport'])
+            ->name('events.reports.store');
         Route::resource('clients', ClientController::class);
         Route::resource('events', EventController::class);
     });

@@ -144,6 +144,14 @@ const getClientInitials = (name: string) => {
 
     return parts.map((part) => part[0]?.toUpperCase() ?? '').join('') || 'CL';
 };
+
+const getEventDashboardHref = (eventId: number) => {
+    if (props.previewMode && props.client?.id) {
+        return route('admin.events.dashboard', eventId);
+    }
+
+    return route('events.dashboard', eventId);
+};
 </script>
 
 <template>
@@ -307,6 +315,12 @@ const getClientInitials = (name: string) => {
                             <p class="dash-muted-text text-xs">
                                 {{ formatDate(event.event_date) }}
                             </p>
+                            <Link
+                                :href="getEventDashboardHref(event.id)"
+                                class="dash-client-preview-link mt-2 inline-flex"
+                            >
+                                Ver dashboard do evento
+                            </Link>
                         </li>
                         <li
                             v-if="!(props.events?.length)"

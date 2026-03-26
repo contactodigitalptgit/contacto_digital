@@ -2,13 +2,21 @@
 import Modal from '@/Components/Modal.vue';
 import { confirmAction, showErrorToast, showSuccessToast } from '@/lib/swal';
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout.vue';
-import { Head, router, useForm } from '@inertiajs/vue3';
+import { Head, Link, router, useForm } from '@inertiajs/vue3';
 import { ref } from 'vue';
 
 interface ClientOption {
     id: number;
     name: string;
     business_name: string | null;
+}
+
+interface EventReportSummary {
+    active_imports_count: number;
+    active_rows_count: number;
+    total: number;
+    last_imported_at: string | null;
+    last_filename: string;
 }
 
 interface EventItem {
@@ -20,6 +28,7 @@ interface EventItem {
     client_name: string;
     client_id: number;
     is_active: boolean;
+    report_summary: EventReportSummary | null;
 }
 
 const props = defineProps<{
@@ -29,7 +38,10 @@ const props = defineProps<{
 
 const showCreateEventModal = ref(false);
 const showEditEventModal = ref(false);
+const showImportReportModal = ref(false);
 const editingEventId = ref<number | null>(null);
+const selectedReportEvent = ref<EventItem | null>(null);
+const reportFileInput = ref<HTMLInputElement | null>(null);
 
 const createEventForm = useForm({
     client_id: '' as number | '',
@@ -45,11 +57,22 @@ const editEventForm = useForm({
     event_date: '',
 });
 
+const reportImportForm = useForm({
+    import_strategy: 'replace' as 'sum' | 'replace',
+    report_file: null as File | null,
+});
+
 const formatDate = (date: string) =>
     new Intl.DateTimeFormat('pt-PT', {
         dateStyle: 'medium',
         timeStyle: 'short',
     }).format(new Date(date));
+
+const formatMoney = (value: number) =>
+    new Intl.NumberFormat('pt-PT', {
+        style: 'currency',
+        currency: 'EUR',
+    }).format(value);
 
 const openCreateEventModal = () => {
     createEventForm.reset();
@@ -89,6 +112,35 @@ const closeEditEventModal = () => {
     editEventForm.clearErrors();
 };
 
+const openImportReportModal = (event: EventItem) => {
+    selectedReportEvent.value = event;
+    reportImportForm.reset();
+    reportImportForm.clearErrors();
+    reportImportForm.import_strategy = event.report_summary ? 'replace' : 'sum';
+    showImportReportModal.value = true;
+
+    if (reportFileInput.value) {
+        reportFileInput.value.value = '';
+    }
+};
+
+const closeImportReportModal = () => {
+    showImportReportModal.value = false;
+    selectedReportEvent.value = null;
+    reportImportForm.reset();
+    reportImportForm.clearErrors();
+
+    if (reportFileInput.value) {
+        reportFileInput.value.value = '';
+    }
+};
+
+const handleReportFileChange = (event: Event) => {
+    const input = event.target as HTMLInputElement;
+
+    reportImportForm.report_file = input.files?.[0] ?? null;
+};
+
 const submitEditEvent = () => {
     if (!editingEventId.value) {
         return;
@@ -101,6 +153,26 @@ const submitEditEvent = () => {
             editingEventId.value = null;
             editEventForm.reset();
             void showSuccessToast('Evento atualizado com sucesso.');
+        },
+    });
+};
+
+const submitReportImport = () => {
+    if (!selectedReportEvent.value) {
+        return;
+    }
+
+    reportImportForm.post(route('admin.events.reports.store', selectedReportEvent.value.id), {
+        preserveScroll: true,
+        forceFormData: true,
+        onSuccess: () => {
+            closeImportReportModal();
+            void showSuccessToast('Relatorio importado com sucesso.');
+        },
+        onError: () => {
+            if (!reportImportForm.errors.report_file) {
+                void showErrorToast('Nao foi possivel importar o relatorio.');
+            }
         },
     });
 };
@@ -194,6 +266,26 @@ const deleteEvent = async (event: EventItem) => {
                             <div class="min-w-0">
                                 <p class="admin-events-title">{{ event.title }}</p>
                                 <p class="admin-events-sub">{{ event.client_name }}</p>
+                                <div
+                                    v-if="event.report_summary"
+                                    class="admin-event-report-summary"
+                                >
+                                    <span>{{ event.report_summary.active_imports_count }} arquivo(s)</span>
+                                    <span>{{ event.report_summary.active_rows_count }} linhas</span>
+                                    <span>{{ formatMoney(event.report_summary.total) }}</span>
+                                </div>
+                                <p
+                                    v-if="event.report_summary?.last_imported_at"
+                                    class="admin-event-report-meta"
+                                >
+                                    Ultimo import: {{ formatDate(event.report_summary.last_imported_at) }}
+                                </p>
+                                <p
+                                    v-else
+                                    class="admin-event-report-empty"
+                                >
+                                    Sem relatorio importado.
+                                </p>
                             </div>
                             <span
                                 class="status-pill shrink-0"
@@ -221,6 +313,43 @@ const deleteEvent = async (event: EventItem) => {
                         </div>
 
                         <div class="admin-events-actions">
+                            <Link
+                                :href="route('admin.events.dashboard', event.id)"
+                                class="admin-event-icon-btn"
+                                title="Ver dashboard do evento"
+                                aria-label="Ver dashboard do evento"
+                            >
+                                <svg
+                                    class="h-4 w-4"
+                                    viewBox="0 0 24 24"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    stroke-width="2"
+                                >
+                                    <path d="M3 12h4l3-8 4 16 3-8h4" />
+                                </svg>
+                            </Link>
+
+                            <button
+                                type="button"
+                                class="admin-event-icon-btn"
+                                title="Importar relatorio"
+                                aria-label="Importar relatorio"
+                                @click="openImportReportModal(event)"
+                            >
+                                <svg
+                                    class="h-4 w-4"
+                                    viewBox="0 0 24 24"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    stroke-width="2"
+                                >
+                                    <path d="M12 3v12" />
+                                    <path d="m7 10 5 5 5-5" />
+                                    <path d="M4 21h16" />
+                                </svg>
+                            </button>
+
                             <button
                                 type="button"
                                 class="admin-event-icon-btn"
@@ -318,6 +447,26 @@ const deleteEvent = async (event: EventItem) => {
                                     <p v-if="event.description" class="admin-events-sub">
                                         {{ event.description }}
                                     </p>
+                                    <div
+                                        v-if="event.report_summary"
+                                        class="admin-event-report-summary"
+                                    >
+                                        <span>{{ event.report_summary.active_imports_count }} arquivo(s)</span>
+                                        <span>{{ event.report_summary.active_rows_count }} linhas</span>
+                                        <span>{{ formatMoney(event.report_summary.total) }}</span>
+                                    </div>
+                                    <p
+                                        v-if="event.report_summary?.last_imported_at"
+                                        class="admin-event-report-meta"
+                                    >
+                                        Ultimo import: {{ formatDate(event.report_summary.last_imported_at) }}
+                                    </p>
+                                    <p
+                                        v-else
+                                        class="admin-event-report-empty"
+                                    >
+                                        Sem relatorio importado.
+                                    </p>
                                 </td>
                                 <td class="admin-events-text">
                                     {{ event.client_name }}
@@ -335,6 +484,43 @@ const deleteEvent = async (event: EventItem) => {
                                 </td>
                                 <td>
                                     <div class="admin-events-actions">
+                                        <Link
+                                            :href="route('admin.events.dashboard', event.id)"
+                                            class="admin-event-icon-btn"
+                                            title="Ver dashboard do evento"
+                                            aria-label="Ver dashboard do evento"
+                                        >
+                                            <svg
+                                                class="h-4 w-4"
+                                                viewBox="0 0 24 24"
+                                                fill="none"
+                                                stroke="currentColor"
+                                                stroke-width="2"
+                                            >
+                                                <path d="M3 12h4l3-8 4 16 3-8h4" />
+                                            </svg>
+                                        </Link>
+
+                                        <button
+                                            type="button"
+                                            class="admin-event-icon-btn"
+                                            title="Importar relatorio"
+                                            aria-label="Importar relatorio"
+                                            @click="openImportReportModal(event)"
+                                        >
+                                            <svg
+                                                class="h-4 w-4"
+                                                viewBox="0 0 24 24"
+                                                fill="none"
+                                                stroke="currentColor"
+                                                stroke-width="2"
+                                            >
+                                                <path d="M12 3v12" />
+                                                <path d="m7 10 5 5 5-5" />
+                                                <path d="M4 21h16" />
+                                            </svg>
+                                        </button>
+
                                         <button
                                             type="button"
                                             class="admin-event-icon-btn"
@@ -683,6 +869,134 @@ const deleteEvent = async (event: EventItem) => {
                         :class="{ 'opacity-60': editEventForm.processing }"
                     >
                         Atualizar evento
+                    </button>
+                </div>
+            </form>
+        </Modal>
+
+        <Modal
+            :show="showImportReportModal"
+            max-width="2xl"
+            @close="closeImportReportModal"
+        >
+            <form class="dash-modal" @submit.prevent="submitReportImport">
+                <div class="dash-modal-header">
+                    <div>
+                        <h3 class="dash-modal-title">Importar relatorio do evento</h3>
+                        <p
+                            v-if="selectedReportEvent"
+                            class="admin-event-modal-subtitle"
+                        >
+                            {{ selectedReportEvent.title }} - {{ selectedReportEvent.client_name }}
+                        </p>
+                    </div>
+                    <button
+                        type="button"
+                        class="dash-modal-close"
+                        @click="closeImportReportModal"
+                    >
+                        <svg
+                            class="h-5 w-5"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            stroke-width="2"
+                        >
+                            <path d="M18 6L6 18M6 6l12 12" />
+                        </svg>
+                    </button>
+                </div>
+
+                <div
+                    v-if="selectedReportEvent?.report_summary"
+                    class="admin-event-import-highlight"
+                >
+                    <p class="admin-event-import-highlight-title">
+                        Relatorios ativos agora
+                    </p>
+                    <div class="admin-event-report-summary">
+                        <span>{{ selectedReportEvent.report_summary.active_imports_count }} arquivo(s)</span>
+                        <span>{{ selectedReportEvent.report_summary.active_rows_count }} linhas</span>
+                        <span>{{ formatMoney(selectedReportEvent.report_summary.total) }}</span>
+                    </div>
+                    <p
+                        v-if="selectedReportEvent.report_summary.last_imported_at"
+                        class="admin-event-report-meta"
+                    >
+                        Ultimo arquivo: {{ selectedReportEvent.report_summary.last_filename }} -
+                        {{ formatDate(selectedReportEvent.report_summary.last_imported_at) }}
+                    </p>
+                </div>
+
+                <div class="dash-modal-grid">
+                    <div class="dash-modal-field dash-modal-field-full">
+                        <label class="dash-modal-label" for="event_report_file">
+                            Arquivo XLS ou XLSX
+                        </label>
+                        <input
+                            id="event_report_file"
+                            ref="reportFileInput"
+                            class="dash-modal-input"
+                            type="file"
+                            accept=".xls,.xlsx"
+                            @change="handleReportFileChange"
+                        />
+                        <p class="admin-event-input-hint">
+                            O layout atual do import usa a mesma base da planilha enviada para o evento.
+                        </p>
+                        <p
+                            v-if="reportImportForm.errors.report_file"
+                            class="dash-modal-error"
+                        >
+                            {{ reportImportForm.errors.report_file }}
+                        </p>
+                    </div>
+
+                    <div class="dash-modal-field dash-modal-field-full">
+                        <label class="dash-modal-label" for="event_report_strategy">
+                            Estrategia de importacao
+                        </label>
+                        <select
+                            id="event_report_strategy"
+                            v-model="reportImportForm.import_strategy"
+                            class="dash-modal-input"
+                        >
+                            <option value="replace">
+                                Substituir relatorios ativos
+                            </option>
+                            <option value="sum">
+                                Somar com relatorios ativos
+                            </option>
+                        </select>
+                        <p class="admin-event-input-hint">
+                            <strong>Substituir</strong> desativa os uploads ativos anteriores. <strong>Somar</strong>
+                            mantem os anteriores ativos e acrescenta os novos dados ao evento.
+                        </p>
+                        <p
+                            v-if="reportImportForm.errors.import_strategy"
+                            class="dash-modal-error"
+                        >
+                            {{ reportImportForm.errors.import_strategy }}
+                        </p>
+                    </div>
+                </div>
+
+                <div class="dash-modal-actions">
+                    <button
+                        type="button"
+                        class="dash-modal-cancel"
+                        @click="closeImportReportModal"
+                    >
+                        Cancelar
+                    </button>
+
+                    <button
+                        type="submit"
+                        class="dash-action-button dash-action-button-inline"
+                        :disabled="reportImportForm.processing"
+                        :class="{ 'opacity-60': reportImportForm.processing }"
+                    >
+                        Importar relatorio
                     </button>
                 </div>
             </form>

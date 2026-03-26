@@ -5,6 +5,8 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class Event extends Model
 {
@@ -36,5 +38,29 @@ class Event extends Model
     public function client(): BelongsTo
     {
         return $this->belongsTo(Client::class);
+    }
+
+    public function reportImports(): HasMany
+    {
+        return $this->hasMany(EventReportImport::class);
+    }
+
+    public function activeReportImports(): HasMany
+    {
+        return $this->reportImports()->where('is_active', true)->where('status', 'completed');
+    }
+
+    public function latestActiveReportImport(): HasOne
+    {
+        return $this->hasOne(EventReportImport::class)
+            ->ofMany(
+                ['imported_at' => 'max', 'id' => 'max'],
+                fn ($query) => $query->where('is_active', true)->where('status', 'completed'),
+            );
+    }
+
+    public function reportRows(): HasMany
+    {
+        return $this->hasMany(EventReportRow::class);
     }
 }
