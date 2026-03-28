@@ -11,7 +11,7 @@ import { Link } from '@inertiajs/vue3';
             <Link href="/" class="guest-brand">
                 <span class="guest-brand-mark">
                     <img
-                        src="/images/logo.png"
+                        src="/images/logo2.png"
                         alt="Contacto Digital"
                         class="guest-logo"
                     />
