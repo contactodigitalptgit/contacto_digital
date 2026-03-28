@@ -6,8 +6,34 @@ use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\EventDashboardController;
 use App\Http\Controllers\ProfileController;
 use Illuminate\Foundation\Application;
+use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
+
+Route::get('/manifest.webmanifest', function () {
+    $manifestPath = public_path('build/manifest.webmanifest');
+
+    abort_unless(File::exists($manifestPath), 404);
+
+    return response()->file($manifestPath, [
+        'Content-Type' => 'application/manifest+json',
+        'Cache-Control' => 'public, max-age=300',
+    ]);
+});
+
+Route::redirect('/manifest.json', '/manifest.webmanifest', 301);
+
+Route::get('/sw.js', function () {
+    $legacyWorkerPath = resource_path('pwa/legacy-sw.js');
+
+    abort_unless(File::exists($legacyWorkerPath), 404);
+
+    return response()->file($legacyWorkerPath, [
+        'Content-Type' => 'application/javascript; charset=UTF-8',
+        'Cache-Control' => 'no-cache, no-store, must-revalidate',
+        'Service-Worker-Allowed' => '/',
+    ]);
+});
 
 Route::get('/', function () {
     return Inertia::render('Welcome', [
