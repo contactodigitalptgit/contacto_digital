@@ -28,17 +28,17 @@ const capabilityCards = [
             'Consulta indicadores, detalhes e estados num ambiente escuro, limpo e confortável para uso contínuo durante o dia inteiro.',
     },
     {
-        eyebrow: 'PWA',
-        title: 'Abre como app no telemóvel, sem perder a velocidade da web.',
+        eyebrow: 'Operacao',
+        title: 'Uma entrada organizada para equipas que precisam decidir rapido.',
         description:
-            'A home já nasce preparada para instalação, atalho no ecrã inicial e arranque em modo standalone para equipas em movimento.',
+            'A homepage apresenta a plataforma com clareza, reforca a confianca no produto e conduz o utilizador para a acao certa sem exageros.',
     },
 ];
 
 const focusPillars = [
     'Interface dark-first para uso profissional e prolongado',
     'Entrada direta para login, dashboard e operação diária',
-    'Estrutura pronta para iPhone, Android, tablet e desktop',
+    'Estrutura pensada para telemovel, tablet e desktop',
 ];
 
 const workflowSteps = [
@@ -54,8 +54,8 @@ const workflowSteps = [
     },
     {
         label: '03',
-        title: 'Leva para o bolso',
-        text: 'A instalação em modo app facilita o uso em equipas que trabalham entre escritório, terreno e reuniões.',
+        title: 'Mantem o ritmo',
+        text: 'A experiencia acompanha escritorio, reunioes e consultas rapidas no telemovel sem perder clareza.',
     },
 ];
 
@@ -76,17 +76,17 @@ const dashboardTiles = [
         accent: 'from-indigo-500/30 via-indigo-500/10 to-transparent',
     },
     {
-        label: 'PWA',
-        value: 'Pronto para instalar',
+        label: 'Operacao',
+        value: 'Rotina mais fluida',
         accent: 'from-emerald-400/30 via-emerald-400/10 to-transparent',
     },
 ];
 
-const installChecks = [
-    'Manifesto servido em rota estavel',
-    'Modo standalone para abrir como app',
-    'Apple touch icon para iPhone e iPad',
-    'Service worker pronto para atualizacoes',
+const experienceChecks = [
+    'Mensagem mais objetiva e sem ruido tecnico',
+    'Leitura confortavel com foco em contraste e hierarquia',
+    'Navegacao direta para login, dashboard e funcionalidades',
+    'Visual consistente em desktop, tablet e telemovel',
 ];
 </script>
 
@@ -131,8 +131,6 @@ const installChecks = [
                     <a href="#experience" class="transition hover:text-white">
                         Experiencia
                     </a>
-                    <a href="#pwa" class="transition hover:text-white"> PWA </a>
-
                     <Link
                         v-if="$page.props.auth.user"
                         :href="route('dashboard')"
@@ -161,7 +159,7 @@ const installChecks = [
                             class="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-2 text-sm text-slate-300 backdrop-blur"
                         >
                             <span class="h-2 w-2 rounded-full bg-emerald-400"></span>
-                            Home dark, moderna e pronta para virar app
+                            Home dark, moderna e alinhada com a operacao
                         </div>
 
                         <h1
@@ -175,9 +173,9 @@ const installChecks = [
                             class="mt-6 max-w-2xl text-lg leading-8 text-slate-300 sm:text-xl"
                         >
                             Contacto Digital centraliza clientes, eventos,
-                            dashboards e operacao diaria numa entrada escura,
-                            elegante e preparada para browser, telemovel e
-                            instalacao PWA.
+                            dashboards e operacao diaria numa entrada escura e
+                            elegante, preparada para browser, telemovel e
+                            uso continuo pela equipa.
                         </p>
 
                         <div class="mt-10 flex flex-col gap-4 sm:flex-row">
@@ -356,36 +354,35 @@ const installChecks = [
 
                                     <div class="space-y-4">
                                         <div
-                                            id="pwa"
                                             class="rounded-[1.4rem] border border-white/10 bg-gradient-to-br from-sky-500/12 via-slate-950/90 to-cyan-500/10 p-5"
                                         >
                                             <p
                                                 class="text-xs uppercase tracking-[0.24em] text-sky-200/75"
                                             >
-                                                PWA ready
+                                                Acesso fluido
                                             </p>
                                             <h3
                                                 class="mt-3 text-xl font-semibold text-white"
                                             >
-                                                Pronto para iPhone, Android e
-                                                acesso rapido
+                                                Clara em desktop, tablet e
+                                                telemovel
                                             </h3>
 
                                             <div class="mt-4 flex flex-wrap gap-2">
                                                 <span
                                                     class="rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-slate-300"
                                                 >
-                                                    iPhone
-                                                </span>
-                                                <span
-                                                    class="rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-slate-300"
-                                                >
-                                                    Android
-                                                </span>
-                                                <span
-                                                    class="rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-slate-300"
-                                                >
                                                     Desktop
+                                                </span>
+                                                <span
+                                                    class="rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-slate-300"
+                                                >
+                                                    Tablet
+                                                </span>
+                                                <span
+                                                    class="rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-slate-300"
+                                                >
+                                                    Telemovel
                                                 </span>
                                             </div>
                                         </div>
@@ -396,12 +393,12 @@ const installChecks = [
                                             <p
                                                 class="text-xs uppercase tracking-[0.24em] text-slate-500"
                                             >
-                                                Checklist tecnico
+                                                Pontos de qualidade
                                             </p>
 
                                             <ul class="mt-4 space-y-3">
                                                 <li
-                                                    v-for="item in installChecks"
+                                                    v-for="item in experienceChecks"
                                                     :key="item"
                                                     class="flex items-center gap-3 text-sm text-slate-300"
                                                 >
@@ -535,14 +532,14 @@ const installChecks = [
                             <p
                                 class="text-xs uppercase tracking-[0.26em] text-slate-500"
                             >
-                                Mobilidade
+                                Consistencia
                             </p>
                             <h3 class="mt-4 text-xl font-semibold text-white">
-                                Instala como app
+                                Fluida em qualquer ecra
                             </h3>
                             <p class="mt-3 text-sm leading-6 text-slate-400">
-                                O posicionamento da home ja conversa com a
-                                experiencia PWA que o projeto precisa passar.
+                                A mesma identidade visual segura mantem-se em
+                                desktop, tablet e telemovel.
                             </p>
                         </article>
                     </div>
@@ -588,10 +585,10 @@ const installChecks = [
                             </Link>
 
                             <a
-                                href="#pwa"
+                                href="#experience"
                                 class="inline-flex items-center justify-center rounded-full border border-white/15 bg-white/5 px-6 py-3 font-semibold text-white transition hover:bg-white/10"
                             >
-                                Ver estado do PWA
+                                Ver experiencia
                             </a>
                         </div>
                     </div>

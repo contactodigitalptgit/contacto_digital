@@ -3,6 +3,14 @@ import laravel from 'laravel-vite-plugin';
 import vue from '@vitejs/plugin-vue';
 import { VitePWA } from 'vite-plugin-pwa';
 
+const iconSizes = [48, 72, 96, 128, 144, 152, 192, 256, 384, 512];
+const iconAssets = iconSizes.map((size) => `icons/icon-${size}x${size}.png`);
+const manifestIcons = iconSizes.map((size) => ({
+    src: `icons/icon-${size}x${size}.png`,
+    sizes: `${size}x${size}`,
+    type: 'image/png',
+}));
+
 export default defineConfig({
     plugins: [
         laravel({
@@ -23,8 +31,10 @@ export default defineConfig({
             includeAssets: [
                 'favicon.ico',
                 'apple-touch-icon.png',
+                'apple-touch-icon-152x152.png',
                 'pwa-192x192.png',
                 'pwa-512x512.png',
+                ...iconAssets,
             ],
             manifest: {
                 name: 'Contacto Digital',
@@ -36,24 +46,7 @@ export default defineConfig({
                 start_url: '/dashboard',
                 scope: '/',
                 lang: 'pt-PT',
-                icons: [
-                    {
-                        src: 'pwa-192x192.png',
-                        sizes: '192x192',
-                        type: 'image/png',
-                    },
-                    {
-                        src: 'pwa-512x512.png',
-                        sizes: '512x512',
-                        type: 'image/png',
-                    },
-                    {
-                        src: 'pwa-512x512.png',
-                        sizes: '512x512',
-                        type: 'image/png',
-                        purpose: 'any maskable',
-                    },
-                ],
+                icons: manifestIcons,
             },
         }),
     ],

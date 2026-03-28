@@ -29,7 +29,9 @@
             })();
         </script>
 
+        <link rel="icon" type="image/png" sizes="48x48" href="/icons/icon-48x48.png">
         <link rel="manifest" href="/manifest.webmanifest">
+        <link rel="apple-touch-icon" sizes="152x152" href="/apple-touch-icon-152x152.png">
         <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 
         <title inertia>{{ config('app.name', 'Laravel') }}</title>
