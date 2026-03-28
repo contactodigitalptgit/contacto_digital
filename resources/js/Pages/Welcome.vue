@@ -106,7 +106,7 @@ const installChecks = [
                         class="flex h-14 w-14 items-center justify-center rounded-2xl border border-white/10 bg-white/5 shadow-[0_18px_60px_rgba(8,15,38,0.45)] backdrop-blur"
                     >
                         <img
-                            src="/images/logo.png"
+                            src="/images/logo2.png"
                             alt="Contacto Digital"
                             class="h-9 w-auto"
                         />
