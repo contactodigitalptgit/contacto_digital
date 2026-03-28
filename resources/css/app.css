@@ -692,6 +692,97 @@
         @apply flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between;
     }
 
+    .client-dashboard-hero {
+        @apply flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between;
+        border-color: color-mix(in srgb, var(--accent) 18%, var(--card-border));
+        background:
+            radial-gradient(circle at top right, color-mix(in srgb, var(--accent) 18%, transparent), transparent 34%),
+            linear-gradient(145deg, color-mix(in srgb, var(--accent) 8%, transparent), transparent 58%),
+            var(--card-bg);
+    }
+
+    .client-dashboard-hero-copy {
+        @apply max-w-3xl;
+    }
+
+    .client-dashboard-kicker {
+        @apply inline-flex rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.24em];
+        color: var(--accent-strong);
+        background: color-mix(in srgb, var(--accent) 10%, var(--table-row-bg) 90%);
+        border: 1px solid color-mix(in srgb, var(--accent) 18%, var(--line-color));
+    }
+
+    .client-dashboard-hero-text {
+        @apply max-w-2xl;
+    }
+
+    .client-dashboard-hero-stats {
+        @apply grid gap-3 sm:grid-cols-2;
+        min-width: min(100%, 28rem);
+    }
+
+    .client-dashboard-hero-stat {
+        @apply rounded-2xl border px-4 py-4;
+        border-color: var(--line-color);
+        background: color-mix(in srgb, var(--table-row-bg) 90%, var(--card-bg) 10%);
+    }
+
+    .client-dashboard-hero-stat span {
+        @apply block text-[11px] font-semibold uppercase tracking-wide;
+        color: var(--text-muted);
+    }
+
+    .client-dashboard-hero-stat strong {
+        @apply mt-3 block text-lg font-semibold leading-snug;
+        color: var(--text-main);
+    }
+
+    .client-dashboard-events-grid {
+        @apply grid gap-4;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .client-dashboard-event-card {
+        @apply flex h-full flex-col justify-between gap-5 rounded-2xl border p-5;
+        border-color: var(--line-color);
+        background:
+            linear-gradient(180deg, color-mix(in srgb, var(--table-row-bg) 88%, white 12%), var(--table-row-bg));
+        box-shadow: 0 18px 34px -28px color-mix(in srgb, var(--accent) 28%, transparent);
+    }
+
+    .dark .client-dashboard-event-card {
+        background:
+            linear-gradient(180deg, color-mix(in srgb, var(--table-row-bg) 92%, white 8%), var(--table-row-bg));
+    }
+
+    .client-dashboard-event-copy {
+        @apply flex flex-col gap-3;
+    }
+
+    .client-dashboard-event-kicker {
+        @apply text-[11px] font-semibold uppercase tracking-[0.22em];
+        color: var(--accent-strong);
+    }
+
+    .client-dashboard-event-date {
+        @apply inline-flex w-fit rounded-full px-3 py-1 text-xs font-medium;
+        color: var(--text-soft);
+        border: 1px solid color-mix(in srgb, var(--accent) 16%, var(--line-color));
+        background: color-mix(in srgb, var(--accent) 8%, var(--table-row-bg) 92%);
+    }
+
+    .client-dashboard-event-link {
+        @apply inline-flex items-center justify-center rounded-xl px-4 py-3 text-sm font-semibold transition;
+        color: #ffffff;
+        background: linear-gradient(135deg, var(--accent), var(--accent-strong));
+        box-shadow: 0 16px 28px -20px color-mix(in srgb, var(--accent) 55%, transparent);
+    }
+
+    .client-dashboard-event-link:hover {
+        transform: translateY(-1px);
+        filter: brightness(1.03);
+    }
+
     .event-dashboard-header {
         @apply flex w-full flex-col gap-3 sm:flex-row sm:items-center sm:justify-between;
     }
@@ -726,6 +817,7 @@
 
     .event-dashboard-section {
         @apply overflow-hidden;
+        scroll-margin-top: 7rem;
     }
 
     .event-dashboard-hero {
@@ -832,6 +924,111 @@
 
     .event-dashboard-menu-tools {
         @apply flex flex-wrap items-center gap-2;
+    }
+
+    .event-dashboard-floating-actions {
+        @apply fixed right-4 z-30 flex flex-col gap-3 lg:hidden;
+        bottom: calc(env(safe-area-inset-bottom) + 5.8rem);
+    }
+
+    .event-dashboard-floating-btn {
+        @apply flex min-w-[10.5rem] flex-col rounded-2xl border px-4 py-3 text-left transition;
+        color: var(--text-main);
+        border-color: color-mix(in srgb, var(--accent) 18%, var(--line-color));
+        background:
+            linear-gradient(180deg, color-mix(in srgb, var(--card-bg) 88%, white 12%), var(--card-bg));
+        box-shadow: 0 22px 36px -22px rgba(15, 23, 42, 0.45);
+        backdrop-filter: blur(18px);
+    }
+
+    .event-dashboard-floating-btn-primary {
+        color: #ffffff;
+        border-color: color-mix(in srgb, var(--accent) 35%, var(--line-color));
+        background: linear-gradient(135deg, var(--accent), var(--accent-strong));
+    }
+
+    .event-dashboard-floating-btn-label {
+        @apply text-[10px] font-semibold uppercase tracking-[0.22em];
+        color: inherit;
+        opacity: 0.72;
+    }
+
+    .event-dashboard-floating-btn strong {
+        @apply mt-2 block text-sm font-semibold leading-snug;
+    }
+
+    .event-dashboard-floating-panel-overlay {
+        @apply fixed inset-0 z-40 flex items-end bg-slate-950/60 px-4 pt-10 backdrop-blur-sm lg:hidden;
+        padding-bottom: calc(env(safe-area-inset-bottom) + 5.8rem);
+    }
+
+    .event-dashboard-floating-panel {
+        @apply w-full rounded-[1.75rem] border p-4;
+        border-color: var(--card-border);
+        background:
+            linear-gradient(135deg, color-mix(in srgb, var(--accent) 9%, transparent), transparent 62%),
+            var(--card-bg);
+        box-shadow: 0 26px 50px -26px rgba(15, 23, 42, 0.55);
+    }
+
+    .event-dashboard-floating-panel-header {
+        @apply flex items-start justify-between gap-4;
+    }
+
+    .event-dashboard-floating-panel-kicker {
+        @apply text-[11px] font-semibold uppercase tracking-[0.24em];
+        color: var(--accent-strong);
+    }
+
+    .event-dashboard-floating-panel-title {
+        @apply mt-2 block text-lg font-semibold;
+        color: var(--text-main);
+    }
+
+    .event-dashboard-floating-panel-close {
+        @apply inline-flex rounded-full border p-2 transition;
+        color: var(--text-soft);
+        border-color: var(--line-color);
+        background: color-mix(in srgb, var(--table-row-bg) 90%, var(--card-bg) 10%);
+    }
+
+    .event-dashboard-floating-panel-close:hover {
+        color: var(--text-main);
+        border-color: color-mix(in srgb, var(--accent) 20%, var(--line-color));
+    }
+
+    .event-dashboard-floating-panel-list {
+        @apply mt-4 grid gap-3;
+    }
+
+    .event-dashboard-floating-panel-item {
+        @apply flex flex-col rounded-2xl border px-4 py-4 text-left transition;
+        border-color: var(--line-color);
+        background: var(--table-row-bg);
+    }
+
+    .event-dashboard-floating-panel-item.is-active {
+        border-color: color-mix(in srgb, var(--accent) 30%, var(--line-color));
+        background: linear-gradient(
+            135deg,
+            color-mix(in srgb, var(--accent) 14%, var(--table-row-bg) 86%),
+            color-mix(in srgb, var(--accent-strong) 10%, var(--table-row-bg) 90%)
+        );
+        box-shadow: 0 22px 38px -30px color-mix(in srgb, var(--accent) 48%, transparent);
+    }
+
+    .event-dashboard-floating-panel-item span {
+        @apply text-sm font-semibold;
+        color: var(--text-main);
+    }
+
+    .event-dashboard-floating-panel-item strong {
+        @apply mt-2 text-sm font-medium leading-6;
+        color: var(--text-soft);
+    }
+
+    .event-dashboard-floating-panel-actions {
+        @apply mt-4 flex flex-wrap gap-2;
     }
 
     .event-dashboard-menu-status {
@@ -1787,6 +1984,10 @@
             grid-template-columns: 1fr;
         }
 
+        .client-dashboard-events-grid {
+            grid-template-columns: 1fr;
+        }
+
         .event-dashboard-grid {
             grid-template-columns: 1fr;
         }
@@ -1855,26 +2056,6 @@
             @apply items-stretch;
         }
 
-        .event-dashboard-menu-header {
-            @apply items-stretch;
-        }
-
-        .event-dashboard-menu-tools {
-            @apply w-full;
-        }
-
-        .event-dashboard-menu-status {
-            @apply w-full justify-center;
-        }
-
-        .event-dashboard-menu-mobile {
-            @apply block;
-        }
-
-        .event-dashboard-menu-grid {
-            @apply hidden;
-        }
-
         .event-dashboard-filter-result {
             min-width: 0;
             @apply text-left;
@@ -1902,6 +2083,15 @@
 
         .event-dashboard-row-grid {
             grid-template-columns: 1fr;
+        }
+
+        .client-dashboard-hero-stats {
+            grid-template-columns: 1fr;
+            min-width: 0;
+        }
+
+        .event-dashboard-floating-actions {
+            right: 1rem;
         }
     }
 }

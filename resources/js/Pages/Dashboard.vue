@@ -164,7 +164,7 @@ const getEventDashboardHref = (eventId: number) => {
             </h2>
         </template>
 
-        <div class="dash-page">
+        <div class="dash-page space-y-6">
             <div v-if="props.type === 'admin'" class="dash-grid">
 
                 <section class="dash-card">
@@ -254,7 +254,7 @@ const getEventDashboardHref = (eventId: number) => {
                 </div>
             </div>
 
-            <div v-else class="grid gap-6 lg:grid-cols-2">
+            <div v-else class="space-y-6">
                 <section
                     v-if="props.previewMode"
                     class="dash-card dash-card-full"
@@ -275,60 +275,75 @@ const getEventDashboardHref = (eventId: number) => {
                     </div>
                 </section>
 
-                <section class="dash-card">
-                    <h3 class="dash-card-title">Dados do Cliente</h3>
-                    <dl class="space-y-3 text-sm">
-                        <div>
-                            <dt class="dash-muted-text font-medium">Nome</dt>
-                            <dd class="dash-main-text font-semibold">{{ props.client?.name }}</dd>
-                        </div>
-                        <div>
-                            <dt class="dash-muted-text font-medium">Nome comercial</dt>
-                            <dd class="dash-soft-text">{{ props.client?.business_name || 'Não informado' }}</dd>
-                        </div>
-                        <div>
-                            <dt class="dash-muted-text font-medium">Endereço</dt>
-                            <dd class="dash-soft-text">{{ props.client?.address }}</dd>
-                        </div>
-                        <div>
-                            <dt class="dash-muted-text font-medium">Telefone</dt>
-                            <dd class="dash-soft-text">{{ props.client?.phone }}</dd>
-                        </div>
-                    </dl>
+                <section class="dash-card dash-card-full client-dashboard-hero">
+                    <div class="client-dashboard-hero-copy">
+                        <span class="client-dashboard-kicker">Painel do cliente</span>
+                        <h3 class="dash-card-title mb-0">Acompanhe os seus eventos com mais foco</h3>
+                        <p class="dash-recent-subtitle client-dashboard-hero-text">
+                            Entre direto na leitura operacional de cada evento, com uma navegação mais limpa e menos informação desnecessária.
+                        </p>
+                    </div>
+
+                    <div class="client-dashboard-hero-stats">
+                        <article class="client-dashboard-hero-stat">
+                            <span>Eventos disponíveis</span>
+                            <strong>{{ props.events?.length ?? 0 }}</strong>
+                        </article>
+                        <article class="client-dashboard-hero-stat">
+                            <span>Acesso rápido</span>
+                            <strong>{{ (props.events?.length ?? 0) > 0 ? 'Pronto para consultar' : 'Sem eventos no momento' }}</strong>
+                        </article>
+                    </div>
                 </section>
 
-                <section class="dash-card">
-                    <h3 class="dash-card-title">Meus Eventos</h3>
-                    <ul class="dash-list">
-                        <li
+                <section class="dash-card dash-card-full" id="client-events">
+                    <div class="dash-recent-header">
+                        <div>
+                            <h3 class="dash-card-title mb-0">Meus Eventos</h3>
+                            <p class="dash-recent-subtitle">
+                                Escolha o evento que deseja acompanhar e entre direto no dashboard operacional.
+                            </p>
+                        </div>
+                    </div>
+
+                    <div
+                        v-if="props.events?.length"
+                        class="client-dashboard-events-grid"
+                    >
+                        <article
                             v-for="event in props.events ?? []"
                             :key="event.id"
-                            class="dash-list-item"
+                            class="client-dashboard-event-card"
                         >
-                            <p class="dash-main-text font-semibold">{{ event.title }}</p>
-                            <p
-                                v-if="event.description"
-                                class="dash-muted-text text-sm"
-                            >
-                                {{ event.description }}
-                            </p>
-                            <p class="dash-muted-text text-xs">
-                                {{ formatDate(event.event_date) }}
-                            </p>
+                            <div class="client-dashboard-event-copy">
+                                <span class="client-dashboard-event-kicker">Evento</span>
+                                <p class="dash-main-text text-xl font-semibold">{{ event.title }}</p>
+                                <p
+                                    v-if="event.description"
+                                    class="dash-muted-text text-sm"
+                                >
+                                    {{ event.description }}
+                                </p>
+                                <p class="client-dashboard-event-date">
+                                    {{ formatDate(event.event_date) }}
+                                </p>
+                            </div>
+
                             <Link
                                 :href="getEventDashboardHref(event.id)"
-                                class="dash-client-preview-link mt-2 inline-flex"
+                                class="client-dashboard-event-link"
                             >
-                                Ver dashboard do evento
+                                Abrir dashboard do evento
                             </Link>
-                        </li>
-                        <li
-                            v-if="!(props.events?.length)"
-                            class="dash-list-item dash-muted-text text-sm"
-                        >
-                            Nenhum evento cadastrado para você.
-                        </li>
-                    </ul>
+                        </article>
+                    </div>
+
+                    <div
+                        v-else
+                        class="dash-recent-empty"
+                    >
+                        Nenhum evento cadastrado para você.
+                    </div>
                 </section>
             </div>
         </div>

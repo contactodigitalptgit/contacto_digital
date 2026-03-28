@@ -1,8 +1,6 @@
 <script setup lang="ts">
-import { usePwaInstall } from '@/composables/usePwaInstall';
-import { showErrorToast, showSuccessToast } from '@/lib/swal';
 import type { PageProps } from '@/types';
-import { computed, onMounted, onUnmounted, ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import ApplicationLogo from '@/Components/ApplicationLogo.vue';
 import Dropdown from '@/Components/Dropdown.vue';
 import { Link, usePage } from '@inertiajs/vue3';
@@ -12,7 +10,7 @@ interface NavItem {
     label: string;
     href: string;
     pattern: string;
-    icon: 'dashboard' | 'clients' | 'events' | 'profile';
+    icon: 'dashboard' | 'clients' | 'events';
 }
 
 type ThemeMode = 'light' | 'dark';
@@ -21,9 +19,6 @@ const page = usePage<PageProps>();
 const isAdmin = computed(() => page.props.auth.user.role === 'admin');
 const theme = ref<ThemeMode>('light');
 const isDarkTheme = computed(() => theme.value === 'dark');
-const updateAvailable = ref(false);
-
-const { canInstallPwa, installPwa, isStandalonePwa } = usePwaInstall();
 
 const primaryNavigation = computed<NavItem[]>(() => {
     const items: NavItem[] = [
@@ -58,16 +53,7 @@ const primaryNavigation = computed<NavItem[]>(() => {
     return items;
 });
 
-const mobileNavigation = computed<NavItem[]>(() => [
-    ...primaryNavigation.value,
-    {
-        key: 'profile',
-        label: 'Perfil',
-        href: route('profile.edit'),
-        pattern: 'profile.*',
-        icon: 'profile',
-    },
-]);
+const mobileNavigation = computed<NavItem[]>(() => primaryNavigation.value);
 
 const isActive = (pattern: string) => route().current(pattern);
 
@@ -85,34 +71,6 @@ const toggleTheme = () => {
     applyTheme(theme.value === 'dark' ? 'light' : 'dark');
 };
 
-const runPwaInstall = async () => {
-    const installed = await installPwa();
-
-    if (installed) {
-        void showSuccessToast('Aplicativo instalado com sucesso.');
-    }
-};
-
-const updatePwa = async () => {
-    if (!window.__pwaUpdateSW) {
-        return;
-    }
-
-    try {
-        await window.__pwaUpdateSW(true);
-    } catch {
-        void showErrorToast('Não foi possível atualizar o aplicativo.');
-    }
-};
-
-const handleNeedRefresh = () => {
-    updateAvailable.value = true;
-};
-
-const handleOfflineReady = () => {
-    void showSuccessToast('Modo offline pronto para uso.');
-};
-
 onMounted(() => {
     const savedTheme = window.localStorage.getItem('contacto-theme');
 
@@ -125,14 +83,6 @@ onMounted(() => {
 
         applyTheme(prefersDark ? 'dark' : 'light');
     }
-
-    window.addEventListener('pwa:need-refresh', handleNeedRefresh);
-    window.addEventListener('pwa:offline-ready', handleOfflineReady);
-});
-
-onUnmounted(() => {
-    window.removeEventListener('pwa:need-refresh', handleNeedRefresh);
-    window.removeEventListener('pwa:offline-ready', handleOfflineReady);
 });
 </script>
 
@@ -204,31 +154,6 @@ onUnmounted(() => {
                             <ApplicationLogo class="app-mobile-logo" />
                         </Link>
                         <div class="app-mobile-header-actions">
-                            <div class="app-mobile-pwa-actions">
-                                <button
-                                    v-if="canInstallPwa"
-                                    type="button"
-                                    class="app-mobile-install-btn"
-                                    @click="runPwaInstall"
-                                >
-                                    Instalar app
-                                </button>
-                                <button
-                                    v-if="updateAvailable"
-                                    type="button"
-                                    class="app-mobile-install-btn update"
-                                    @click="updatePwa"
-                                >
-                                    Atualizar
-                                </button>
-                                <span
-                                    v-if="isStandalonePwa"
-                                    class="app-mobile-pwa-badge"
-                                >
-                                    PWA
-                                </span>
-                            </div>
-
                             <Dropdown
                                 align="right"
                                 width="48"
@@ -268,24 +193,6 @@ onUnmounted(() => {
                                     </div>
 
                                     <button
-                                        v-if="canInstallPwa"
-                                        type="button"
-                                        class="app-header-dropdown-item"
-                                        @click="runPwaInstall"
-                                    >
-                                        <span>Instalar app</span>
-                                    </button>
-
-                                    <button
-                                        v-if="updateAvailable"
-                                        type="button"
-                                        class="app-header-dropdown-item"
-                                        @click="updatePwa"
-                                    >
-                                        <span>Atualizar app</span>
-                                    </button>
-
-                                    <button
                                         type="button"
                                         class="app-header-dropdown-item"
                                         @click="toggleTheme"
@@ -315,6 +222,7 @@ onUnmounted(() => {
                                     </button>
 
                                     <Link
+                                        v-if="isAdmin"
                                         :href="route('profile.edit')"
                                         class="app-header-dropdown-item"
                                     >
@@ -358,31 +266,6 @@ onUnmounted(() => {
                                     <input type="text" placeholder="Pesquisar..." />
                                 </label>
 
-                                <button
-                                    v-if="canInstallPwa"
-                                    type="button"
-                                    class="app-header-pwa-btn"
-                                    @click="runPwaInstall"
-                                >
-                                    Instalar app
-                                </button>
-
-                                <button
-                                    v-if="updateAvailable"
-                                    type="button"
-                                    class="app-header-pwa-btn update"
-                                    @click="updatePwa"
-                                >
-                                    Atualizar
-                                </button>
-
-                                <span
-                                    v-if="isStandalonePwa"
-                                    class="app-standalone-chip"
-                                >
-                                    PWA
-                                </span>
-
                                 <Dropdown
                                     align="right"
                                     width="48"
@@ -420,24 +303,6 @@ onUnmounted(() => {
                                         </div>
 
                                         <button
-                                            v-if="canInstallPwa"
-                                            type="button"
-                                            class="app-header-dropdown-item"
-                                            @click="runPwaInstall"
-                                        >
-                                            <span>Instalar app</span>
-                                        </button>
-
-                                        <button
-                                            v-if="updateAvailable"
-                                            type="button"
-                                            class="app-header-dropdown-item"
-                                            @click="updatePwa"
-                                        >
-                                            <span>Atualizar app</span>
-                                        </button>
-
-                                        <button
                                             type="button"
                                             class="app-header-dropdown-item"
                                             @click="toggleTheme"
@@ -467,6 +332,7 @@ onUnmounted(() => {
                                         </button>
 
                                         <Link
+                                            v-if="isAdmin"
                                             :href="route('profile.edit')"
                                             class="app-header-dropdown-item"
                                         >
@@ -545,17 +411,6 @@ onUnmounted(() => {
                         >
                             <rect x="3" y="4" width="18" height="18" rx="2" />
                             <path d="M16 2v4M8 2v4M3 10h18" />
-                        </svg>
-                        <svg
-                            v-if="item.icon === 'profile'"
-                            class="mb-1 h-5 w-5"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            stroke-width="1.8"
-                        >
-                            <circle cx="12" cy="8" r="4" />
-                            <path d="M4 21a8 8 0 0 1 16 0" />
                         </svg>
                         <span>{{ item.label }}</span>
                     </Link>

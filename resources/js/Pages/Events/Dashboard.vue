@@ -167,6 +167,7 @@ const dashboardRoute = computed(() =>
 
 const hasImportedData = computed(() => props.summary.total_rows > 0);
 const activeSection = ref<DashboardSectionId>('overview');
+const showSectionMenu = ref(false);
 
 const getFilterOptionLabel = (options: FilterOption[], value: string) =>
     options.find((option) => option.value === value)?.label ?? value;
@@ -249,23 +250,30 @@ const dashboardSections = computed<DashboardSection[]>(() => [
     },
 ]);
 
+const currentSection = computed(
+    () =>
+        dashboardSections.value.find(
+            (section) => section.id === activeSection.value,
+        ) ?? dashboardSections.value[0],
+);
+
 const heroMetaCards = computed<HeroMetaCard[]>(() => {
     const cards: HeroMetaCard[] = [
-        {
-            label: 'Cliente',
-            value: props.event.client_name,
-        },
-        {
-            label: 'Data do evento',
-            value: formatDateTime(props.event.event_date),
-        },
         {
             label: 'Linhas ativas',
             value: formatNumber(props.summary.total_rows),
         },
         {
+            label: 'Linhas no recorte',
+            value: formatNumber(props.summary.filtered_rows),
+        },
+        {
             label: 'Lojas no recorte',
             value: formatNumber(props.summary.stores_count),
+        },
+        {
+            label: 'Produtos no recorte',
+            value: formatNumber(props.summary.products_count),
         },
     ];
 
@@ -411,6 +419,21 @@ const clearFilters = () => {
     );
 };
 
+const setActiveSection = (section: DashboardSectionId) => {
+    activeSection.value = section;
+    showSectionMenu.value = false;
+
+    if (typeof window === 'undefined') {
+        return;
+    }
+
+    window.requestAnimationFrame(() => {
+        document
+            .getElementById(`event-dashboard-section-${section}`)
+            ?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+};
+
 const goToPage = (url: string | null) => {
     if (!url) {
         return;
@@ -491,11 +514,7 @@ const getRowDocument = (row: EventRow) => {
                         {{ props.event.title }}
                     </h2>
                     <p class="event-dashboard-subtitle">
-                        {{ props.event.client_name }}
-                        <span v-if="props.event.client_business_name">
-                            - {{ props.event.client_business_name }}
-                        </span>
-                        · {{ formatDateTime(props.event.event_date) }}
+                        {{ props.event.description || 'Acompanhe o desempenho do evento com uma leitura mais objetiva e focada na operação.' }}
                     </p>
                 </div>
                 <Link
@@ -507,7 +526,7 @@ const getRowDocument = (row: EventRow) => {
             </div>
         </template>
 
-        <div class="dash-page">
+        <div class="dash-page space-y-6">
             <section
                 v-if="props.previewMode"
                 class="dash-card dash-card-full"
@@ -573,12 +592,12 @@ const getRowDocument = (row: EventRow) => {
                 </div>
             </section>
 
-            <section class="dash-card event-dashboard-section event-dashboard-menu-section">
+            <section class="hidden dash-card event-dashboard-section event-dashboard-menu-section lg:block">
                 <div class="event-dashboard-menu-header">
                     <div>
-                        <h3 class="dash-card-title mb-0">Menu do dashboard</h3>
+                        <h3 class="dash-card-title mb-0">Navegação do dashboard</h3>
                         <p class="dash-recent-subtitle">
-                            Escolha uma área para consultar e reduza o scroll no PWA.
+                            Troque de área sem alongar a página e mantenha a consulta mais leve.
                         </p>
                     </div>
 
@@ -591,7 +610,7 @@ const getRowDocument = (row: EventRow) => {
                             v-if="activeSection !== 'filters'"
                             type="button"
                             class="dash-link-button"
-                            @click="activeSection = 'filters'"
+                            @click="setActiveSection('filters')"
                         >
                             Abrir filtros
                         </button>
@@ -607,28 +626,6 @@ const getRowDocument = (row: EventRow) => {
                     </div>
                 </div>
 
-                <div class="event-dashboard-menu-mobile">
-                    <label
-                        class="dash-modal-label"
-                        for="event_dashboard_section"
-                    >
-                        Área visível
-                    </label>
-                    <select
-                        id="event_dashboard_section"
-                        v-model="activeSection"
-                        class="dash-modal-input"
-                    >
-                        <option
-                            v-for="section in dashboardSections"
-                            :key="section.id"
-                            :value="section.id"
-                        >
-                            {{ section.label }} · {{ section.helper }}
-                        </option>
-                    </select>
-                </div>
-
                 <div class="event-dashboard-menu-grid">
                     <button
                         v-for="section in dashboardSections"
@@ -636,7 +633,7 @@ const getRowDocument = (row: EventRow) => {
                         type="button"
                         class="event-dashboard-menu-item"
                         :class="{ 'is-active': activeSection === section.id }"
-                        @click="activeSection = section.id"
+                        @click="setActiveSection(section.id)"
                     >
                         <span class="event-dashboard-menu-item-label">
                             {{ section.label }}
@@ -648,8 +645,94 @@ const getRowDocument = (row: EventRow) => {
                 </div>
             </section>
 
+            <div class="event-dashboard-floating-actions lg:hidden">
+                <button
+                    type="button"
+                    class="event-dashboard-floating-btn"
+                    @click="showSectionMenu = !showSectionMenu"
+                >
+                    <span class="event-dashboard-floating-btn-label">Área visível</span>
+                    <strong>{{ currentSection.label }}</strong>
+                </button>
+
+                <button
+                    type="button"
+                    class="event-dashboard-floating-btn event-dashboard-floating-btn-primary"
+                    @click="setActiveSection('filters')"
+                >
+                    <span class="event-dashboard-floating-btn-label">Filtro</span>
+                    <strong>{{ hasActiveFilters ? `${activeFilterChips.length} ativo(s)` : 'Abrir filtros' }}</strong>
+                </button>
+            </div>
+
+            <div
+                v-if="showSectionMenu"
+                class="event-dashboard-floating-panel-overlay lg:hidden"
+                @click="showSectionMenu = false"
+            >
+                <div
+                    class="event-dashboard-floating-panel"
+                    @click.stop
+                >
+                    <div class="event-dashboard-floating-panel-header">
+                        <div>
+                            <span class="event-dashboard-floating-panel-kicker">Menu do dashboard</span>
+                            <strong class="event-dashboard-floating-panel-title">Escolha a área da consulta</strong>
+                        </div>
+                        <button
+                            type="button"
+                            class="event-dashboard-floating-panel-close"
+                            @click="showSectionMenu = false"
+                        >
+                            <svg
+                                class="h-5 w-5"
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                stroke-width="2"
+                            >
+                                <path d="M18 6L6 18M6 6l12 12" />
+                            </svg>
+                        </button>
+                    </div>
+
+                    <div class="event-dashboard-floating-panel-list">
+                        <button
+                            v-for="section in dashboardSections"
+                            :key="section.id"
+                            type="button"
+                            class="event-dashboard-floating-panel-item"
+                            :class="{ 'is-active': activeSection === section.id }"
+                            @click="setActiveSection(section.id)"
+                        >
+                            <span>{{ section.label }}</span>
+                            <strong>{{ section.helper }}</strong>
+                        </button>
+                    </div>
+
+                    <div class="event-dashboard-floating-panel-actions">
+                        <button
+                            v-if="hasActiveFilters"
+                            type="button"
+                            class="dash-link-button"
+                            @click="clearFilters"
+                        >
+                            Limpar filtros
+                        </button>
+                        <button
+                            type="button"
+                            class="dash-action-button dash-action-button-inline"
+                            @click="setActiveSection('filters')"
+                        >
+                            Abrir filtros
+                        </button>
+                    </div>
+                </div>
+            </div>
+
             <section
                 v-show="activeSection === 'overview'"
+                id="event-dashboard-section-overview"
                 class="dash-card event-dashboard-section"
             >
                 <div class="dash-recent-header">
@@ -687,6 +770,7 @@ const getRowDocument = (row: EventRow) => {
 
             <section
                 v-show="activeSection === 'filters'"
+                id="event-dashboard-section-filters"
                 class="dash-card event-dashboard-section"
             >
                 <div class="dash-recent-header">
@@ -884,6 +968,7 @@ const getRowDocument = (row: EventRow) => {
 
             <section
                 v-show="activeSection === 'bars'"
+                id="event-dashboard-section-bars"
                 class="dash-card event-dashboard-section"
             >
                 <div class="dash-recent-header">
@@ -963,6 +1048,7 @@ const getRowDocument = (row: EventRow) => {
 
             <section
                 v-show="activeSection === 'stores'"
+                id="event-dashboard-section-stores"
                 class="dash-card event-dashboard-section"
             >
                 <div class="dash-recent-header">
@@ -1029,6 +1115,7 @@ const getRowDocument = (row: EventRow) => {
 
             <section
                 v-show="activeSection === 'products'"
+                id="event-dashboard-section-products"
                 class="dash-card event-dashboard-section"
             >
                 <div class="dash-recent-header">
@@ -1095,6 +1182,7 @@ const getRowDocument = (row: EventRow) => {
 
             <section
                 v-show="activeSection === 'rows'"
+                id="event-dashboard-section-rows"
                 class="dash-card event-dashboard-section"
             >
                 <div class="dash-recent-header">
