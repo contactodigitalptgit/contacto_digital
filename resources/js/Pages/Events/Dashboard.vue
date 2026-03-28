@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout.vue';
 import { Head, Link, router, useForm } from '@inertiajs/vue3';
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
 
 interface EventMeta {
     id: number;
@@ -111,6 +111,25 @@ interface FilterChip {
     value: string;
 }
 
+type DashboardSectionId =
+    | 'overview'
+    | 'filters'
+    | 'bars'
+    | 'stores'
+    | 'products'
+    | 'rows';
+
+interface DashboardSection {
+    id: DashboardSectionId;
+    label: string;
+    helper: string;
+}
+
+interface HeroMetaCard {
+    label: string;
+    value: string;
+}
+
 const props = defineProps<{
     event: EventMeta;
     filters: FilterState;
@@ -147,6 +166,7 @@ const dashboardRoute = computed(() =>
 );
 
 const hasImportedData = computed(() => props.summary.total_rows > 0);
+const activeSection = ref<DashboardSectionId>('overview');
 
 const getFilterOptionLabel = (options: FilterOption[], value: string) =>
     options.find((option) => option.value === value)?.label ?? value;
@@ -194,6 +214,77 @@ const activeFilterChips = computed<FilterChip[]>(() => {
 
 const hasActiveFilters = computed(() => activeFilterChips.value.length > 0);
 
+const dashboardSections = computed<DashboardSection[]>(() => [
+    {
+        id: 'overview',
+        label: 'Visão geral',
+        helper: 'Resumo financeiro e operacional',
+    },
+    {
+        id: 'filters',
+        label: 'Filtros',
+        helper: hasActiveFilters.value
+            ? `${activeFilterChips.value.length} filtro(s) ativo(s)`
+            : 'Sem filtros aplicados',
+    },
+    {
+        id: 'bars',
+        label: 'Bares',
+        helper: `${formatNumber(props.summary.bar_groups_count)} agrupamento(s)`,
+    },
+    {
+        id: 'stores',
+        label: 'Lojas',
+        helper: `${formatNumber(props.summary.stores_count)} ponto(s) no recorte`,
+    },
+    {
+        id: 'products',
+        label: 'Produtos',
+        helper: `${formatNumber(props.summary.products_count)} item(ns) no recorte`,
+    },
+    {
+        id: 'rows',
+        label: 'Linhas',
+        helper: `${formatNumber(props.pagination.total)} registro(s) na listagem`,
+    },
+]);
+
+const heroMetaCards = computed<HeroMetaCard[]>(() => {
+    const cards: HeroMetaCard[] = [
+        {
+            label: 'Cliente',
+            value: props.event.client_name,
+        },
+        {
+            label: 'Data do evento',
+            value: formatDateTime(props.event.event_date),
+        },
+        {
+            label: 'Linhas ativas',
+            value: formatNumber(props.summary.total_rows),
+        },
+        {
+            label: 'Lojas no recorte',
+            value: formatNumber(props.summary.stores_count),
+        },
+    ];
+
+    if (props.previewMode) {
+        cards.push(
+            {
+                label: 'Último arquivo',
+                value: props.summary.last_filename || 'Sem importação',
+            },
+            {
+                label: 'Última importação',
+                value: formatDateTime(props.summary.last_imported_at),
+            },
+        );
+    }
+
+    return cards;
+});
+
 const heroHighlights = computed<HeroHighlight[]>(() => [
     {
         label: 'Vendas no filtro',
@@ -207,11 +298,15 @@ const heroHighlights = computed<HeroHighlight[]>(() => [
         helper: `${formatNumber(props.summary.total_quantity)} unidade(s) movimentadas`,
     },
     {
-        label: 'Importações ativas',
-        value: formatNumber(props.summary.active_imports_count),
-        helper: props.summary.last_imported_at
-            ? `Atualizado em ${formatDateTime(props.summary.last_imported_at)}`
-            : 'Nenhum relatório importado',
+        label: props.previewMode ? 'Importações ativas' : 'Linhas no recorte',
+        value: props.previewMode
+            ? formatNumber(props.summary.active_imports_count)
+            : formatNumber(props.summary.filtered_rows),
+        helper: props.previewMode
+            ? props.summary.last_imported_at
+                ? `Atualizado em ${formatDateTime(props.summary.last_imported_at)}`
+                : 'Nenhum relatório importado'
+            : `${formatNumber(props.summary.products_count)} produto(s) e ${formatNumber(props.summary.stores_count)} loja(s) no recorte`,
     },
 ]);
 
@@ -238,14 +333,24 @@ const summaryCards = computed<SummaryCard[]>(() => [
         helper: 'Itens vendidos nas linhas filtradas',
     },
     {
+        label: 'Ticket médio',
+        value: formatMoney(props.summary.average_ticket),
+        helper: 'Valor médio por linha filtrada',
+    },
+    {
+        label: 'Linhas no recorte',
+        value: formatNumber(props.summary.filtered_rows),
+        helper: 'Linhas consideradas depois dos filtros',
+    },
+    {
+        label: 'Linhas ativas',
+        value: formatNumber(props.summary.total_rows),
+        helper: 'Base ativa disponível para este evento',
+    },
+    {
         label: 'Bares agrupados',
         value: formatNumber(props.summary.bar_groups_count),
         helper: 'Pontos consolidados por bar base',
-    },
-    {
-        label: 'Importações ativas',
-        value: formatNumber(props.summary.active_imports_count),
-        helper: 'Versões de relatório em uso neste evento',
     },
     {
         label: 'Lojas',
@@ -436,21 +541,13 @@ const getRowDocument = (row: EventRow) => {
                         </p>
 
                         <div class="event-dashboard-meta-grid">
-                            <article class="event-dashboard-meta-card">
-                                <span>Cliente</span>
-                                <strong>{{ props.event.client_name }}</strong>
-                            </article>
-                            <article class="event-dashboard-meta-card">
-                                <span>Data do evento</span>
-                                <strong>{{ formatDateTime(props.event.event_date) }}</strong>
-                            </article>
-                            <article class="event-dashboard-meta-card">
-                                <span>Último arquivo</span>
-                                <strong>{{ props.summary.last_filename || 'Sem importação' }}</strong>
-                            </article>
-                            <article class="event-dashboard-meta-card">
-                                <span>Última importação</span>
-                                <strong>{{ formatDateTime(props.summary.last_imported_at) }}</strong>
+                            <article
+                                v-for="card in heroMetaCards"
+                                :key="card.label"
+                                class="event-dashboard-meta-card"
+                            >
+                                <span>{{ card.label }}</span>
+                                <strong>{{ card.value }}</strong>
                             </article>
                         </div>
                     </div>
@@ -476,7 +573,122 @@ const getRowDocument = (row: EventRow) => {
                 </div>
             </section>
 
-            <section class="dash-card event-dashboard-section">
+            <section class="dash-card event-dashboard-section event-dashboard-menu-section">
+                <div class="event-dashboard-menu-header">
+                    <div>
+                        <h3 class="dash-card-title mb-0">Menu do dashboard</h3>
+                        <p class="dash-recent-subtitle">
+                            Escolha uma área para consultar e reduza o scroll no PWA.
+                        </p>
+                    </div>
+
+                    <div class="event-dashboard-menu-tools">
+                        <span class="event-dashboard-menu-status">
+                            {{ hasActiveFilters ? `${activeFilterChips.length} filtro(s) ativo(s)` : 'Sem filtros ativos' }}
+                        </span>
+
+                        <button
+                            v-if="activeSection !== 'filters'"
+                            type="button"
+                            class="dash-link-button"
+                            @click="activeSection = 'filters'"
+                        >
+                            Abrir filtros
+                        </button>
+
+                        <button
+                            v-if="hasActiveFilters"
+                            type="button"
+                            class="dash-link-button"
+                            @click="clearFilters"
+                        >
+                            Limpar filtros
+                        </button>
+                    </div>
+                </div>
+
+                <div class="event-dashboard-menu-mobile">
+                    <label
+                        class="dash-modal-label"
+                        for="event_dashboard_section"
+                    >
+                        Área visível
+                    </label>
+                    <select
+                        id="event_dashboard_section"
+                        v-model="activeSection"
+                        class="dash-modal-input"
+                    >
+                        <option
+                            v-for="section in dashboardSections"
+                            :key="section.id"
+                            :value="section.id"
+                        >
+                            {{ section.label }} · {{ section.helper }}
+                        </option>
+                    </select>
+                </div>
+
+                <div class="event-dashboard-menu-grid">
+                    <button
+                        v-for="section in dashboardSections"
+                        :key="section.id"
+                        type="button"
+                        class="event-dashboard-menu-item"
+                        :class="{ 'is-active': activeSection === section.id }"
+                        @click="activeSection = section.id"
+                    >
+                        <span class="event-dashboard-menu-item-label">
+                            {{ section.label }}
+                        </span>
+                        <strong class="event-dashboard-menu-item-helper">
+                            {{ section.helper }}
+                        </strong>
+                    </button>
+                </div>
+            </section>
+
+            <section
+                v-show="activeSection === 'overview'"
+                class="dash-card event-dashboard-section"
+            >
+                <div class="dash-recent-header">
+                    <div>
+                        <h3 class="dash-card-title mb-0">Visão geral do evento</h3>
+                        <p class="dash-recent-subtitle">
+                            Resumo financeiro e operacional do recorte atual, sem informação técnica desnecessária para o cliente.
+                        </p>
+                    </div>
+                </div>
+
+                <div
+                    v-if="!hasImportedData"
+                    class="event-dashboard-empty"
+                >
+                    Nenhum relatório ativo importado para este evento.
+                </div>
+
+                <div
+                    v-else
+                    class="event-dashboard-summary-grid"
+                >
+                    <article
+                        v-for="card in summaryCards"
+                        :key="card.label"
+                        class="event-dashboard-summary-card"
+                        :class="{ 'event-dashboard-summary-card-featured': card.featured }"
+                    >
+                        <span class="event-dashboard-summary-label">{{ card.label }}</span>
+                        <strong class="event-dashboard-summary-value">{{ card.value }}</strong>
+                        <p class="event-dashboard-summary-helper">{{ card.helper }}</p>
+                    </article>
+                </div>
+            </section>
+
+            <section
+                v-show="activeSection === 'filters'"
+                class="dash-card event-dashboard-section"
+            >
                 <div class="dash-recent-header">
                     <div>
                         <h3 class="dash-card-title mb-0">Filtros</h3>
@@ -670,35 +882,13 @@ const getRowDocument = (row: EventRow) => {
                 </form>
             </section>
 
-            <section class="dash-card event-dashboard-section">
+            <section
+                v-show="activeSection === 'bars'"
+                class="dash-card event-dashboard-section"
+            >
                 <div class="dash-recent-header">
                     <div>
-                        <h3 class="dash-card-title mb-0">Resumo do Evento</h3>
-                        <p class="dash-recent-subtitle">
-                            {{ props.summary.filtered_rows }} linha(s) no filtro atual de
-                            {{ props.summary.total_rows }} linha(s) ativas.
-                        </p>
-                    </div>
-                </div>
-
-                <div class="event-dashboard-summary-grid">
-                    <article
-                        v-for="card in summaryCards"
-                        :key="card.label"
-                        class="event-dashboard-summary-card"
-                        :class="{ 'event-dashboard-summary-card-featured': card.featured }"
-                    >
-                        <span class="event-dashboard-summary-label">{{ card.label }}</span>
-                        <strong class="event-dashboard-summary-value">{{ card.value }}</strong>
-                        <p class="event-dashboard-summary-helper">{{ card.helper }}</p>
-                    </article>
-                </div>
-            </section>
-
-            <section class="dash-card event-dashboard-section">
-                <div class="dash-recent-header">
-                    <div>
-                        <h3 class="dash-card-title mb-0">Bares Agrupados</h3>
+                        <h3 class="dash-card-title mb-0">Bares agrupados</h3>
                         <p class="dash-recent-subtitle">
                             Consolidação por bar base, agrupando os operadores do mesmo ponto.
                         </p>
@@ -771,138 +961,145 @@ const getRowDocument = (row: EventRow) => {
                 </ul>
             </section>
 
-            <div class="event-dashboard-grid">
-                <section class="dash-card event-dashboard-section">
-                    <div class="dash-recent-header">
-                        <div>
-                            <h3 class="dash-card-title mb-0">Pontos de Venda</h3>
-                            <p class="dash-recent-subtitle">
-                                Detalhe por operador e ponto de venda no filtro atual.
-                            </p>
-                        </div>
-                    </div>
-
-                    <ul class="event-dashboard-breakdown-list">
-                        <li
-                            v-for="(store, index) in props.topStores"
-                            :key="`${store.label}-${store.code || 'no-code'}`"
-                            class="event-dashboard-breakdown-item"
-                        >
-                            <div class="event-dashboard-breakdown-main">
-                                <span class="event-dashboard-rank">
-                                    {{ index + 1 }}
-                                </span>
-
-                                <div class="min-w-0 flex-1">
-                                    <div class="event-dashboard-breakdown-head">
-                                        <p class="event-dashboard-breakdown-title">
-                                            {{ store.label }}
-                                        </p>
-                                        <span class="event-dashboard-breakdown-badge">
-                                            {{ store.code || 'Sem código' }}
-                                        </span>
-                                    </div>
-                                    <p class="event-dashboard-breakdown-subtitle">
-                                        {{ store.rows_count }} linha(s) no recorte atual
-                                    </p>
-
-                                    <div class="event-dashboard-breakdown-track">
-                                        <span
-                                            class="event-dashboard-breakdown-fill"
-                                            :style="{ width: getBreakdownWidth(store.sales_total, maxStoreSales) }"
-                                        />
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div class="event-dashboard-breakdown-side">
-                                <div class="event-dashboard-breakdown-stat">
-                                    <span>Vendido</span>
-                                    <strong>{{ formatMoney(store.sales_total) }}</strong>
-                                </div>
-                                <div class="event-dashboard-breakdown-stat">
-                                    <span>Qtd</span>
-                                    <strong>{{ formatNumber(store.quantity_total) }}</strong>
-                                </div>
-                            </div>
-                        </li>
-                        <li
-                            v-if="!props.topStores.length"
-                            class="event-dashboard-empty"
-                        >
-                            Nenhuma loja encontrada para os filtros atuais.
-                        </li>
-                    </ul>
-                </section>
-
-                <section class="dash-card event-dashboard-section">
-                    <div class="dash-recent-header">
-                        <div>
-                            <h3 class="dash-card-title mb-0">Top Produtos</h3>
-                            <p class="dash-recent-subtitle">
-                                Ranking por total vendido no filtro atual.
-                            </p>
-                        </div>
-                    </div>
-
-                    <ul class="event-dashboard-breakdown-list">
-                        <li
-                            v-for="(product, index) in props.topProducts"
-                            :key="`${product.label}-${product.code || 'no-code'}`"
-                            class="event-dashboard-breakdown-item"
-                        >
-                            <div class="event-dashboard-breakdown-main">
-                                <span class="event-dashboard-rank">
-                                    {{ index + 1 }}
-                                </span>
-
-                                <div class="min-w-0 flex-1">
-                                    <div class="event-dashboard-breakdown-head">
-                                        <p class="event-dashboard-breakdown-title">
-                                            {{ product.label }}
-                                        </p>
-                                        <span class="event-dashboard-breakdown-badge">
-                                            {{ product.code || 'Sem código' }}
-                                        </span>
-                                    </div>
-                                    <p class="event-dashboard-breakdown-subtitle">
-                                        {{ product.rows_count }} linha(s) no recorte atual
-                                    </p>
-
-                                    <div class="event-dashboard-breakdown-track">
-                                        <span
-                                            class="event-dashboard-breakdown-fill"
-                                            :style="{ width: getBreakdownWidth(product.sales_total, maxProductSales) }"
-                                        />
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div class="event-dashboard-breakdown-side">
-                                <div class="event-dashboard-breakdown-stat">
-                                    <span>Vendido</span>
-                                    <strong>{{ formatMoney(product.sales_total) }}</strong>
-                                </div>
-                                <div class="event-dashboard-breakdown-stat">
-                                    <span>Qtd</span>
-                                    <strong>{{ formatNumber(product.quantity_total) }}</strong>
-                                </div>
-                            </div>
-                        </li>
-                        <li
-                            v-if="!props.topProducts.length"
-                            class="event-dashboard-empty"
-                        >
-                            Nenhum produto encontrado para os filtros atuais.
-                        </li>
-                    </ul>
-                </section>
-            </div>
-
-            <section class="dash-card event-dashboard-section">
+            <section
+                v-show="activeSection === 'stores'"
+                class="dash-card event-dashboard-section"
+            >
                 <div class="dash-recent-header">
                     <div>
-                        <h3 class="dash-card-title mb-0">Linhas Importadas</h3>
+                        <h3 class="dash-card-title mb-0">Pontos de venda</h3>
+                        <p class="dash-recent-subtitle">
+                            Detalhe por operador e ponto de venda no filtro atual.
+                        </p>
+                    </div>
+                </div>
+
+                <ul class="event-dashboard-breakdown-list">
+                    <li
+                        v-for="(store, index) in props.topStores"
+                        :key="`${store.label}-${store.code || 'no-code'}`"
+                        class="event-dashboard-breakdown-item"
+                    >
+                        <div class="event-dashboard-breakdown-main">
+                            <span class="event-dashboard-rank">
+                                {{ index + 1 }}
+                            </span>
+
+                            <div class="min-w-0 flex-1">
+                                <div class="event-dashboard-breakdown-head">
+                                    <p class="event-dashboard-breakdown-title">
+                                        {{ store.label }}
+                                    </p>
+                                    <span class="event-dashboard-breakdown-badge">
+                                        {{ store.code || 'Sem código' }}
+                                    </span>
+                                </div>
+                                <p class="event-dashboard-breakdown-subtitle">
+                                    {{ store.rows_count }} linha(s) no recorte atual
+                                </p>
+
+                                <div class="event-dashboard-breakdown-track">
+                                    <span
+                                        class="event-dashboard-breakdown-fill"
+                                        :style="{ width: getBreakdownWidth(store.sales_total, maxStoreSales) }"
+                                    />
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="event-dashboard-breakdown-side">
+                            <div class="event-dashboard-breakdown-stat">
+                                <span>Vendido</span>
+                                <strong>{{ formatMoney(store.sales_total) }}</strong>
+                            </div>
+                            <div class="event-dashboard-breakdown-stat">
+                                <span>Qtd</span>
+                                <strong>{{ formatNumber(store.quantity_total) }}</strong>
+                            </div>
+                        </div>
+                    </li>
+                    <li
+                        v-if="!props.topStores.length"
+                        class="event-dashboard-empty"
+                    >
+                        Nenhuma loja encontrada para os filtros atuais.
+                    </li>
+                </ul>
+            </section>
+
+            <section
+                v-show="activeSection === 'products'"
+                class="dash-card event-dashboard-section"
+            >
+                <div class="dash-recent-header">
+                    <div>
+                        <h3 class="dash-card-title mb-0">Top produtos</h3>
+                        <p class="dash-recent-subtitle">
+                            Ranking por total vendido no filtro atual.
+                        </p>
+                    </div>
+                </div>
+
+                <ul class="event-dashboard-breakdown-list">
+                    <li
+                        v-for="(product, index) in props.topProducts"
+                        :key="`${product.label}-${product.code || 'no-code'}`"
+                        class="event-dashboard-breakdown-item"
+                    >
+                        <div class="event-dashboard-breakdown-main">
+                            <span class="event-dashboard-rank">
+                                {{ index + 1 }}
+                            </span>
+
+                            <div class="min-w-0 flex-1">
+                                <div class="event-dashboard-breakdown-head">
+                                    <p class="event-dashboard-breakdown-title">
+                                        {{ product.label }}
+                                    </p>
+                                    <span class="event-dashboard-breakdown-badge">
+                                        {{ product.code || 'Sem código' }}
+                                    </span>
+                                </div>
+                                <p class="event-dashboard-breakdown-subtitle">
+                                    {{ product.rows_count }} linha(s) no recorte atual
+                                </p>
+
+                                <div class="event-dashboard-breakdown-track">
+                                    <span
+                                        class="event-dashboard-breakdown-fill"
+                                        :style="{ width: getBreakdownWidth(product.sales_total, maxProductSales) }"
+                                    />
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="event-dashboard-breakdown-side">
+                            <div class="event-dashboard-breakdown-stat">
+                                <span>Vendido</span>
+                                <strong>{{ formatMoney(product.sales_total) }}</strong>
+                            </div>
+                            <div class="event-dashboard-breakdown-stat">
+                                <span>Qtd</span>
+                                <strong>{{ formatNumber(product.quantity_total) }}</strong>
+                            </div>
+                        </div>
+                    </li>
+                    <li
+                        v-if="!props.topProducts.length"
+                        class="event-dashboard-empty"
+                    >
+                        Nenhum produto encontrado para os filtros atuais.
+                    </li>
+                </ul>
+            </section>
+
+            <section
+                v-show="activeSection === 'rows'"
+                class="dash-card event-dashboard-section"
+            >
+                <div class="dash-recent-header">
+                    <div>
+                        <h3 class="dash-card-title mb-0">Linhas importadas</h3>
                         <p class="dash-recent-subtitle">
                             Dados filtrados usados pelo dashboard do evento.
                         </p>
