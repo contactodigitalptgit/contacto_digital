@@ -3,7 +3,7 @@ import Modal from '@/Components/Modal.vue';
 import { confirmAction, showErrorToast, showSuccessToast } from '@/lib/swal';
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout.vue';
 import { Head, Link, router, useForm } from '@inertiajs/vue3';
-import { ref } from 'vue';
+import { computed, onBeforeUnmount, ref, watch } from 'vue';
 
 interface ClientOption {
     id: number;
@@ -12,11 +12,14 @@ interface ClientOption {
 }
 
 interface EventReportSummary {
-    active_imports_count: number;
+    active_syncs_count: number;
     active_rows_count: number;
     total: number;
-    last_imported_at: string | null;
-    last_filename: string;
+    last_synced_at: string | null;
+    machines_count: number;
+    status: 'processing' | 'completed' | 'failed' | null;
+    started_at: string | null;
+    error: string | null;
 }
 
 interface EventItem {
@@ -25,8 +28,13 @@ interface EventItem {
     description: string | null;
     event_date: string;
     event_date_input: string;
+    report_starts_at: string | null;
+    report_starts_at_input: string;
+    report_ends_at: string | null;
+    report_ends_at_input: string;
     client_name: string;
     client_id: number;
+    available_machine_count: number;
     is_active: boolean;
     report_summary: EventReportSummary | null;
 }
@@ -41,13 +49,16 @@ const showEditEventModal = ref(false);
 const showImportReportModal = ref(false);
 const editingEventId = ref<number | null>(null);
 const selectedReportEvent = ref<EventItem | null>(null);
-const reportFileInput = ref<HTMLInputElement | null>(null);
+const isSyncingReport = ref(false);
+const eventsPollerId = ref<number | null>(null);
 
 const createEventForm = useForm({
     client_id: '' as number | '',
     title: '',
     description: '',
     event_date: '',
+    report_starts_at: '',
+    report_ends_at: '',
 });
 
 const editEventForm = useForm({
@@ -55,12 +66,43 @@ const editEventForm = useForm({
     title: '',
     description: '',
     event_date: '',
+    report_starts_at: '',
+    report_ends_at: '',
 });
 
-const reportImportForm = useForm({
-    import_strategy: 'replace' as 'sum' | 'replace',
-    report_file: null as File | null,
-});
+const reportSyncIntegrationError = ref('');
+const hasProcessingSync = computed(() =>
+    props.events.some((event) => event.report_summary?.status === 'processing'),
+);
+
+const startEventsPolling = () => {
+    if (eventsPollerId.value !== null) {
+        return;
+    }
+
+    eventsPollerId.value = window.setInterval(() => {
+        if (!hasProcessingSync.value) {
+            return;
+        }
+
+        router.visit(window.location.href, {
+            method: 'get',
+            only: ['events'],
+            preserveScroll: true,
+            preserveState: true,
+            replace: true,
+        });
+    }, 5000);
+};
+
+const stopEventsPolling = () => {
+    if (eventsPollerId.value === null) {
+        return;
+    }
+
+    window.clearInterval(eventsPollerId.value);
+    eventsPollerId.value = null;
+};
 
 const formatDate = (date: string) =>
     new Intl.DateTimeFormat('pt-PT', {
@@ -102,6 +144,8 @@ const openEditEventModal = (event: EventItem) => {
     editEventForm.title = event.title;
     editEventForm.description = event.description ?? '';
     editEventForm.event_date = event.event_date_input;
+    editEventForm.report_starts_at = event.report_starts_at_input;
+    editEventForm.report_ends_at = event.report_ends_at_input;
     editEventForm.clearErrors();
     showEditEventModal.value = true;
 };
@@ -114,31 +158,16 @@ const closeEditEventModal = () => {
 
 const openImportReportModal = (event: EventItem) => {
     selectedReportEvent.value = event;
-    reportImportForm.reset();
-    reportImportForm.clearErrors();
-    reportImportForm.import_strategy = event.report_summary ? 'replace' : 'sum';
+    isSyncingReport.value = false;
+    reportSyncIntegrationError.value = '';
     showImportReportModal.value = true;
-
-    if (reportFileInput.value) {
-        reportFileInput.value.value = '';
-    }
 };
 
 const closeImportReportModal = () => {
     showImportReportModal.value = false;
     selectedReportEvent.value = null;
-    reportImportForm.reset();
-    reportImportForm.clearErrors();
-
-    if (reportFileInput.value) {
-        reportFileInput.value.value = '';
-    }
-};
-
-const handleReportFileChange = (event: Event) => {
-    const input = event.target as HTMLInputElement;
-
-    reportImportForm.report_file = input.files?.[0] ?? null;
+    isSyncingReport.value = false;
+    reportSyncIntegrationError.value = '';
 };
 
 const submitEditEvent = () => {
@@ -158,24 +187,50 @@ const submitEditEvent = () => {
 };
 
 const submitReportImport = () => {
-    if (!selectedReportEvent.value) {
+    if (!selectedReportEvent.value || isSyncingReport.value) {
         return;
     }
 
-    reportImportForm.post(route('admin.events.reports.store', selectedReportEvent.value.id), {
+    isSyncingReport.value = true;
+    reportSyncIntegrationError.value = '';
+
+    router.post(route('admin.events.reports.store', selectedReportEvent.value.id), {}, {
         preserveScroll: true,
-        forceFormData: true,
         onSuccess: () => {
             closeImportReportModal();
-            void showSuccessToast('Relatorio importado com sucesso.');
+            void showSuccessToast('Sincronizacao iniciada. Pode continuar a usar o sistema.');
         },
-        onError: () => {
-            if (!reportImportForm.errors.report_file) {
-                void showErrorToast('Nao foi possivel importar o relatorio.');
+        onError: (errors) => {
+            reportSyncIntegrationError.value =
+                (errors.integration as string | undefined) ?? '';
+
+            if (!reportSyncIntegrationError.value) {
+                void showErrorToast('Nao foi possivel sincronizar o relatorio.');
             }
+        },
+        onFinish: () => {
+            isSyncingReport.value = false;
         },
     });
 };
+
+watch(
+    hasProcessingSync,
+    (processing) => {
+        if (processing) {
+            startEventsPolling();
+
+            return;
+        }
+
+        stopEventsPolling();
+    },
+    { immediate: true },
+);
+
+onBeforeUnmount(() => {
+    stopEventsPolling();
+});
 
 const toggleEventStatus = async (event: EventItem) => {
     const nextStatus = !event.is_active;
@@ -270,21 +325,35 @@ const deleteEvent = async (event: EventItem) => {
                                     v-if="event.report_summary"
                                     class="admin-event-report-summary"
                                 >
-                                    <span>{{ event.report_summary.active_imports_count }} arquivo(s)</span>
+                                    <span>{{ event.report_summary.active_syncs_count }} sync(s)</span>
                                     <span>{{ event.report_summary.active_rows_count }} linhas</span>
+                                    <span>{{ event.report_summary.machines_count }} maquina(s)</span>
                                     <span>{{ formatMoney(event.report_summary.total) }}</span>
                                 </div>
                                 <p
-                                    v-if="event.report_summary?.last_imported_at"
+                                    v-if="event.report_summary?.status === 'processing'"
                                     class="admin-event-report-meta"
                                 >
-                                    Ultimo import: {{ formatDate(event.report_summary.last_imported_at) }}
+                                    Sincronizacao em andamento desde
+                                    {{ event.report_summary.started_at ? formatDate(event.report_summary.started_at) : 'agora' }}.
                                 </p>
                                 <p
-                                    v-else
+                                    v-if="event.report_summary?.last_synced_at"
+                                    class="admin-event-report-meta"
+                                >
+                                    Ultima sincronizacao: {{ formatDate(event.report_summary.last_synced_at) }}
+                                </p>
+                                <p
+                                    v-if="event.report_summary?.status === 'failed' && event.report_summary.error"
+                                    class="dash-modal-error"
+                                >
+                                    {{ event.report_summary.error }}
+                                </p>
+                                <p
+                                    v-if="!event.report_summary"
                                     class="admin-event-report-empty"
                                 >
-                                    Sem relatorio importado.
+                                    Sem relatorio sincronizado.
                                 </p>
                             </div>
                             <span
@@ -333,8 +402,8 @@ const deleteEvent = async (event: EventItem) => {
                             <button
                                 type="button"
                                 class="admin-event-icon-btn"
-                                title="Importar relatorio"
-                                aria-label="Importar relatorio"
+                                title="Sincronizar relatorio"
+                                aria-label="Sincronizar relatorio"
                                 @click="openImportReportModal(event)"
                             >
                                 <svg
@@ -451,21 +520,35 @@ const deleteEvent = async (event: EventItem) => {
                                         v-if="event.report_summary"
                                         class="admin-event-report-summary"
                                     >
-                                        <span>{{ event.report_summary.active_imports_count }} arquivo(s)</span>
+                                        <span>{{ event.report_summary.active_syncs_count }} sync(s)</span>
                                         <span>{{ event.report_summary.active_rows_count }} linhas</span>
+                                        <span>{{ event.report_summary.machines_count }} maquina(s)</span>
                                         <span>{{ formatMoney(event.report_summary.total) }}</span>
                                     </div>
                                     <p
-                                        v-if="event.report_summary?.last_imported_at"
+                                        v-if="event.report_summary?.status === 'processing'"
                                         class="admin-event-report-meta"
                                     >
-                                        Ultimo import: {{ formatDate(event.report_summary.last_imported_at) }}
+                                        Sincronizacao em andamento desde
+                                        {{ event.report_summary.started_at ? formatDate(event.report_summary.started_at) : 'agora' }}.
                                     </p>
                                     <p
-                                        v-else
+                                        v-if="event.report_summary?.last_synced_at"
+                                        class="admin-event-report-meta"
+                                    >
+                                        Ultima sincronizacao: {{ formatDate(event.report_summary.last_synced_at) }}
+                                    </p>
+                                    <p
+                                        v-if="event.report_summary?.status === 'failed' && event.report_summary.error"
+                                        class="dash-modal-error"
+                                    >
+                                        {{ event.report_summary.error }}
+                                    </p>
+                                    <p
+                                        v-if="!event.report_summary"
                                         class="admin-event-report-empty"
                                     >
-                                        Sem relatorio importado.
+                                        Sem relatorio sincronizado.
                                     </p>
                                 </td>
                                 <td class="admin-events-text">
@@ -504,8 +587,8 @@ const deleteEvent = async (event: EventItem) => {
                                         <button
                                             type="button"
                                             class="admin-event-icon-btn"
-                                            title="Importar relatorio"
-                                            aria-label="Importar relatorio"
+                                            title="Sincronizar relatorio"
+                                            aria-label="Sincronizar relatorio"
                                             @click="openImportReportModal(event)"
                                         >
                                             <svg
@@ -702,6 +785,42 @@ const deleteEvent = async (event: EventItem) => {
                     </div>
 
                     <div class="dash-modal-field dash-modal-field-full">
+                        <label class="dash-modal-label" for="event_report_starts_at_create">
+                            Início do relatório (opcional)
+                        </label>
+                        <input
+                            id="event_report_starts_at_create"
+                            v-model="createEventForm.report_starts_at"
+                            class="dash-modal-input"
+                            type="datetime-local"
+                        />
+                        <p
+                            v-if="createEventForm.errors.report_starts_at"
+                            class="dash-modal-error"
+                        >
+                            {{ createEventForm.errors.report_starts_at }}
+                        </p>
+                    </div>
+
+                    <div class="dash-modal-field dash-modal-field-full">
+                        <label class="dash-modal-label" for="event_report_ends_at_create">
+                            Fim do relatório (opcional)
+                        </label>
+                        <input
+                            id="event_report_ends_at_create"
+                            v-model="createEventForm.report_ends_at"
+                            class="dash-modal-input"
+                            type="datetime-local"
+                        />
+                        <p
+                            v-if="createEventForm.errors.report_ends_at"
+                            class="dash-modal-error"
+                        >
+                            {{ createEventForm.errors.report_ends_at }}
+                        </p>
+                    </div>
+
+                    <div class="dash-modal-field dash-modal-field-full">
                         <label class="dash-modal-label" for="event_description_create">
                             Descrição (opcional)
                         </label>
@@ -835,6 +954,42 @@ const deleteEvent = async (event: EventItem) => {
                     </div>
 
                     <div class="dash-modal-field dash-modal-field-full">
+                        <label class="dash-modal-label" for="event_report_starts_at_edit">
+                            Início do relatório (opcional)
+                        </label>
+                        <input
+                            id="event_report_starts_at_edit"
+                            v-model="editEventForm.report_starts_at"
+                            class="dash-modal-input"
+                            type="datetime-local"
+                        />
+                        <p
+                            v-if="editEventForm.errors.report_starts_at"
+                            class="dash-modal-error"
+                        >
+                            {{ editEventForm.errors.report_starts_at }}
+                        </p>
+                    </div>
+
+                    <div class="dash-modal-field dash-modal-field-full">
+                        <label class="dash-modal-label" for="event_report_ends_at_edit">
+                            Fim do relatório (opcional)
+                        </label>
+                        <input
+                            id="event_report_ends_at_edit"
+                            v-model="editEventForm.report_ends_at"
+                            class="dash-modal-input"
+                            type="datetime-local"
+                        />
+                        <p
+                            v-if="editEventForm.errors.report_ends_at"
+                            class="dash-modal-error"
+                        >
+                            {{ editEventForm.errors.report_ends_at }}
+                        </p>
+                    </div>
+
+                    <div class="dash-modal-field dash-modal-field-full">
                         <label class="dash-modal-label" for="event_description_edit">
                             Descrição (opcional)
                         </label>
@@ -882,7 +1037,7 @@ const deleteEvent = async (event: EventItem) => {
             <form class="dash-modal" @submit.prevent="submitReportImport">
                 <div class="dash-modal-header">
                     <div>
-                        <h3 class="dash-modal-title">Importar relatorio do evento</h3>
+                        <h3 class="dash-modal-title">Sincronizar relatorio do evento</h3>
                         <p
                             v-if="selectedReportEvent"
                             class="admin-event-modal-subtitle"
@@ -912,71 +1067,52 @@ const deleteEvent = async (event: EventItem) => {
                     class="admin-event-import-highlight"
                 >
                     <p class="admin-event-import-highlight-title">
-                        Relatorios ativos agora
+                        Estado atual do relatorio
                     </p>
                     <div class="admin-event-report-summary">
-                        <span>{{ selectedReportEvent.report_summary.active_imports_count }} arquivo(s)</span>
+                        <span>{{ selectedReportEvent.report_summary.active_syncs_count }} sync(s)</span>
                         <span>{{ selectedReportEvent.report_summary.active_rows_count }} linhas</span>
+                        <span>{{ selectedReportEvent.report_summary.machines_count }} maquina(s)</span>
                         <span>{{ formatMoney(selectedReportEvent.report_summary.total) }}</span>
                     </div>
                     <p
-                        v-if="selectedReportEvent.report_summary.last_imported_at"
+                        v-if="selectedReportEvent.report_summary.status === 'processing'"
                         class="admin-event-report-meta"
                     >
-                        Ultimo arquivo: {{ selectedReportEvent.report_summary.last_filename }} -
-                        {{ formatDate(selectedReportEvent.report_summary.last_imported_at) }}
+                        Sincronizacao em andamento desde
+                        {{ selectedReportEvent.report_summary.started_at ? formatDate(selectedReportEvent.report_summary.started_at) : 'agora' }}.
+                    </p>
+                    <p
+                        v-if="selectedReportEvent.report_summary.last_synced_at"
+                        class="admin-event-report-meta"
+                    >
+                        Ultima sincronizacao: {{ formatDate(selectedReportEvent.report_summary.last_synced_at) }}
+                    </p>
+                    <p
+                        v-if="selectedReportEvent.report_summary.status === 'failed' && selectedReportEvent.report_summary.error"
+                        class="dash-modal-error"
+                    >
+                        {{ selectedReportEvent.report_summary.error }}
                     </p>
                 </div>
 
                 <div class="dash-modal-grid">
                     <div class="dash-modal-field dash-modal-field-full">
-                        <label class="dash-modal-label" for="event_report_file">
-                            Arquivo XLS ou XLSX
-                        </label>
-                        <input
-                            id="event_report_file"
-                            ref="reportFileInput"
-                            class="dash-modal-input"
-                            type="file"
-                            accept=".xls,.xlsx"
-                            @change="handleReportFileChange"
-                        />
+                        <label class="dash-modal-label">Maquinas ativas do cliente</label>
+                        <div class="dash-modal-input">
+                            {{ selectedReportEvent?.available_machine_count ?? 0 }} maquina(s)
+                        </div>
                         <p class="admin-event-input-hint">
-                            O layout atual do import usa a mesma base da planilha enviada para o evento.
+                            A sincronizacao consulta todas as maquinas ativas deste cliente e tenta trazer todos os dados disponíveis da ZoneSoft.
+                        </p>
+                        <p class="admin-event-input-hint">
+                            Em clientes com muitas vendas, esta operacao pode demorar alguns minutos.
                         </p>
                         <p
-                            v-if="reportImportForm.errors.report_file"
+                            v-if="reportSyncIntegrationError"
                             class="dash-modal-error"
                         >
-                            {{ reportImportForm.errors.report_file }}
-                        </p>
-                    </div>
-
-                    <div class="dash-modal-field dash-modal-field-full">
-                        <label class="dash-modal-label" for="event_report_strategy">
-                            Estrategia de importacao
-                        </label>
-                        <select
-                            id="event_report_strategy"
-                            v-model="reportImportForm.import_strategy"
-                            class="dash-modal-input"
-                        >
-                            <option value="replace">
-                                Substituir relatorios ativos
-                            </option>
-                            <option value="sum">
-                                Somar com relatorios ativos
-                            </option>
-                        </select>
-                        <p class="admin-event-input-hint">
-                            <strong>Substituir</strong> desativa os uploads ativos anteriores. <strong>Somar</strong>
-                            mantem os anteriores ativos e acrescenta os novos dados ao evento.
-                        </p>
-                        <p
-                            v-if="reportImportForm.errors.import_strategy"
-                            class="dash-modal-error"
-                        >
-                            {{ reportImportForm.errors.import_strategy }}
+                            {{ reportSyncIntegrationError }}
                         </p>
                     </div>
                 </div>
@@ -993,10 +1129,10 @@ const deleteEvent = async (event: EventItem) => {
                     <button
                         type="submit"
                         class="dash-action-button dash-action-button-inline"
-                        :disabled="reportImportForm.processing"
-                        :class="{ 'opacity-60': reportImportForm.processing }"
+                        :disabled="isSyncingReport || (selectedReportEvent?.available_machine_count ?? 0) === 0 || selectedReportEvent?.report_summary?.status === 'processing'"
+                        :class="{ 'opacity-60': isSyncingReport || (selectedReportEvent?.available_machine_count ?? 0) === 0 || selectedReportEvent?.report_summary?.status === 'processing' }"
                     >
-                        Importar relatorio
+                        {{ isSyncingReport ? 'Iniciando...' : selectedReportEvent?.report_summary?.status === 'processing' ? 'Sincronizacao em andamento' : 'Sincronizar relatorio' }}
                     </button>
                 </div>
             </form>

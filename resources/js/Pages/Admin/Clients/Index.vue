@@ -13,6 +13,7 @@ interface ClientItem {
     phone: string;
     email: string;
     events_count: number;
+    zonesoft_machines_count: number;
     is_active: boolean;
 }
 
@@ -216,6 +217,11 @@ const deleteClient = async (client: ClientItem) => {
                                 <p class="admin-clients-mobile-value">{{ client.events_count }}</p>
                             </div>
 
+                            <div class="admin-clients-mobile-item">
+                                <p class="admin-clients-mobile-label">Client IDs</p>
+                                <p class="admin-clients-mobile-value">{{ client.zonesoft_machines_count }}</p>
+                            </div>
+
                             <div class="admin-clients-mobile-item admin-clients-mobile-item-full">
                                 <p class="admin-clients-mobile-label">Usuário</p>
                                 <p class="admin-clients-mobile-value">{{ client.email }}</p>
@@ -238,6 +244,25 @@ const deleteClient = async (client: ClientItem) => {
                                 >
                                     <path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6-10-6-10-6Z" />
                                     <circle cx="12" cy="12" r="2.8" />
+                                </svg>
+                            </Link>
+
+                            <Link
+                                :href="route('admin.clients.integrations.show', client.id)"
+                                class="admin-client-icon-btn"
+                                title="Gerir integrações ZoneSoft"
+                                aria-label="Gerir integrações ZoneSoft"
+                            >
+                                <svg
+                                    class="h-4 w-4"
+                                    viewBox="0 0 24 24"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    stroke-width="2"
+                                >
+                                    <path d="M8 12h8" />
+                                    <path d="M12 8v8" />
+                                    <rect x="3" y="3" width="18" height="18" rx="4" />
                                 </svg>
                             </Link>
 
@@ -328,6 +353,7 @@ const deleteClient = async (client: ClientItem) => {
                                 <th>Nome comercial</th>
                                 <th>Contato</th>
                                 <th>Eventos</th>
+                                <th>Client IDs</th>
                                 <th>Status</th>
                                 <th class="text-right">Ações</th>
                             </tr>
@@ -351,6 +377,9 @@ const deleteClient = async (client: ClientItem) => {
                                 </td>
                                 <td class="admin-clients-text">
                                     {{ client.events_count }}
+                                </td>
+                                <td class="admin-clients-text">
+                                    {{ client.zonesoft_machines_count }}
                                 </td>
                                 <td class="admin-clients-text">
                                     <span
@@ -377,6 +406,25 @@ const deleteClient = async (client: ClientItem) => {
                                             >
                                                 <path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6-10-6-10-6Z" />
                                                 <circle cx="12" cy="12" r="2.8" />
+                                            </svg>
+                                        </Link>
+
+                                        <Link
+                                            :href="route('admin.clients.integrations.show', client.id)"
+                                            class="admin-client-icon-btn"
+                                            title="Gerir integrações ZoneSoft"
+                                            aria-label="Gerir integrações ZoneSoft"
+                                        >
+                                            <svg
+                                                class="h-4 w-4"
+                                                viewBox="0 0 24 24"
+                                                fill="none"
+                                                stroke="currentColor"
+                                                stroke-width="2"
+                                            >
+                                                <path d="M8 12h8" />
+                                                <path d="M12 8v8" />
+                                                <rect x="3" y="3" width="18" height="18" rx="4" />
                                             </svg>
                                         </Link>
 
@@ -456,7 +504,7 @@ const deleteClient = async (client: ClientItem) => {
                             </tr>
                             <tr v-if="!clients.length">
                                 <td
-                                    colspan="6"
+                                    colspan="7"
                                     class="py-8 text-center text-sm"
                                 >
                                     <span class="dash-muted-text">

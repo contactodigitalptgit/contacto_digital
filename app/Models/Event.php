@@ -21,6 +21,8 @@ class Event extends Model
         'title',
         'description',
         'event_date',
+        'report_starts_at',
+        'report_ends_at',
         'is_active',
     ];
 
@@ -31,6 +33,8 @@ class Event extends Model
     {
         return [
             'event_date' => 'datetime',
+            'report_starts_at' => 'datetime',
+            'report_ends_at' => 'datetime',
             'is_active' => 'boolean',
         ];
     }
@@ -57,6 +61,11 @@ class Event extends Model
                 ['imported_at' => 'max', 'id' => 'max'],
                 fn ($query) => $query->where('is_active', true)->where('status', 'completed'),
             );
+    }
+
+    public function latestReportImport(): HasOne
+    {
+        return $this->hasOne(EventReportImport::class)->latestOfMany();
     }
 
     public function reportRows(): HasMany

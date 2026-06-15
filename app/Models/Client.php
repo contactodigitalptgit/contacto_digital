@@ -6,6 +6,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasManyThrough;
 
 class Client extends Model
 {
@@ -42,5 +43,15 @@ class Client extends Model
     public function events(): HasMany
     {
         return $this->hasMany(Event::class);
+    }
+
+    public function zonesoftMachines(): HasMany
+    {
+        return $this->hasMany(ClientZoneSoftMachine::class);
+    }
+
+    public function reportRows(): HasManyThrough
+    {
+        return $this->hasManyThrough(EventReportRow::class, Event::class);
     }
 }

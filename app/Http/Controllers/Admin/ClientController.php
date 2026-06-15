@@ -20,7 +20,10 @@ class ClientController extends Controller
     {
         $clients = Client::query()
             ->with('user')
-            ->withCount('events')
+            ->withCount([
+                'events',
+                'zonesoftMachines as active_zonesoft_machines_count' => fn ($query) => $query->where('is_active', true),
+            ])
             ->orderBy('name')
             ->get()
             ->map(fn (Client $client): array => [
@@ -31,6 +34,7 @@ class ClientController extends Controller
                 'phone' => $client->phone,
                 'email' => $client->user->email,
                 'events_count' => $client->events_count,
+                'zonesoft_machines_count' => (int) $client->active_zonesoft_machines_count,
                 'is_active' => $client->is_active,
             ]);
 

@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Admin\ClientController;
+use App\Http\Controllers\Admin\ClientZoneSoftIntegrationController;
 use App\Http\Controllers\Admin\EventController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\EventDashboardController;
@@ -67,6 +68,18 @@ Route::middleware(['auth', 'active.client', 'admin'])
             ->name('clients.toggle-status');
         Route::get('clients/{client}/dashboard', [ClientController::class, 'dashboard'])
             ->name('clients.dashboard');
+        Route::get('clients/{client}/integrations', [ClientZoneSoftIntegrationController::class, 'show'])
+            ->name('clients.integrations.show');
+        Route::post('clients/{client}/integrations/application', [ClientZoneSoftIntegrationController::class, 'saveApplication'])
+            ->name('clients.integrations.application.save');
+        Route::post('clients/{client}/integrations/discover-stores', [ClientZoneSoftIntegrationController::class, 'discoverStores'])
+            ->name('clients.integrations.discover-stores');
+        Route::post('clients/{client}/integrations/machines', [ClientZoneSoftIntegrationController::class, 'storeMachine'])
+            ->name('clients.integrations.machines.store');
+        Route::put('clients/{client}/integrations/machines/{machine}', [ClientZoneSoftIntegrationController::class, 'updateMachine'])
+            ->name('clients.integrations.machines.update');
+        Route::delete('clients/{client}/integrations/machines/{machine}', [ClientZoneSoftIntegrationController::class, 'destroyMachine'])
+            ->name('clients.integrations.machines.destroy');
         Route::patch('events/{event}/status', [EventController::class, 'toggleStatus'])
             ->name('events.toggle-status');
         Route::get('events/{event}/dashboard', [EventDashboardController::class, 'preview'])

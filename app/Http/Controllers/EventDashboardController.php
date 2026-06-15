@@ -50,6 +50,9 @@ class EventDashboardController extends Controller
     ): Response {
         $event->load(['client', 'latestActiveReportImport'])
             ->loadCount('activeReportImports');
+        $event->client->loadCount([
+            'zonesoftMachines as active_zonesoft_machines_count' => fn ($query) => $query->where('is_active', true),
+        ]);
 
         $filters = $this->normalizeFilters($request);
 
@@ -75,8 +78,13 @@ class EventDashboardController extends Controller
                 'client_name' => $event->client->name,
                 'client_business_name' => $event->client->business_name,
                 'active_imports_count' => (int) $event->active_report_imports_count,
-                'last_imported_at' => $event->latestActiveReportImport?->imported_at?->toISOString(),
-                'last_filename' => $event->latestActiveReportImport?->original_filename,
+                'last_synced_at' => $event->latestActiveReportImport?->imported_at?->toISOString(),
+            ],
+            'integration' => [
+                'source' => 'ZoneSoft API',
+                'configured_client_ids_count' => (int) ($event->client->active_zonesoft_machines_count ?? 0),
+                'machines_count' => (int) ($event->latestActiveReportImport?->summary['machines_count'] ?? 0),
+                'last_synced_at' => $event->latestActiveReportImport?->imported_at?->toISOString(),
             ],
             'filters' => $filters,
             'filterOptions' => [
@@ -89,7 +97,7 @@ class EventDashboardController extends Controller
                 clone $filteredRowsQuery,
                 (int) $event->active_report_imports_count,
                 $event->latestActiveReportImport?->imported_at?->toISOString(),
-                $event->latestActiveReportImport?->original_filename,
+                (int) ($event->latestActiveReportImport?->summary['machines_count'] ?? 0),
             ),
             'barGroups' => $this->buildBarGroups(clone $filteredRowsQuery),
             'topStores' => $this->buildTopStores(clone $filteredRowsQuery),
@@ -257,8 +265,8 @@ class EventDashboardController extends Controller
         Builder $baseRowsQuery,
         Builder $filteredRowsQuery,
         int $activeImportsCount,
-        ?string $lastImportedAt,
-        ?string $lastFilename,
+        ?string $lastSyncedAt,
+        int $machinesCount,
     ): array {
         $filteredRowsCount = (clone $filteredRowsQuery)->count();
         $totalSales = (float) ((clone $filteredRowsQuery)->sum('total') ?? 0);
@@ -285,8 +293,8 @@ class EventDashboardController extends Controller
             'average_ticket' => $filteredRowsCount > 0
                 ? round($totalSales / $filteredRowsCount, 4)
                 : 0,
-            'last_imported_at' => $lastImportedAt,
-            'last_filename' => $lastFilename,
+            'last_synced_at' => $lastSyncedAt,
+            'machines_count' => $machinesCount,
         ];
     }
 

@@ -3,13 +3,12 @@
 namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Jobs\SyncEventReportJob;
 use App\Models\Client;
 use App\Models\Event;
-use App\Services\EventReportImportService;
+use App\Services\EventReportSyncService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
-use Illuminate\Validation\Rule;
-use Illuminate\Validation\Rules\File;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -18,7 +17,13 @@ class EventController extends Controller
     public function index(): Response
     {
         $events = Event::query()
-            ->with(['client', 'latestActiveReportImport'])
+            ->with([
+                'latestActiveReportImport',
+                'latestReportImport',
+                'client' => fn ($query) => $query->withCount([
+                    'zonesoftMachines as active_zonesoft_machines_count' => fn ($machineQuery) => $machineQuery->where('is_active', true),
+                ]),
+            ])
             ->withCount([
                 'activeReportImports as active_report_imports_count',
                 'reportRows as active_report_rows_count' => fn ($query) => $query->whereHas(
@@ -35,23 +40,40 @@ class EventController extends Controller
             ->orderByDesc('is_active')
             ->orderBy('event_date')
             ->get()
-            ->map(fn (Event $event): array => [
-                'id' => $event->id,
-                'title' => $event->title,
-                'description' => $event->description,
-                'event_date' => $event->event_date->toISOString(),
-                'event_date_input' => $event->event_date->format('Y-m-d\TH:i'),
-                'client_name' => $event->client->name,
-                'client_id' => $event->client_id,
-                'is_active' => $event->is_active,
-                'report_summary' => $event->latestActiveReportImport ? [
-                    'active_imports_count' => (int) $event->active_report_imports_count,
-                    'active_rows_count' => (int) $event->active_report_rows_count,
-                    'total' => (float) ($event->active_report_total_sum ?? 0),
-                    'last_imported_at' => $event->latestActiveReportImport->imported_at?->toISOString(),
-                    'last_filename' => $event->latestActiveReportImport->original_filename,
-                ] : null,
-            ]);
+            ->map(function (Event $event): array {
+                $latestActiveImport = $event->latestActiveReportImport;
+                $latestImport = $event->latestReportImport;
+                $hasAnyImport = $latestActiveImport !== null || $latestImport !== null;
+                $latestImportSummary = is_array($latestImport?->summary) ? $latestImport->summary : [];
+
+                return [
+                    'id' => $event->id,
+                    'title' => $event->title,
+                    'description' => $event->description,
+                    'event_date' => $event->event_date->toISOString(),
+                    'event_date_input' => $event->event_date->format('Y-m-d\TH:i'),
+                    'report_starts_at' => $event->report_starts_at?->toISOString(),
+                    'report_starts_at_input' => $event->report_starts_at?->format('Y-m-d\TH:i') ?? '',
+                    'report_ends_at' => $event->report_ends_at?->toISOString(),
+                    'report_ends_at_input' => $event->report_ends_at?->format('Y-m-d\TH:i') ?? '',
+                    'client_name' => $event->client->name,
+                    'client_id' => $event->client_id,
+                    'is_active' => $event->is_active,
+                    'available_machine_count' => (int) ($event->client->active_zonesoft_machines_count ?? 0),
+                    'report_summary' => $hasAnyImport ? [
+                        'active_syncs_count' => (int) $event->active_report_imports_count,
+                        'active_rows_count' => (int) $event->active_report_rows_count,
+                        'total' => (float) ($event->active_report_total_sum ?? 0),
+                        'last_synced_at' => $latestActiveImport?->imported_at?->toISOString(),
+                        'machines_count' => (int) ($latestActiveImport?->summary['machines_count'] ?? 0),
+                        'status' => $latestImport?->status ?? ($latestActiveImport ? 'completed' : null),
+                        'started_at' => $latestImport?->created_at?->toISOString(),
+                        'error' => is_string($latestImportSummary['error'] ?? null)
+                            ? $latestImportSummary['error']
+                            : null,
+                    ] : null,
+                ];
+            });
 
         return Inertia::render('Admin/Events/Index', [
             'events' => $events,
@@ -77,6 +99,8 @@ class EventController extends Controller
             'title' => ['required', 'string', 'max:255'],
             'description' => ['nullable', 'string'],
             'event_date' => ['required', 'date'],
+            'report_starts_at' => ['nullable', 'date'],
+            'report_ends_at' => ['nullable', 'date', 'after_or_equal:report_starts_at'],
         ]);
 
         Event::create($validated);
@@ -93,6 +117,8 @@ class EventController extends Controller
                 'title' => $event->title,
                 'description' => $event->description,
                 'event_date' => $event->event_date->format('Y-m-d\TH:i'),
+                'report_starts_at' => $event->report_starts_at?->format('Y-m-d\TH:i'),
+                'report_ends_at' => $event->report_ends_at?->format('Y-m-d\TH:i'),
             ],
             'clients' => Client::query()
                 ->orderBy('name')
@@ -107,6 +133,8 @@ class EventController extends Controller
             'title' => ['required', 'string', 'max:255'],
             'description' => ['nullable', 'string'],
             'event_date' => ['required', 'date'],
+            'report_starts_at' => ['nullable', 'date'],
+            'report_ends_at' => ['nullable', 'date', 'after_or_equal:report_starts_at'],
         ]);
 
         $event->update($validated);
@@ -137,19 +165,17 @@ class EventController extends Controller
     public function storeReport(
         Request $request,
         Event $event,
-        EventReportImportService $importService,
+        EventReportSyncService $syncService,
     ): RedirectResponse {
-        $validated = $request->validate([
-            'import_strategy' => ['required', Rule::in(['sum', 'replace'])],
-            'report_file' => ['required', File::types(['xls', 'xlsx'])->max(20 * 1024)],
-        ]);
+        if (app()->runningUnitTests()) {
+            $syncService->sync($event, $request->user());
 
-        $importService->import(
-            $event,
-            $request->file('report_file'),
-            $validated['import_strategy'],
-            $request->user(),
-        );
+            return to_route('admin.events.index');
+        }
+
+        $syncLog = $syncService->start($event, $request->user());
+
+        SyncEventReportJob::dispatch($syncLog->id, $event->id);
 
         return to_route('admin.events.index');
     }

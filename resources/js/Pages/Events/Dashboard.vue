@@ -11,8 +11,7 @@ interface EventMeta {
     client_name: string;
     client_business_name: string | null;
     active_imports_count: number;
-    last_imported_at: string | null;
-    last_filename: string | null;
+    last_synced_at: string | null;
 }
 
 interface FilterState {
@@ -43,8 +42,15 @@ interface EventSummary {
     stores_count: number;
     products_count: number;
     average_ticket: number;
-    last_imported_at: string | null;
-    last_filename: string | null;
+    last_synced_at: string | null;
+    machines_count: number;
+}
+
+interface IntegrationMeta {
+    source: string;
+    configured_client_ids_count: number;
+    machines_count: number;
+    last_synced_at: string | null;
 }
 
 interface BreakdownItem {
@@ -106,6 +112,12 @@ interface SummaryCard {
     featured?: boolean;
 }
 
+interface IntegrationCard {
+    label: string;
+    value: string;
+    helper: string;
+}
+
 interface FilterChip {
     label: string;
     value: string;
@@ -132,6 +144,7 @@ interface HeroMetaCard {
 
 const props = defineProps<{
     event: EventMeta;
+    integration: IntegrationMeta;
     filters: FilterState;
     filterOptions: {
         barGroups: FilterOption[];
@@ -280,12 +293,12 @@ const heroMetaCards = computed<HeroMetaCard[]>(() => {
     if (props.previewMode) {
         cards.push(
             {
-                label: 'Último arquivo',
-                value: props.summary.last_filename || 'Sem importação',
+                label: 'Máquinas sincronizadas',
+                value: formatNumber(props.summary.machines_count),
             },
             {
-                label: 'Última importação',
-                value: formatDateTime(props.summary.last_imported_at),
+                label: 'Última sincronização',
+                value: formatDateTime(props.summary.last_synced_at),
             },
         );
     }
@@ -306,14 +319,14 @@ const heroHighlights = computed<HeroHighlight[]>(() => [
         helper: `${formatNumber(props.summary.total_quantity)} unidade(s) movimentadas`,
     },
     {
-        label: props.previewMode ? 'Importações ativas' : 'Linhas no recorte',
+        label: props.previewMode ? 'Sincronizações ativas' : 'Linhas no recorte',
         value: props.previewMode
             ? formatNumber(props.summary.active_imports_count)
             : formatNumber(props.summary.filtered_rows),
         helper: props.previewMode
-            ? props.summary.last_imported_at
-                ? `Atualizado em ${formatDateTime(props.summary.last_imported_at)}`
-                : 'Nenhum relatório importado'
+            ? props.summary.last_synced_at
+                ? `Atualizado em ${formatDateTime(props.summary.last_synced_at)}`
+                : 'Nenhuma sincronização realizada'
             : `${formatNumber(props.summary.products_count)} produto(s) e ${formatNumber(props.summary.stores_count)} loja(s) no recorte`,
     },
 ]);
@@ -369,6 +382,33 @@ const summaryCards = computed<SummaryCard[]>(() => [
         label: 'Produtos',
         value: formatNumber(props.summary.products_count),
         helper: 'Produtos distintos no recorte atual',
+    },
+]);
+
+const integrationCards = computed<IntegrationCard[]>(() => [
+    {
+        label: 'Origem',
+        value: props.integration.source,
+        helper: 'Fonte usada para alimentar os dados deste evento',
+    },
+    {
+        label: 'Client IDs ativos',
+        value: formatNumber(props.integration.configured_client_ids_count),
+        helper: 'Máquinas ativas configuradas para este cliente',
+    },
+    {
+        label: 'Máquinas na última sync',
+        value: formatNumber(props.integration.machines_count),
+        helper: props.integration.machines_count > 0
+            ? 'Client IDs usados na sincronização mais recente'
+            : 'Ainda não existe sincronização concluída',
+    },
+    {
+        label: 'Última sincronização',
+        value: props.integration.last_synced_at
+            ? formatDateTime(props.integration.last_synced_at)
+            : 'Ainda não sincronizado',
+        helper: 'Momento da atualização mais recente vinda da ZoneSoft',
     },
 ]);
 
@@ -592,6 +632,29 @@ const getRowDocument = (row: EventRow) => {
                 </div>
             </section>
 
+            <section class="dash-card event-dashboard-section">
+                <div class="dash-recent-header">
+                    <div>
+                        <h3 class="dash-card-title mb-0">Integração ZoneSoft</h3>
+                        <p class="dash-recent-subtitle">
+                            Estado operacional da integração usada para sincronizar este evento.
+                        </p>
+                    </div>
+                </div>
+
+                <div class="event-dashboard-summary-grid">
+                    <article
+                        v-for="card in integrationCards"
+                        :key="card.label"
+                        class="event-dashboard-summary-card"
+                    >
+                        <span class="event-dashboard-summary-label">{{ card.label }}</span>
+                        <strong class="event-dashboard-summary-value">{{ card.value }}</strong>
+                        <p class="event-dashboard-summary-helper">{{ card.helper }}</p>
+                    </article>
+                </div>
+            </section>
+
             <section class="hidden dash-card event-dashboard-section event-dashboard-menu-section lg:block">
                 <div class="event-dashboard-menu-header">
                     <div>
@@ -748,7 +811,7 @@ const getRowDocument = (row: EventRow) => {
                     v-if="!hasImportedData"
                     class="event-dashboard-empty"
                 >
-                    Nenhum relatório ativo importado para este evento.
+                    Nenhum relatório sincronizado para este evento.
                 </div>
 
                 <div
@@ -1001,7 +1064,7 @@ const getRowDocument = (row: EventRow) => {
                                     </span>
                                 </div>
                                 <p class="event-dashboard-breakdown-subtitle">
-                                    {{ bar.rows_count }} linha(s) importadas neste agrupamento
+                                    {{ bar.rows_count }} linha(s) sincronizadas neste agrupamento
                                 </p>
 
                                 <div class="event-dashboard-breakdown-track">
@@ -1187,7 +1250,7 @@ const getRowDocument = (row: EventRow) => {
             >
                 <div class="dash-recent-header">
                     <div>
-                        <h3 class="dash-card-title mb-0">Linhas importadas</h3>
+                        <h3 class="dash-card-title mb-0">Linhas sincronizadas</h3>
                         <p class="dash-recent-subtitle">
                             Dados filtrados usados pelo dashboard do evento.
                         </p>
@@ -1203,7 +1266,7 @@ const getRowDocument = (row: EventRow) => {
 
                 <div class="event-dashboard-table-toolbar">
                     <p class="dash-muted">
-                        {{ hasActiveFilters ? 'O resultado abaixo reflete os filtros aplicados.' : 'Sem filtros ativos. A listagem mostra todas as linhas importadas ativas.' }}
+                        {{ hasActiveFilters ? 'O resultado abaixo reflete os filtros aplicados.' : 'Sem filtros ativos. A listagem mostra todas as linhas sincronizadas ativas.' }}
                     </p>
                     <div class="event-dashboard-filter-chip-list">
                         <span class="event-dashboard-filter-chip">
@@ -1224,7 +1287,7 @@ const getRowDocument = (row: EventRow) => {
                     v-if="!hasImportedData"
                     class="event-dashboard-empty"
                 >
-                    Nenhum relatório ativo importado para este evento.
+                    Nenhum relatório sincronizado para este evento.
                 </div>
 
                 <template v-else>
