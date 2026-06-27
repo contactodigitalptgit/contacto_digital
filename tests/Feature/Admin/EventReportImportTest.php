@@ -123,7 +123,10 @@ class EventReportImportTest extends TestCase
                 $this->assertSame('app-key-123', $request->header('X-ZS-APP-KEY')[0] ?? null);
                 $this->assertSame('B3FC7C254EBDD7505C9CFA30468213B0', $request->header('X-ZS-CLIENT-ID')[0] ?? null);
                 $this->assertNotEmpty($request->header('X-ZS-SIGNATURE')[0] ?? null);
-                $this->assertSame('loja = 1', $request->data()['document']['condition'] ?? null);
+                $this->assertSame(
+                    "loja = 1 and data >= '2026-06-20' and data <= '2026-06-20'",
+                    $request->data()['document']['condition'] ?? null,
+                );
 
                 return Http::response([
                     'Response' => [
@@ -131,7 +134,16 @@ class EventReportImportTest extends TestCase
                         'StatusMessage' => 'OK',
                         'Content' => [
                             'document' => [
-                                ['numero' => 501, 'doc' => 'FS', 'serie' => 'A2026'],
+                                [
+                                    'numero' => 501,
+                                    'doc' => 'FS',
+                                    'serie' => 'A2026',
+                                    'data' => '2026-06-20',
+                                    'datahora' => '2026-06-20 12:05:00',
+                                    'pagamento' => 3,
+                                    'total' => 8.7,
+                                    'pago' => 1,
+                                ],
                             ],
                         ],
                     ],
@@ -181,12 +193,34 @@ class EventReportImportTest extends TestCase
                     ],
                 ],
             ], 200),
+            'https://api.zonesoft.org/v3/salesday/getInstances' => function ($request) {
+                $this->assertSame(
+                    "loja = 1 and data >= '2026-06-20' and data <= '2026-06-20'",
+                    $request->data()['salesday']['condition'] ?? null,
+                );
+
+                return $this->fakeSalesdayResponse([
+                    [
+                        'loja' => 1,
+                        'data' => '2026-06-20',
+                        'caixa' => 1,
+                        'Open' => 1,
+                        'fs' => 5.50,
+                        'ft' => 3.20,
+                        'movimento' => 8.70,
+                        'num' => 5.50,
+                        'deb' => 3.20,
+                    ],
+                ]);
+            },
         ]);
 
         $this
             ->actingAs($admin)
-            ->post(route('admin.events.reports.store', $event))
-            ->assertRedirect(route('admin.events.index'));
+            ->post(route('admin.events.reports.store', $event), [
+                'redirect_to' => route('admin.events.dashboard', $event, absolute: false),
+            ])
+            ->assertRedirect(route('admin.events.dashboard', $event));
 
         $import = EventReportImport::query()->firstOrFail();
 
@@ -196,6 +230,11 @@ class EventReportImportTest extends TestCase
         $this->assertSame(2, $import->imported_rows_count);
         $this->assertSame('zonesoft_api', $import->summary['source'] ?? null);
         $this->assertSame(1, $import->summary['machines_count'] ?? null);
+        $this->assertSame('2026-06-20', $import->summary['salesday_records'][0]['sale_date'] ?? null);
+        $this->assertSame('5.5000', $import->summary['salesday_records'][0]['fs'] ?? null);
+        $this->assertSame('3.2000', $import->summary['salesday_records'][0]['ft'] ?? null);
+        $this->assertSame('3', $import->summary['payment_documents'][0]['payment_code'] ?? null);
+        $this->assertSame('8.7000', $import->summary['payment_documents'][0]['total'] ?? null);
 
         $this->assertDatabaseHas('event_report_rows', [
             'event_id' => $event->id,
@@ -204,6 +243,187 @@ class EventReportImportTest extends TestCase
             'description' => 'Agua',
             'store_name' => 'Loja 1 - POS 1',
         ]);
+    }
+
+    public function test_sync_filters_sales_outside_precise_event_report_range(): void
+    {
+        [$admin, $client] = $this->makeAdminClientContext();
+        $application = $this->makeApplication();
+        $event = Event::create([
+            'client_id' => $client->id,
+            'title' => 'Evento Janela Horaria',
+            'description' => 'Sincronizacao ZoneSoft com filtro horario',
+            'event_date' => '2026-06-20 12:00:00',
+            'report_starts_at' => '2026-06-20 12:00:00',
+            'report_ends_at' => '2026-06-20 12:59:59',
+            'is_active' => true,
+        ]);
+
+        ClientZoneSoftMachine::create([
+            'client_id' => $client->id,
+            'zonesoft_application_id' => $application->id,
+            'zs_client_id' => 'B3FC7C254EBDD7505C9CFA30468213B0',
+            'license' => 'Z11JSMZIYP',
+            'store_id' => 1,
+            'store_label' => 'Loja 1',
+            'permissions' => 'API + All document interfaces',
+            'is_active' => true,
+            'last_validated_at' => now(),
+        ]);
+
+        Http::fake([
+            'https://api.zonesoft.org/v3/documents/getDocumentsHeaders' => function ($request) {
+                $this->assertSame(
+                    "loja = 1 and data >= '2026-06-20' and data <= '2026-06-20'",
+                    $request->data()['document']['condition'] ?? null,
+                );
+
+                return Http::response([
+                    'Response' => [
+                        'StatusCode' => 200,
+                        'StatusMessage' => 'OK',
+                        'Content' => [
+                            'document' => [
+                                ['numero' => 501, 'doc' => 'FS', 'serie' => 'A2026'],
+                            ],
+                        ],
+                    ],
+                ], 200);
+            },
+            'https://api.zonesoft.org/v3/sales/getInstancesFromDocument' => Http::response([
+                'Response' => [
+                    'StatusCode' => 200,
+                    'StatusMessage' => 'OK',
+                    'Content' => [
+                        'sale' => [
+                            [
+                                'id' => 1,
+                                'loja' => 1,
+                                'numero' => 501,
+                                'doc' => 'FS',
+                                'serie' => 'A2026',
+                                'data' => '2026-06-20',
+                                'datahora' => '2026-06-20 11:59:59',
+                                'codigo' => 729,
+                                'descricao' => 'Fora da janela',
+                                'qtd' => 1,
+                                'valor' => 1.00,
+                                'desconto' => 0,
+                                'desconto2' => 0,
+                                'total' => 1.00,
+                            ],
+                            [
+                                'id' => 2,
+                                'loja' => 1,
+                                'numero' => 501,
+                                'doc' => 'FS',
+                                'serie' => 'A2026',
+                                'data' => '2026-06-20',
+                                'datahora' => '2026-06-20 12:05:00',
+                                'codigo' => 730,
+                                'descricao' => 'Dentro da janela',
+                                'qtd' => 2,
+                                'valor' => 4.8673,
+                                'desconto' => 0,
+                                'desconto2' => 0,
+                                'total' => 5.50,
+                            ],
+                            [
+                                'id' => 3,
+                                'loja' => 1,
+                                'numero' => 501,
+                                'doc' => 'FS',
+                                'serie' => 'A2026',
+                                'data' => '2026-06-20',
+                                'datahora' => '2026-06-20 13:00:00',
+                                'codigo' => 731,
+                                'descricao' => 'Fora depois do fim',
+                                'qtd' => 1,
+                                'valor' => 2.00,
+                                'desconto' => 0,
+                                'desconto2' => 0,
+                                'total' => 2.00,
+                            ],
+                        ],
+                    ],
+                ],
+            ], 200),
+            'https://api.zonesoft.org/v3/salesday/getInstances' => $this->fakeSalesdayResponse([
+                [
+                    'loja' => 1,
+                    'data' => '2026-06-20',
+                    'caixa' => 1,
+                    'Open' => 1,
+                    'fs' => 5.50,
+                ],
+            ]),
+        ]);
+
+        $this
+            ->actingAs($admin)
+            ->post(route('admin.events.reports.store', $event))
+            ->assertRedirect(route('admin.events.index'));
+
+        $import = EventReportImport::query()->latest('id')->firstOrFail();
+
+        $this->assertSame(1, $import->imported_rows_count);
+        $this->assertDatabaseHas('event_report_rows', [
+            'event_id' => $event->id,
+            'document_number' => '501',
+            'product_code' => '730',
+            'description' => 'Dentro da janela',
+        ]);
+        $this->assertDatabaseMissing('event_report_rows', [
+            'event_id' => $event->id,
+            'product_code' => '729',
+        ]);
+        $this->assertDatabaseMissing('event_report_rows', [
+            'event_id' => $event->id,
+            'product_code' => '731',
+        ]);
+    }
+
+    public function test_admin_cannot_start_sync_when_event_already_has_processing_import(): void
+    {
+        [$admin, $client] = $this->makeAdminClientContext();
+        $application = $this->makeApplication();
+        $event = $this->makeEvent($client);
+
+        ClientZoneSoftMachine::create([
+            'client_id' => $client->id,
+            'zonesoft_application_id' => $application->id,
+            'zs_client_id' => 'B3FC7C254EBDD7505C9CFA30468213B0',
+            'license' => 'Z11JSMZIYP',
+            'store_id' => 1,
+            'store_label' => 'Loja 1',
+            'permissions' => 'API + All document interfaces',
+            'is_active' => true,
+            'last_validated_at' => now(),
+        ]);
+
+        EventReportImport::create([
+            'event_id' => $event->id,
+            'uploaded_by_user_id' => $admin->id,
+            'import_strategy' => 'replace',
+            'original_filename' => 'zonesoft-api',
+            'stored_path' => 'zonesoft://sync',
+            'mime_type' => 'application/json',
+            'file_hash' => hash('sha256', 'processing-sync'),
+            'headers' => ['source' => 'zonesoft_api'],
+            'summary' => ['source' => 'zonesoft_api', 'machines_count' => 0],
+            'imported_rows_count' => 0,
+            'is_active' => false,
+            'status' => 'processing',
+        ]);
+
+        $this
+            ->actingAs($admin)
+            ->post(route('admin.events.reports.store', $event))
+            ->assertSessionHasErrors([
+                'integration' => 'Ja existe uma sincronizacao em andamento para este evento.',
+            ]);
+
+        $this->assertSame(1, EventReportImport::query()->count());
     }
 
     public function test_sync_replaces_previous_active_snapshot_and_event_index_uses_only_latest_sync(): void
@@ -299,6 +519,7 @@ class EventReportImportTest extends TestCase
                     ],
                 ],
             ], 200),
+            'https://api.zonesoft.org/v3/salesday/getInstances' => $this->fakeSalesdayResponse(),
         ]);
 
         $this
@@ -320,7 +541,7 @@ class EventReportImportTest extends TestCase
         $response->assertInertia(fn (AssertableInertia $page) => $page
             ->component('Admin/Events/Index')
             ->has('events', 1)
-            ->where('events.0.report_summary.active_syncs_count', 1)
+            ->where('events.0.report_summary.active_syncs_count', 0)
             ->where('events.0.report_summary.active_rows_count', 1)
             ->where('events.0.report_summary.machines_count', 1));
     }
@@ -407,6 +628,7 @@ class EventReportImportTest extends TestCase
                     ],
                 ],
             ], 200),
+            'https://api.zonesoft.org/v3/salesday/getInstances' => $this->fakeSalesdayResponse(),
         ]);
 
         $this
@@ -499,6 +721,7 @@ class EventReportImportTest extends TestCase
                     ],
                 ], 200);
             },
+            'https://api.zonesoft.org/v3/salesday/getInstances' => $this->fakeSalesdayResponse(),
         ]);
 
         $this
@@ -570,5 +793,21 @@ class EventReportImportTest extends TestCase
             'report_ends_at' => '2026-06-20 23:59:59',
             'is_active' => true,
         ]);
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $records
+     */
+    private function fakeSalesdayResponse(array $records = [])
+    {
+        return Http::response([
+            'Response' => [
+                'StatusCode' => 200,
+                'StatusMessage' => 'OK',
+                'Content' => [
+                    'salesday' => $records,
+                ],
+            ],
+        ], 200);
     }
 }

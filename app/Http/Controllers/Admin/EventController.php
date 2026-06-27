@@ -26,6 +26,7 @@ class EventController extends Controller
             ])
             ->withCount([
                 'activeReportImports as active_report_imports_count',
+                'processingReportImports as processing_report_imports_count',
                 'reportRows as active_report_rows_count' => fn ($query) => $query->whereHas(
                     'reportImport',
                     fn ($importQuery) => $importQuery->where('is_active', true)->where('status', 'completed'),
@@ -61,7 +62,7 @@ class EventController extends Controller
                     'is_active' => $event->is_active,
                     'available_machine_count' => (int) ($event->client->active_zonesoft_machines_count ?? 0),
                     'report_summary' => $hasAnyImport ? [
-                        'active_syncs_count' => (int) $event->active_report_imports_count,
+                        'active_syncs_count' => (int) $event->processing_report_imports_count,
                         'active_rows_count' => (int) $event->active_report_rows_count,
                         'total' => (float) ($event->active_report_total_sum ?? 0),
                         'last_synced_at' => $latestActiveImport?->imported_at?->toISOString(),
@@ -167,16 +168,30 @@ class EventController extends Controller
         Event $event,
         EventReportSyncService $syncService,
     ): RedirectResponse {
+        $validated = $request->validate([
+            'redirect_to' => ['nullable', 'string', 'max:2048'],
+        ]);
+        $redirectTo = $this->resolveReportRedirect($validated['redirect_to'] ?? null);
+
         if (app()->runningUnitTests()) {
             $syncService->sync($event, $request->user());
 
-            return to_route('admin.events.index');
+            return redirect()->to($redirectTo);
         }
 
         $syncLog = $syncService->start($event, $request->user());
 
         SyncEventReportJob::dispatch($syncLog->id, $event->id);
 
-        return to_route('admin.events.index');
+        return redirect()->to($redirectTo);
+    }
+
+    private function resolveReportRedirect(?string $redirectTo): string
+    {
+        if (is_string($redirectTo) && $redirectTo !== '' && str_starts_with($redirectTo, '/') && ! str_starts_with($redirectTo, '//')) {
+            return $redirectTo;
+        }
+
+        return route('admin.events.index');
     }
 }

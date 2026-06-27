@@ -56,10 +56,24 @@ class EventDashboardTest extends TestCase
             ->where('filters.product', '730')
             ->where('summary.bar_groups_count', 1)
             ->where('summary.filtered_rows', $expectedCount)
+            ->where('summary.tickets_count', $expectedCount)
             ->where('pagination.total', $expectedCount)
+            ->where('salesday.available', true)
+            ->where('salesday.records_count', 2)
+            ->where('salesday.totals.fs', 2.75)
+            ->where('paymentSummary.source', 'documents_headers')
+            ->where('paymentSummary.cash', 2.75)
+            ->where('paymentSummary.zticket', 5.5)
+            ->where('zoneDevices', fn ($zones): bool => collect($zones)->contains(
+                fn (array $zone): bool => $zone['label'] === 'Bar 1'
+                    && count($zone['items']) === 2,
+            ))
             ->where('barGroups', fn ($groups): bool => collect($groups)->contains(
                 fn (array $group): bool => $group['label'] === 'Bar 1'
                     && empty(array_diff($expectedMembers, $group['members'])),
+            ))
+            ->where('documentTypes', fn ($documentTypes): bool => collect($documentTypes)->contains(
+                fn (array $documentType): bool => in_array($documentType['label'], ['FS', 'FT'], true),
             ))
             ->where('rows', fn ($rows): bool => collect($rows)->every(
                 fn (array $row): bool => $row['product_code'] === '730'
@@ -109,8 +123,28 @@ class EventDashboardTest extends TestCase
             ->where('integration.source', 'ZoneSoft API')
             ->where('integration.configured_client_ids_count', 2)
             ->where('integration.machines_count', 2)
+            ->where('event.processing_imports_count', 0)
             ->where('summary.total_rows', 7)
+            ->where('summary.processing_imports_count', 0)
+            ->where('summary.tickets_count', 7)
+            ->where('summary.document_types_count', 6)
             ->where('summary.bar_groups_count', 6)
+            ->where('salesday.available', true)
+            ->where('salesday.records_count', 4)
+            ->where('salesday.days_count', 2)
+            ->where('salesday.totals.ft', 8.25)
+            ->where('paymentSummary.source', 'documents_headers')
+            ->where('paymentSummary.multibanco', 4.2)
+            ->where('paymentSummary.cash', 7.3)
+            ->where('paymentSummary.zticket', 5.5)
+            ->where('paymentSummary.top_up_loaded', 2.75)
+            ->where('zoneDevices', fn ($zones): bool => collect($zones)->contains(
+                fn (array $zone): bool => $zone['label'] === 'Bar 1'
+                    && count($zone['items']) === 2,
+            ))
+            ->where('barGroups', fn ($groups): bool => collect($groups)->contains(
+                fn (array $group): bool => $group['label'] === 'Top Up',
+            ))
             ->where('filterOptions.barGroups', fn ($groups): bool => collect($groups)->contains(
                 fn (array $group): bool => $group['value'] === 'Bar 1' && $group['rows_count'] > 0,
             ))
@@ -200,7 +234,158 @@ class EventDashboardTest extends TestCase
             'mime_type' => 'application/json',
             'file_hash' => hash('sha256', 'dashboard-sync-'.$event->id),
             'headers' => ['source' => 'zonesoft_api'],
-            'summary' => ['source' => 'zonesoft_api', 'machines_count' => 2],
+            'summary' => [
+                'source' => 'zonesoft_api',
+                'machines_count' => 2,
+                'salesday_records' => [
+                    [
+                        'store_code' => '1',
+                        'store_name' => 'Bar 1 - Joao',
+                        'sale_date' => '2026-03-14',
+                        'cash_register_code' => '1',
+                        'is_closed' => true,
+                        'fs' => '2.7500',
+                        'ft' => '0.0000',
+                        'tk' => '0.0000',
+                        'vd' => '0.0000',
+                        'enc' => '0.0000',
+                        'nc' => '0.0000',
+                        'rc' => '0.0000',
+                        'movimento' => '2.7500',
+                        'num' => '2.7500',
+                        'deb' => '0.0000',
+                        'crd' => '0.0000',
+                        'chq' => '0.0000',
+                        'cartoes' => '0.0000',
+                        'etk' => '0.0000',
+                    ],
+                    [
+                        'store_code' => '1',
+                        'store_name' => 'Bar 1 - Joao',
+                        'sale_date' => '2026-03-14',
+                        'cash_register_code' => '2',
+                        'is_closed' => true,
+                        'fs' => '0.0000',
+                        'ft' => '5.5000',
+                        'tk' => '0.0000',
+                        'vd' => '0.0000',
+                        'enc' => '0.0000',
+                        'nc' => '0.0000',
+                        'rc' => '0.0000',
+                        'movimento' => '5.5000',
+                        'num' => '0.0000',
+                        'deb' => '5.5000',
+                        'crd' => '0.0000',
+                        'chq' => '0.0000',
+                        'cartoes' => '0.0000',
+                        'etk' => '0.0000',
+                    ],
+                    [
+                        'store_code' => '2',
+                        'store_name' => 'Bar 2 - Ines',
+                        'sale_date' => '2026-03-14',
+                        'cash_register_code' => '1',
+                        'is_closed' => false,
+                        'fs' => '0.0000',
+                        'ft' => '2.7500',
+                        'tk' => '0.0000',
+                        'vd' => '0.0000',
+                        'enc' => '0.0000',
+                        'nc' => '0.0000',
+                        'rc' => '0.0000',
+                        'movimento' => '2.7500',
+                        'num' => '0.0000',
+                        'deb' => '0.0000',
+                        'crd' => '2.7500',
+                        'chq' => '0.0000',
+                        'cartoes' => '0.0000',
+                        'etk' => '0.0000',
+                    ],
+                    [
+                        'store_code' => '4',
+                        'store_name' => 'Bar 4 - Ana',
+                        'sale_date' => '2026-03-15',
+                        'cash_register_code' => '1',
+                        'is_closed' => true,
+                        'fs' => '0.0000',
+                        'ft' => '0.0000',
+                        'tk' => '1.0000',
+                        'vd' => '0.0000',
+                        'enc' => '0.0000',
+                        'nc' => '0.0000',
+                        'rc' => '0.0000',
+                        'movimento' => '1.0000',
+                        'num' => '1.0000',
+                        'deb' => '0.0000',
+                        'crd' => '0.0000',
+                        'chq' => '0.0000',
+                        'cartoes' => '0.0000',
+                        'etk' => '0.0000',
+                    ],
+                ],
+                'payment_documents' => [
+                    [
+                        'store_code' => '1',
+                        'store_name' => 'Bar 1 - Joao',
+                        'sale_date' => '2026-03-14',
+                        'doc_type' => 'FS',
+                        'document_series' => 'A2026',
+                        'document_number' => '1',
+                        'payment_code' => '1',
+                        'total' => '2.7500',
+                    ],
+                    [
+                        'store_code' => '1',
+                        'store_name' => 'Bar 1 Joana C',
+                        'sale_date' => '2026-03-14',
+                        'doc_type' => 'FT',
+                        'document_series' => 'A2026',
+                        'document_number' => '2',
+                        'payment_code' => '56',
+                        'total' => '5.5000',
+                    ],
+                    [
+                        'store_code' => '2',
+                        'store_name' => 'Bar 2 - Ines',
+                        'sale_date' => '2026-03-14',
+                        'doc_type' => 'FS',
+                        'document_series' => 'A2026',
+                        'document_number' => '3',
+                        'payment_code' => '3',
+                        'total' => '3.2000',
+                    ],
+                    [
+                        'store_code' => '3',
+                        'store_name' => 'Bar 3 - Luis',
+                        'sale_date' => '2026-03-14',
+                        'doc_type' => 'VD',
+                        'document_series' => 'A2026',
+                        'document_number' => '4',
+                        'payment_code' => '1',
+                        'total' => '1.8000',
+                    ],
+                    [
+                        'store_code' => '4',
+                        'store_name' => 'Bar 4 - Ana',
+                        'sale_date' => '2026-03-15',
+                        'doc_type' => 'TK',
+                        'document_series' => 'A2026',
+                        'document_number' => '5',
+                        'payment_code' => '3',
+                        'total' => '1.0000',
+                    ],
+                    [
+                        'store_code' => '5',
+                        'store_name' => 'BC TOP BAR 2 - POS 1',
+                        'sale_date' => '2026-03-15',
+                        'doc_type' => 'ZT',
+                        'document_series' => 'A2026',
+                        'document_number' => '6',
+                        'payment_code' => '1',
+                        'total' => '2.7500',
+                    ],
+                ],
+            ],
             'imported_rows_count' => 7,
             'imported_at' => now(),
             'is_active' => true,
@@ -208,13 +393,13 @@ class EventDashboardTest extends TestCase
         ]);
 
         $rows = [
-            ['store_code' => '1', 'store_name' => 'Bar 1 - Joao', 'sale_date' => '2026-03-14', 'sale_datetime' => '2026-03-14 12:00:00', 'product_code' => '730', 'description' => 'Agua', 'quantity' => '1.0000', 'value' => '2.4336', 'discount' => '0.0000', 'total' => '2.7500'],
-            ['store_code' => '1', 'store_name' => 'Bar 1 Joana C', 'sale_date' => '2026-03-14', 'sale_datetime' => '2026-03-14 12:05:00', 'product_code' => '730', 'description' => 'Agua', 'quantity' => '2.0000', 'value' => '4.8673', 'discount' => '0.0000', 'total' => '5.5000'],
-            ['store_code' => '2', 'store_name' => 'Bar 2 - Ines', 'sale_date' => '2026-03-14', 'sale_datetime' => '2026-03-14 12:10:00', 'product_code' => '731', 'description' => 'Cerveja', 'quantity' => '1.0000', 'value' => '2.9200', 'discount' => '0.0000', 'total' => '3.2000'],
-            ['store_code' => '3', 'store_name' => 'Bar 3 - Luis', 'sale_date' => '2026-03-14', 'sale_datetime' => '2026-03-14 12:15:00', 'product_code' => '732', 'description' => 'Sumo', 'quantity' => '1.0000', 'value' => '1.5000', 'discount' => '0.0000', 'total' => '1.8000'],
-            ['store_code' => '4', 'store_name' => 'Bar 4 - Ana', 'sale_date' => '2026-03-15', 'sale_datetime' => '2026-03-15 12:00:00', 'product_code' => '733', 'description' => 'Cafe', 'quantity' => '1.0000', 'value' => '0.8000', 'discount' => '0.0000', 'total' => '1.0000'],
-            ['store_code' => '5', 'store_name' => 'Bar 5 - Ines', 'sale_date' => '2026-03-15', 'sale_datetime' => '2026-03-15 12:05:00', 'product_code' => '730', 'description' => 'Agua', 'quantity' => '1.0000', 'value' => '2.4336', 'discount' => '0.0000', 'total' => '2.7500'],
-            ['store_code' => null, 'store_name' => null, 'sale_date' => '2026-03-15', 'sale_datetime' => '2026-03-15 12:10:00', 'product_code' => '734', 'description' => 'Snack', 'quantity' => '1.0000', 'value' => '1.2000', 'discount' => '0.0000', 'total' => '1.5000'],
+            ['doc_type' => 'FS', 'store_code' => '1', 'store_name' => 'Bar 1 - Joao', 'sale_date' => '2026-03-14', 'sale_datetime' => '2026-03-14 12:00:00', 'product_code' => '730', 'description' => 'Agua', 'quantity' => '1.0000', 'value' => '2.4336', 'discount' => '0.0000', 'total' => '2.7500'],
+            ['doc_type' => 'FT', 'store_code' => '1', 'store_name' => 'Bar 1 Joana C', 'sale_date' => '2026-03-14', 'sale_datetime' => '2026-03-14 12:05:00', 'product_code' => '730', 'description' => 'Agua', 'quantity' => '2.0000', 'value' => '4.8673', 'discount' => '0.0000', 'total' => '5.5000'],
+            ['doc_type' => 'FS', 'store_code' => '2', 'store_name' => 'Bar 2 - Ines', 'sale_date' => '2026-03-14', 'sale_datetime' => '2026-03-14 12:10:00', 'product_code' => '731', 'description' => 'Cerveja', 'quantity' => '1.0000', 'value' => '2.9200', 'discount' => '0.0000', 'total' => '3.2000'],
+            ['doc_type' => 'VD', 'store_code' => '3', 'store_name' => 'Bar 3 - Luis', 'sale_date' => '2026-03-14', 'sale_datetime' => '2026-03-14 12:15:00', 'product_code' => '732', 'description' => 'Sumo', 'quantity' => '1.0000', 'value' => '1.5000', 'discount' => '0.0000', 'total' => '1.8000'],
+            ['doc_type' => 'TK', 'store_code' => '4', 'store_name' => 'Bar 4 - Ana', 'sale_date' => '2026-03-15', 'sale_datetime' => '2026-03-15 12:00:00', 'product_code' => '733', 'description' => 'Cafe', 'quantity' => '1.0000', 'value' => '0.8000', 'discount' => '0.0000', 'total' => '1.0000'],
+            ['doc_type' => 'ZT', 'store_code' => '5', 'store_name' => 'BC TOP BAR 2 - POS 1', 'sale_date' => '2026-03-15', 'sale_datetime' => '2026-03-15 12:05:00', 'product_code' => '730', 'description' => 'Agua', 'quantity' => '1.0000', 'value' => '2.4336', 'discount' => '0.0000', 'total' => '2.7500'],
+            ['doc_type' => null, 'store_code' => null, 'store_name' => null, 'sale_date' => '2026-03-15', 'sale_datetime' => '2026-03-15 12:10:00', 'product_code' => '734', 'description' => 'Snack', 'quantity' => '1.0000', 'value' => '1.2000', 'discount' => '0.0000', 'total' => '1.5000'],
         ];
 
         foreach ($rows as $index => $row) {
@@ -223,7 +408,7 @@ class EventDashboardTest extends TestCase
                 'event_report_import_id' => $sync->id,
                 'source_sheet' => 'zonesoft:test',
                 'source_row_number' => $index + 1,
-                'doc_type' => 'FS',
+                'doc_type' => $row['doc_type'],
                 'document_series' => 'A2026',
                 'document_number' => (string) ($index + 1),
                 'raw_row' => ['index' => $index + 1],

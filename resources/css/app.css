@@ -784,7 +784,7 @@
     }
 
     .event-dashboard-header {
-        @apply flex w-full flex-col gap-3 sm:flex-row sm:items-center sm:justify-between;
+        @apply flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between;
     }
 
     .event-dashboard-header-top {
@@ -1975,6 +1975,268 @@
         color: var(--text-main);
     }
 
+    .report-dashboard-toolbar {
+        @apply flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between;
+    }
+
+    .report-dashboard-toolbar-subtitle {
+        @apply mt-1 text-sm;
+        color: var(--text-muted);
+    }
+
+    .report-dashboard-section {
+        @apply space-y-4;
+    }
+
+    .report-dashboard-section-header {
+        @apply space-y-2;
+    }
+
+    .report-dashboard-section-title {
+        @apply text-sm font-bold uppercase tracking-[0.12em];
+        color: var(--accent-strong);
+    }
+
+    .report-dashboard-section-helper {
+        @apply text-sm leading-6;
+        color: var(--text-muted);
+    }
+
+    .report-dashboard-brand {
+        @apply grid gap-6 rounded-[1.75rem] border px-6 py-7 lg:px-8;
+        grid-template-columns: minmax(0, 1.5fr) minmax(16rem, 0.8fr);
+        border-color: color-mix(in srgb, var(--accent) 24%, var(--line-color));
+        background:
+            linear-gradient(135deg, color-mix(in srgb, var(--accent-strong) 30%, transparent), transparent 58%),
+            linear-gradient(135deg, color-mix(in srgb, var(--accent) 14%, transparent), transparent 72%),
+            color-mix(in srgb, var(--card-bg) 94%, var(--accent) 6%);
+        box-shadow: 0 30px 60px -42px color-mix(in srgb, var(--accent-strong) 55%, transparent);
+    }
+
+    .report-dashboard-brand-kicker {
+        @apply text-xs font-semibold uppercase tracking-[0.24em];
+        color: var(--accent-strong);
+    }
+
+    .report-dashboard-brand-title {
+        @apply mt-3 text-3xl font-extrabold leading-tight;
+        color: var(--text-main);
+    }
+
+    .report-dashboard-brand-subtitle {
+        @apply mt-2 text-lg;
+        color: var(--text-soft);
+    }
+
+    .report-dashboard-brand-description {
+        @apply mt-4 max-w-3xl text-sm leading-7;
+        color: var(--text-soft);
+    }
+
+    .report-dashboard-brand-note {
+        @apply mt-3 text-xs italic;
+        color: var(--text-muted);
+    }
+
+    .report-dashboard-brand-meta {
+        @apply grid gap-3 self-start;
+    }
+
+    .report-dashboard-brand-meta-card {
+        @apply rounded-2xl border px-4 py-4;
+        border-color: color-mix(in srgb, var(--accent) 18%, var(--line-color));
+        background: color-mix(in srgb, var(--table-row-bg) 92%, var(--card-bg) 8%);
+    }
+
+    .report-dashboard-brand-meta-card span {
+        @apply block text-[11px] font-semibold uppercase tracking-wide;
+        color: var(--text-muted);
+    }
+
+    .report-dashboard-brand-meta-card strong {
+        @apply mt-2 block text-base font-semibold;
+        color: var(--text-main);
+    }
+
+    .report-dashboard-inline-note {
+        @apply rounded-2xl border px-4 py-3 text-sm;
+        border-color: color-mix(in srgb, var(--accent) 24%, var(--line-color));
+        color: var(--text-soft);
+        background: color-mix(in srgb, var(--accent) 10%, var(--table-row-bg) 90%);
+    }
+
+    .report-dashboard-grid {
+        @apply grid gap-4;
+    }
+
+    .report-dashboard-grid-3 {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .report-dashboard-grid-4 {
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+
+    .report-dashboard-grid-5 {
+        grid-template-columns: repeat(5, minmax(0, 1fr));
+    }
+
+    .report-dashboard-metric-card {
+        @apply rounded-2xl border px-5 py-5;
+        border-color: var(--line-color);
+        background: var(--card-bg);
+    }
+
+    .report-dashboard-metric-card-strong {
+        border-color: color-mix(in srgb, var(--accent) 28%, var(--line-color));
+        background:
+            linear-gradient(135deg, color-mix(in srgb, var(--accent-strong) 16%, transparent), transparent 64%),
+            color-mix(in srgb, var(--card-bg) 90%, var(--accent) 10%);
+    }
+
+    .report-dashboard-metric-label {
+        @apply block text-[11px] font-semibold uppercase tracking-[0.08em];
+        color: var(--text-muted);
+    }
+
+    .report-dashboard-metric-value {
+        @apply mt-3 block text-[2rem] font-bold leading-none;
+        color: var(--text-main);
+    }
+
+    .report-dashboard-summary-card {
+        @apply rounded-2xl border px-4 py-4 text-center;
+        border-color: var(--line-color);
+        background: var(--card-bg);
+    }
+
+    .report-dashboard-summary-label {
+        @apply block text-[10px] font-semibold uppercase tracking-[0.08em];
+        color: var(--text-muted);
+    }
+
+    .report-dashboard-summary-value {
+        @apply mt-2 block text-2xl font-bold;
+        color: var(--text-main);
+    }
+
+    .report-dashboard-panel {
+        @apply px-5 py-5;
+    }
+
+    .report-dashboard-products-grid {
+        @apply grid gap-5;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .report-dashboard-product-row {
+        @apply flex items-center gap-3;
+    }
+
+    .report-dashboard-rank {
+        @apply inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-xl text-xs font-bold;
+        color: var(--text-main);
+        background: color-mix(in srgb, var(--line-color) 72%, transparent);
+    }
+
+    .report-dashboard-rank.is-top {
+        color: #ffffff;
+        background: linear-gradient(135deg, var(--accent), var(--accent-strong));
+    }
+
+    .report-dashboard-product-head {
+        @apply mb-1 flex items-center justify-between gap-3 text-sm;
+        color: var(--text-main);
+    }
+
+    .report-dashboard-product-head strong {
+        @apply font-bold;
+    }
+
+    .report-dashboard-product-track {
+        @apply h-2 overflow-hidden rounded-full;
+        background: color-mix(in srgb, var(--line-color) 68%, transparent);
+    }
+
+    .report-dashboard-product-fill {
+        @apply block h-full rounded-full;
+        background: linear-gradient(90deg, var(--accent), var(--accent-strong));
+    }
+
+    .report-dashboard-table-shell {
+        @apply overflow-hidden;
+    }
+
+    .report-dashboard-table thead th {
+        @apply text-[11px] font-bold uppercase tracking-[0.08em];
+    }
+
+    .report-dashboard-table tbody td {
+        color: var(--text-soft);
+    }
+
+    .report-dashboard-table tfoot td {
+        @apply font-bold;
+        color: var(--text-main);
+    }
+
+    .report-dashboard-performance-track {
+        @apply h-2 overflow-hidden rounded-full;
+        background: color-mix(in srgb, var(--line-color) 68%, transparent);
+    }
+
+    .report-dashboard-performance-fill {
+        @apply block h-full rounded-full;
+        background: linear-gradient(90deg, var(--accent), var(--accent-strong));
+        opacity: 0.8;
+    }
+
+    .report-dashboard-zone-grid {
+        @apply grid gap-4;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .report-dashboard-zone-card {
+        @apply overflow-hidden rounded-2xl border;
+        border-color: var(--line-color);
+        background: var(--card-bg);
+    }
+
+    .report-dashboard-zone-header {
+        @apply flex items-center justify-between gap-3 px-4 py-3 text-xs font-semibold uppercase tracking-[0.08em];
+        color: var(--text-main);
+        background:
+            linear-gradient(135deg, color-mix(in srgb, var(--accent) 18%, transparent), transparent 75%),
+            color-mix(in srgb, var(--table-row-bg) 92%, var(--card-bg) 8%);
+        border-bottom: 1px solid color-mix(in srgb, var(--accent) 16%, var(--line-color));
+    }
+
+    .report-dashboard-zone-body {
+        @apply divide-y;
+        border-color: color-mix(in srgb, var(--line-color) 72%, transparent);
+    }
+
+    .report-dashboard-zone-row {
+        @apply flex items-center justify-between gap-3 px-4 py-3 text-sm;
+        color: var(--text-soft);
+    }
+
+    .report-dashboard-zone-row strong {
+        @apply font-semibold;
+        color: var(--text-main);
+    }
+
+    .report-dashboard-zone-footer {
+        @apply flex items-center justify-between gap-3 px-4 py-3 text-sm font-bold;
+        color: var(--text-main);
+        background: color-mix(in srgb, var(--accent) 8%, var(--table-row-bg) 92%);
+        border-top: 1px solid color-mix(in srgb, var(--accent) 16%, var(--line-color));
+    }
+
+    .report-dashboard-empty {
+        @apply rounded-2xl px-5 py-12 text-center text-sm;
+    }
+
     @media (max-width: 1023px) {
         .app-header-actions {
             @apply hidden;
@@ -2011,6 +2273,19 @@
         .event-dashboard-breakdown-side {
             grid-template-columns: repeat(2, minmax(0, 1fr));
             min-width: 0;
+        }
+
+        .report-dashboard-brand {
+            grid-template-columns: 1fr;
+        }
+
+        .report-dashboard-grid-4,
+        .report-dashboard-grid-5 {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .report-dashboard-zone-grid {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
         }
     }
 
@@ -2092,6 +2367,32 @@
 
         .event-dashboard-floating-actions {
             right: 1rem;
+        }
+
+        .report-dashboard-products-grid,
+        .report-dashboard-grid-3,
+        .report-dashboard-grid-4,
+        .report-dashboard-grid-5,
+        .report-dashboard-zone-grid {
+            grid-template-columns: 1fr;
+        }
+
+        .report-dashboard-brand {
+            @apply px-5 py-6;
+        }
+
+        .report-dashboard-brand-title {
+            @apply text-2xl;
+        }
+
+        .report-dashboard-metric-value {
+            @apply text-[1.7rem];
+        }
+
+        .report-dashboard-zone-header,
+        .report-dashboard-zone-row,
+        .report-dashboard-zone-footer {
+            @apply flex-col items-start;
         }
     }
 }

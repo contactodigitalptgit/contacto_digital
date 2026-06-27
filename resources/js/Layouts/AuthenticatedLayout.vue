@@ -252,19 +252,7 @@ onMounted(() => {
                             <slot name="header" />
 
                             <div class="app-header-actions">
-                                <label class="app-header-search">
-                                    <svg
-                                        class="h-4 w-4"
-                                        viewBox="0 0 24 24"
-                                        fill="none"
-                                        stroke="currentColor"
-                                        stroke-width="2"
-                                    >
-                                        <circle cx="11" cy="11" r="7" />
-                                        <path d="M20 20l-3.5-3.5" />
-                                    </svg>
-                                    <input type="text" placeholder="Pesquisar..." />
-                                </label>
+
 
                                 <Dropdown
                                     align="right"

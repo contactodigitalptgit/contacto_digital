@@ -54,6 +54,11 @@ class Event extends Model
         return $this->reportImports()->where('is_active', true)->where('status', 'completed');
     }
 
+    public function processingReportImports(): HasMany
+    {
+        return $this->reportImports()->where('status', 'processing');
+    }
+
     public function latestActiveReportImport(): HasOne
     {
         return $this->hasOne(EventReportImport::class)

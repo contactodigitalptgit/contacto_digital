@@ -9,6 +9,7 @@ use App\Models\EventReportRow;
 use App\Models\User;
 use App\Services\ZoneSoft\ZoneSoftApiClient;
 use App\Services\ZoneSoft\ZoneSoftApiException;
+use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
@@ -55,7 +56,7 @@ class EventReportSyncService
 
         try {
             $machines = $this->resolveMachines($event);
-            $machineSync = $this->fetchRows($machines);
+            $machineSync = $this->fetchRows($event, $machines);
         } catch (\Throwable $exception) {
             $syncLog->update([
                 'status' => 'failed',
@@ -74,6 +75,9 @@ class EventReportSyncService
         $successfulMachinesCount = $machineSync['successful_machines_count'];
         $failedMachines = $machineSync['failed_machines'];
         $machineWarnings = $machineSync['machine_warnings'];
+        $salesDayRecords = $machineSync['salesday_records'];
+        $salesDayWarnings = $machineSync['salesday_warnings'];
+        $paymentDocuments = $machineSync['payment_documents'];
 
         if ($successfulMachinesCount === 0) {
             $message = $this->buildMachineFailureMessage($failedMachines);
@@ -98,6 +102,9 @@ class EventReportSyncService
             $successfulMachinesCount,
             $failedMachines,
             $machineWarnings,
+            $salesDayRecords,
+            $salesDayWarnings,
+            $paymentDocuments,
         );
         $timestamp = now();
 
@@ -200,16 +207,25 @@ class EventReportSyncService
      *     rows:list<array<string, mixed>>,
      *     successful_machines_count:int,
      *     failed_machines:list<array{machine_id:int,zs_client_id:string,store_id:int,message:string}>,
-     *     machine_warnings:list<array{machine_id:int,zs_client_id:string,store_id:int,message:string}>
+     *     machine_warnings:list<array{machine_id:int,zs_client_id:string,store_id:int,message:string}>,
+     *     salesday_records:list<array<string, mixed>>,
+     *     salesday_warnings:list<array{machine_id:int,zs_client_id:string,store_id:int,message:string}>,
+     *     payment_documents:list<array<string, mixed>>
      * }
      */
-    private function fetchRows(Collection $machines): array
+    private function fetchRows(Event $event, Collection $machines): array
     {
+        $syncRange = $this->resolveSyncRange($event);
         $rows = [];
         $dedupe = [];
+        $salesDayRecords = [];
+        $salesDayDedupe = [];
+        $paymentDocuments = [];
+        $paymentDocumentDedupe = [];
         $successfulMachinesCount = 0;
         $failedMachines = [];
         $machineWarnings = [];
+        $salesDayWarnings = [];
 
         foreach ($machines as $machine) {
             if (! $machine->application) {
@@ -222,7 +238,7 @@ class EventReportSyncService
             }
 
             try {
-                $documents = $this->fetchDocuments($machine);
+                $documents = $this->fetchDocuments($machine, $syncRange);
             } catch (ZoneSoftApiException $exception) {
                 $failedMachines[] = $this->markMachineFailure($machine, $exception->getMessage());
 
@@ -230,6 +246,7 @@ class EventReportSyncService
             }
 
             $documentWarnings = [];
+            $salesDayWarning = null;
 
             foreach ($documents as $document) {
                 try {
@@ -243,12 +260,18 @@ class EventReportSyncService
                     continue;
                 }
 
+                $documentRows = [];
+
                 foreach ($sales as $sale) {
                     $normalizedRow = $this->normalizeSaleRow(
                         $machine,
                         $sale,
                         count($rows) + 1,
                     );
+
+                    if (! $this->rowMatchesSyncRange($normalizedRow, $syncRange)) {
+                        continue;
+                    }
 
                     $dedupeKey = implode('|', [
                         $machine->zs_client_id,
@@ -266,11 +289,64 @@ class EventReportSyncService
 
                     $dedupe[$dedupeKey] = true;
                     $rows[] = $normalizedRow;
+                    $documentRows[] = $normalizedRow;
+                }
+
+                if ($documentRows !== []) {
+                    $normalizedPaymentDocument = $this->normalizePaymentDocument(
+                        $machine,
+                        $document,
+                        $documentRows[0],
+                    );
+                    $paymentDocumentKey = $this->buildPaymentDocumentKey(
+                        $machine,
+                        $normalizedPaymentDocument,
+                    );
+
+                    if (! isset($paymentDocumentDedupe[$paymentDocumentKey])) {
+                        $paymentDocumentDedupe[$paymentDocumentKey] = true;
+                        $paymentDocuments[] = $normalizedPaymentDocument;
+                    }
                 }
             }
 
+            try {
+                $machineSalesDayRecords = $this->fetchSalesDayRecords($machine, $syncRange);
+            } catch (ZoneSoftApiException $exception) {
+                $salesDayWarning = sprintf(
+                    'Resumo Salesday indisponivel para a loja %d: %s',
+                    $machine->store_id,
+                    $exception->getMessage(),
+                );
+                $salesDayWarnings[] = [
+                    'machine_id' => $machine->id,
+                    'zs_client_id' => $machine->zs_client_id,
+                    'store_id' => $machine->store_id,
+                    'message' => $salesDayWarning,
+                ];
+                $machineSalesDayRecords = [];
+            }
+
+            foreach ($machineSalesDayRecords as $salesDayRecord) {
+                $normalizedSalesDayRecord = $this->normalizeSalesDayRecord($machine, $salesDayRecord);
+
+                $salesDayKey = implode('|', [
+                    $machine->zs_client_id,
+                    $normalizedSalesDayRecord['store_code'] ?? '',
+                    $normalizedSalesDayRecord['sale_date'] ?? '',
+                    $normalizedSalesDayRecord['cash_register_code'] ?? '',
+                ]);
+
+                if (isset($salesDayDedupe[$salesDayKey])) {
+                    continue;
+                }
+
+                $salesDayDedupe[$salesDayKey] = true;
+                $salesDayRecords[] = $normalizedSalesDayRecord;
+            }
+
             $successfulMachinesCount++;
-            $warningMessage = $this->summarizeMachineWarnings($documentWarnings);
+            $warningMessage = $this->summarizeMachineWarnings($documentWarnings, $salesDayWarning);
 
             $machine->forceFill([
                 'last_validated_at' => now(),
@@ -292,13 +368,17 @@ class EventReportSyncService
             'successful_machines_count' => $successfulMachinesCount,
             'failed_machines' => $failedMachines,
             'machine_warnings' => $machineWarnings,
+            'salesday_records' => $salesDayRecords,
+            'salesday_warnings' => $salesDayWarnings,
+            'payment_documents' => $paymentDocuments,
         ];
     }
 
     /**
+     * @param  array{start:CarbonImmutable,end:CarbonImmutable}  $syncRange
      * @return list<array<string, mixed>>
      */
-    private function fetchDocuments(ClientZoneSoftMachine $machine): array
+    private function fetchDocuments(ClientZoneSoftMachine $machine, array $syncRange): array
     {
         $documents = [];
         $offset = 0;
@@ -312,7 +392,7 @@ class EventReportSyncService
                 'getDocumentsHeaders',
                 'document',
                 [
-                    'condition' => $this->buildDocumentCondition($machine),
+                    'condition' => $this->buildDocumentCondition($machine, $syncRange),
                     'order' => 'data ASC, numero ASC',
                     'limit' => $limit,
                     'offset' => $offset,
@@ -355,9 +435,65 @@ class EventReportSyncService
             : [];
     }
 
-    private function buildDocumentCondition(ClientZoneSoftMachine $machine): string
+    /**
+     * @param  array{start:CarbonImmutable,end:CarbonImmutable}  $syncRange
+     * @return list<array<string, mixed>>
+     */
+    private function fetchSalesDayRecords(ClientZoneSoftMachine $machine, array $syncRange): array
     {
-        return sprintf('loja = %d', $machine->store_id);
+        $records = [];
+        $offset = 0;
+        $limit = 250;
+
+        do {
+            $response = $this->apiClient->post(
+                $machine->application,
+                $machine->zs_client_id,
+                'salesday',
+                'getInstances',
+                'salesday',
+                [
+                    'condition' => $this->buildSalesDayCondition($machine, $syncRange),
+                    'order' => 'data ASC, caixa ASC',
+                    'limit' => $limit,
+                    'offset' => $offset,
+                ],
+            );
+
+            /** @var list<array<string, mixed>> $batch */
+            $batch = is_array($response['salesday'] ?? null)
+                ? array_values(array_filter($response['salesday'], 'is_array'))
+                : [];
+
+            $records = [...$records, ...$batch];
+            $offset += count($batch);
+        } while (count($batch) === $limit);
+
+        return $records;
+    }
+
+    /**
+     * @param  array{start:CarbonImmutable,end:CarbonImmutable}  $syncRange
+     */
+    private function buildDocumentCondition(ClientZoneSoftMachine $machine, array $syncRange): string
+    {
+        return implode(' and ', [
+            sprintf('loja = %d', $machine->store_id),
+            sprintf("data >= '%s'", $syncRange['start']->toDateString()),
+            sprintf("data <= '%s'", $syncRange['end']->toDateString()),
+        ]);
+    }
+
+    /**
+     * @param  array{start:CarbonImmutable,end:CarbonImmutable}  $syncRange
+     */
+    private function buildSalesDayCondition(ClientZoneSoftMachine $machine, array $syncRange): string
+    {
+        return implode(' and ', [
+            sprintf('loja = %d', $machine->store_id),
+            sprintf("data >= '%s'", $syncRange['start']->toDateString()),
+            sprintf("data <= '%s'", $syncRange['end']->toDateString()),
+        ]);
     }
 
     /**
@@ -381,17 +517,25 @@ class EventReportSyncService
     /**
      * @param  list<string>  $documentWarnings
      */
-    private function summarizeMachineWarnings(array $documentWarnings): ?string
+    private function summarizeMachineWarnings(array $documentWarnings, ?string $salesDayWarning = null): ?string
     {
-        if ($documentWarnings === []) {
-            return null;
+        $messages = [];
+
+        if ($documentWarnings !== []) {
+            $messages[] = sprintf(
+                'Falha parcial em %d documento(s). Primeiro erro: %s',
+                count($documentWarnings),
+                $documentWarnings[0],
+            );
         }
 
-        return sprintf(
-            'Falha parcial em %d documento(s). Primeiro erro: %s',
-            count($documentWarnings),
-            $documentWarnings[0],
-        );
+        if ($salesDayWarning !== null) {
+            $messages[] = $salesDayWarning;
+        }
+
+        return $messages === []
+            ? null
+            : implode(' ', $messages);
     }
 
     /**
@@ -435,9 +579,79 @@ class EventReportSyncService
     }
 
     /**
+     * @param  array<string, mixed>  $salesDay
+     * @return array<string, mixed>
+     */
+    private function normalizeSalesDayRecord(ClientZoneSoftMachine $machine, array $salesDay): array
+    {
+        $storeCode = isset($salesDay['loja']) ? (string) $salesDay['loja'] : (string) $machine->store_id;
+        $storeName = $machine->store_label ?: 'Loja '.$storeCode;
+        $openState = $salesDay['Open'] ?? $salesDay['open'] ?? null;
+
+        return [
+            'machine_id' => $machine->id,
+            'machine_client_id' => $machine->zs_client_id,
+            'store_code' => $storeCode,
+            'store_name' => $storeName,
+            'sale_date' => $this->normalizeDate($salesDay['data'] ?? null),
+            'cash_register_code' => isset($salesDay['caixa']) ? (string) $salesDay['caixa'] : null,
+            'is_closed' => is_numeric($openState) ? (int) $openState === 1 : null,
+            'opened_at' => $this->normalizeDateTime($salesDay['dataopen'] ?? null),
+            'closed_at' => $this->normalizeDateTime($salesDay['dataclose'] ?? null),
+            'opened_by' => isset($salesDay['opencx']) ? (string) $salesDay['opencx'] : null,
+            'closed_by' => isset($salesDay['closecx']) ? (string) $salesDay['closecx'] : null,
+            'vd' => $this->normalizeDecimal($salesDay['vd'] ?? null),
+            'tk' => $this->normalizeDecimal($salesDay['tk'] ?? null),
+            'fs' => $this->normalizeDecimal($salesDay['fs'] ?? null),
+            'ft' => $this->normalizeDecimal($salesDay['ft'] ?? null),
+            'nc' => $this->normalizeDecimal($salesDay['nc'] ?? null),
+            'rc' => $this->normalizeDecimal($salesDay['rc'] ?? null),
+            'ad' => $this->normalizeDecimal($salesDay['ad'] ?? null),
+            'enc' => $this->normalizeDecimal($salesDay['enc'] ?? null),
+            'movimento' => $this->normalizeDecimal($salesDay['movimento'] ?? null),
+            'num' => $this->normalizeDecimal($salesDay['num'] ?? null),
+            'deb' => $this->normalizeDecimal($salesDay['deb'] ?? null),
+            'crd' => $this->normalizeDecimal($salesDay['crd'] ?? null),
+            'chq' => $this->normalizeDecimal($salesDay['chq'] ?? null),
+            'cartoes' => $this->normalizeDecimal($salesDay['cartoes'] ?? null),
+            'etk' => $this->normalizeDecimal($salesDay['etk'] ?? null),
+        ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $document
+     * @param  array<string, mixed>  $referenceRow
+     * @return array<string, mixed>
+     */
+    private function normalizePaymentDocument(
+        ClientZoneSoftMachine $machine,
+        array $document,
+        array $referenceRow,
+    ): array {
+        return [
+            'machine_id' => $machine->id,
+            'machine_client_id' => $machine->zs_client_id,
+            'store_code' => (string) ($referenceRow['store_code'] ?? $machine->store_id),
+            'store_name' => (string) ($referenceRow['store_name'] ?? ($machine->store_label ?: 'Loja '.$machine->store_id)),
+            'sale_date' => $this->normalizeDate($document['data'] ?? ($referenceRow['sale_date'] ?? null)),
+            'sale_datetime' => $this->normalizeDateTime($document['datahora'] ?? ($referenceRow['sale_datetime'] ?? null)),
+            'doc_type' => isset($document['doc']) ? (string) $document['doc'] : ($referenceRow['doc_type'] ?? null),
+            'document_series' => isset($document['serie']) ? (string) $document['serie'] : ($referenceRow['document_series'] ?? null),
+            'document_number' => isset($document['numero']) ? (string) $document['numero'] : ($referenceRow['document_number'] ?? null),
+            'payment_code' => isset($document['pagamento']) ? (string) $document['pagamento'] : null,
+            'payment_reference' => isset($document['referencia_pagamento']) ? (string) $document['referencia_pagamento'] : null,
+            'paid' => isset($document['pago']) ? (int) $document['pago'] === 1 : null,
+            'total' => $this->normalizeDecimal($document['total'] ?? null),
+        ];
+    }
+
+    /**
      * @param  list<array<string, mixed>>  $rows
      * @param  list<array{machine_id:int,zs_client_id:string,store_id:int,message:string}>  $failedMachines
      * @param  list<array{machine_id:int,zs_client_id:string,store_id:int,message:string}>  $machineWarnings
+     * @param  list<array<string, mixed>>  $salesDayRecords
+     * @param  list<array{machine_id:int,zs_client_id:string,store_id:int,message:string}>  $salesDayWarnings
+     * @param  list<array<string, mixed>>  $paymentDocuments
      * @return array<string, mixed>
      */
     private function buildSummary(
@@ -445,6 +659,9 @@ class EventReportSyncService
         int $successfulMachinesCount,
         array $failedMachines,
         array $machineWarnings,
+        array $salesDayRecords,
+        array $salesDayWarnings,
+        array $paymentDocuments,
     ): array
     {
         $totals = [
@@ -473,7 +690,24 @@ class EventReportSyncService
             'quantity_total' => number_format($totals['quantity'], 4, '.', ''),
             'failed_machines' => $failedMachines,
             'machine_warnings' => $machineWarnings,
+            'salesday_records' => $salesDayRecords,
+            'salesday_warnings' => $salesDayWarnings,
+            'payment_documents' => $paymentDocuments,
         ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $document
+     */
+    private function buildPaymentDocumentKey(ClientZoneSoftMachine $machine, array $document): string
+    {
+        return implode('|', [
+            $machine->zs_client_id,
+            $document['store_code'] ?? '',
+            $document['doc_type'] ?? '',
+            $document['document_series'] ?? '',
+            $document['document_number'] ?? '',
+        ]);
     }
 
     /**
@@ -513,6 +747,64 @@ class EventReportSyncService
         );
     }
 
+    /**
+     * @return array{start:CarbonImmutable,end:CarbonImmutable}
+     */
+    private function resolveSyncRange(Event $event): array
+    {
+        $start = $event->report_starts_at
+            ? CarbonImmutable::instance($event->report_starts_at)
+            : null;
+        $end = $event->report_ends_at
+            ? CarbonImmutable::instance($event->report_ends_at)
+            : null;
+
+        if ($start === null && $end === null) {
+            $eventDate = CarbonImmutable::instance($event->event_date);
+
+            return [
+                'start' => $eventDate->startOfDay(),
+                'end' => $eventDate->endOfDay(),
+            ];
+        }
+
+        if ($start !== null && $end === null) {
+            $end = $start->endOfDay();
+        }
+
+        if ($start === null && $end !== null) {
+            $start = $end->startOfDay();
+        }
+
+        return [
+            'start' => $start,
+            'end' => $end,
+        ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $row
+     * @param  array{start:CarbonImmutable,end:CarbonImmutable}  $syncRange
+     */
+    private function rowMatchesSyncRange(array $row, array $syncRange): bool
+    {
+        $saleDateTime = $this->parseCarbon($row['sale_datetime'] ?? null);
+
+        if ($saleDateTime !== null) {
+            return ! $saleDateTime->lt($syncRange['start'])
+                && ! $saleDateTime->gt($syncRange['end']);
+        }
+
+        $saleDate = $this->parseCarbon($row['sale_date'] ?? null);
+
+        if ($saleDate === null) {
+            return true;
+        }
+
+        return ! $saleDate->startOfDay()->lt($syncRange['start']->startOfDay())
+            && ! $saleDate->endOfDay()->gt($syncRange['end']->endOfDay());
+    }
+
     private function normalizeDate(mixed $value): ?string
     {
         if (! is_string($value) || trim($value) === '') {
@@ -520,7 +812,7 @@ class EventReportSyncService
         }
 
         try {
-            return \Carbon\CarbonImmutable::parse($value)->toDateString();
+            return CarbonImmutable::parse($value)->toDateString();
         } catch (\Throwable) {
             return null;
         }
@@ -533,7 +825,7 @@ class EventReportSyncService
         }
 
         try {
-            return \Carbon\CarbonImmutable::parse($value)->format('Y-m-d H:i:s');
+            return CarbonImmutable::parse($value)->format('Y-m-d H:i:s');
         } catch (\Throwable) {
             return null;
         }
@@ -569,5 +861,18 @@ class EventReportSyncService
         }
 
         return number_format((float) $value, 4, '.', '');
+    }
+
+    private function parseCarbon(mixed $value): ?CarbonImmutable
+    {
+        if (! is_string($value) || trim($value) === '') {
+            return null;
+        }
+
+        try {
+            return CarbonImmutable::parse($value);
+        } catch (\Throwable) {
+            return null;
+        }
     }
 }
