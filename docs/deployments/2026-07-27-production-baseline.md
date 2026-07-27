@@ -3,8 +3,9 @@
 **Data:** 27 de julho de 2026
 **Ambiente:** produção
 **Branch candidata:** `codex/release-production-baseline`
-**Commit da release:** definido após integração
-**Estado:** em validação
+**Commit da release:** `82d5d58f9e4a9ef1831cc036e99c47944bbf7188`
+**Tag:** `production-2026-07-27.1`
+**Estado:** implantada e validada
 
 ## Objetivo
 
@@ -101,23 +102,52 @@ Se qualquer validação crítica falhar:
 
 ## Evidências Pós-Deploy
 
-Preencher após o cutover:
-
 ```text
-Commit:
-Tag:
-Pull request:
-Diretório da release:
-Diretório de rollback:
-Backup da base:
-Checksum da base:
-Início:
-Fim:
-Indisponibilidade:
-Migration:
-Healthcheck:
-Login:
-Dashboard:
-Scheduler:
-Resultado:
+Commit: 82d5d58f9e4a9ef1831cc036e99c47944bbf7188
+Tag: production-2026-07-27.1
+Pull request: https://github.com/Valtersystem/contacto_digital/pull/1
+Diretório da release: /srv/projects/contacto-digital/releases/82d5d58f9e4a9ef1831cc036e99c47944bbf7188
+Diretório de rollback: /srv/projects/contacto-digital/releases/pre-20260727-194950-cc9b9c8
+Backup: /srv/backups/contacto-digital/deploy-20260727-194950
+Checksum da base: f23141bf9b091419b15130ad426c22c6c5e5c1e9ddbdeb941985d8bd9d0e7d59
+Início: 2026-07-27T19:53:03+02:00
+Fim: 2026-07-27T19:53:23+02:00
+Janela de cutover: 20 segundos
+Indisponibilidade: não medida separadamente da janela de cutover
+Migration: Nothing to migrate
+Healthcheck: /up = 200 em 0,146 s
+Login: /login = 200 em 0,125 s
+Raiz: / = 302 para /login
+PWA: /build/sw.js = 200
+Dashboard: rota protegida; validação visual autenticada não executada por falta de sessão
+Scheduler: cron ativo; ciclos 19:54 e 19:55 concluídos; dry-run sem evento devido
+Resultado: aprovado, rollback não acionado
 ```
+
+## Integridade Pós-Deploy
+
+- SQLite: `PRAGMA integrity_check` retornou `ok`;
+- utilizadores: 4 antes e 4 depois;
+- clientes: 2 antes e 2 depois;
+- eventos: 2 antes e 2 depois;
+- importações: 83 antes e 83 depois;
+- linhas de relatório: 8.128 antes e 8.128 depois;
+- importações concluídas: 78 antes e 78 depois;
+- importações falhadas históricas: 5 antes e 5 depois;
+- importações em processamento no cutover: 0;
+- manifesto Vite: `f163b7406575f953e300440f2b72f30d45d0539760bd9bac4313ac14bc40f049`;
+- imagem PHP: `sha256:1ca58885e8a3d944fbecaffb3f1ab066eaae5059d106faa134b7805855b96a16`;
+- requisitos PHP, incluindo `gd`, `intl`, SQLite e `zip`: aprovados;
+- assets JS e CSS referenciados pelo manifesto: HTTP 200;
+- logs PHP-FPM e Nginx após o cutover: sem erros.
+
+## Observações Operacionais
+
+- o disparador está em `/etc/cron.d/contacto-digital-scheduler`;
+- o serviço `cron` está ativo e executa `schedule:run` a cada minuto;
+- `events:sync-due-reports --dry-run` confirmou que não havia evento devido;
+- os containers continuam sem healthcheck Docker e com política de restart
+  indefinida; esta melhoria permanece fora desta baseline;
+- o servidor continua com atualizações pendentes e pedido de reinício. A
+  manutenção deve ser feita numa janela separada, com validação dos demais
+  serviços hospedados.
