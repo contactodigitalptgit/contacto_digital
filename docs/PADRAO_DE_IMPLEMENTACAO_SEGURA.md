@@ -437,6 +437,7 @@ vendor/bin/pint --test
 php artisan test
 npm audit
 npm run build
+scripts/security/check-repository.sh
 git diff --check
 ```
 

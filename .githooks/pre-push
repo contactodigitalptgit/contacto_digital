@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+zero_sha='0000000000000000000000000000000000000000'
+
+while read -r local_ref local_sha remote_ref remote_sha; do
+    if [[ "$remote_ref" != "refs/heads/main" ]]; then
+        continue
+    fi
+
+    if [[ "$local_sha" == "$zero_sha" ]]; then
+        printf 'Erro: a exclusão da branch main está bloqueada.\n' >&2
+        exit 1
+    fi
+
+    if [[ "$remote_sha" != "$zero_sha" ]] \
+        && ! git merge-base --is-ancestor "$remote_sha" "$local_sha"; then
+        printf 'Erro: force-push para a branch main está bloqueado.\n' >&2
+        exit 1
+    fi
+done
+
+"$(git rev-parse --show-toplevel)/scripts/security/check-repository.sh"
