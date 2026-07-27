@@ -25,7 +25,12 @@ tracked_forbidden="$(
     } | sed '/^$/d' | sort -u
 )"
 
-history_paths="$(git rev-list --objects --all | cut -d' ' -f2-)"
+history_refs="$(git for-each-ref --format='%(refname)' refs/heads refs/remotes)"
+history_paths="$(
+    printf '%s\n' "$history_refs" \
+        | git rev-list --objects --stdin \
+        | cut -d' ' -f2-
+)"
 history_forbidden="$(
     {
         printf '%s\n' "$history_paths" | find_forbidden_paths
