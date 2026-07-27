@@ -83,7 +83,7 @@ Essa linha de base deve ser atualizada após cada fase.
 ### CR-001 - Proteger e sanear o repositório
 
 **Prioridade:** P0
-**Estado:** Em execução
+**Estado:** Concluído
 
 Progresso em 27 de julho de 2026:
 
@@ -99,9 +99,23 @@ Progresso em 27 de julho de 2026:
 - [x] limpeza do histórico ensaiada num clone isolado;
 - [x] ensaio validado com zero caminhos de base, `git fsck` aprovado e zero
   achados no Gitleaks;
-- [ ] publicar o histórico saneado;
-- [ ] validar um clone novo do histórico remoto;
-- [ ] ativar proteção de branch e análise contínua de segredos.
+- [x] histórico saneado publicado na `main`;
+- [x] clone novo validado com zero caminhos e zero objetos das bases removidas;
+- [x] Gitleaks validado com zero achados nos 20 commits publicáveis;
+- [x] workflow de segurança ativado para push e pull request;
+- [x] execução GitHub Actions `30274298861` concluída com sucesso;
+- [x] hook local instalado para rejeitar exclusão ou force-push da `main`;
+- [x] `main` local e remota alinhadas no commit `52c666b`;
+- [x] proteção nativa de branch e Secret Scanning solicitados ao GitHub.
+
+Risco residual aceito temporariamente:
+
+- o GitHub recusou branch protection e Secret Scanning para este repositório privado
+  no plano atual;
+- o hook local e o CI são as mitigações ativas, mas não substituem completamente
+  uma regra aplicada pelo servidor;
+- o upgrade do plano GitHub e a ativação dessas proteções devem ser concluídos no
+  CR-301 antes de adicionar outros programadores ao repositório.
 
 Ações:
 
