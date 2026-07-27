@@ -84,6 +84,7 @@ class AdminManagementTest extends TestCase
                 'title' => 'Evento de Teste',
                 'description' => 'Descricao',
                 'event_date' => now()->addDay()->toDateTimeString(),
+                'report_ends_at' => now()->addDays(2)->toDateTimeString(),
             ]);
 
         $response->assertRedirect(route('admin.events.index'));

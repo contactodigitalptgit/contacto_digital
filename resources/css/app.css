@@ -317,7 +317,7 @@
     }
 
     .app-nav {
-        @apply flex-1 space-y-2 px-4 py-6;
+        @apply flex-1 space-y-2 overflow-y-auto px-4 py-6;
     }
 
     .app-nav-link {
@@ -343,6 +343,114 @@
 
     .app-nav-link.is-active .app-nav-icon {
         background: rgba(255, 255, 255, 0.24);
+    }
+
+    .app-report-navigation {
+        @apply mt-5 border-t pt-5;
+        border-color: rgba(166, 188, 224, 0.2);
+    }
+
+    .app-report-navigation-header {
+        @apply px-3;
+    }
+
+    .app-report-navigation-header span,
+    .app-report-navigation-header strong {
+        @apply block;
+    }
+
+    .app-report-navigation-header span {
+        @apply text-[10px] font-bold uppercase tracking-[0.2em];
+        color: rgba(93, 181, 255, 0.9);
+    }
+
+    .app-report-navigation-header strong {
+        @apply mt-1 truncate text-xs font-semibold;
+        color: rgba(219, 231, 250, 0.76);
+    }
+
+    .app-report-navigation-list {
+        @apply mt-3 grid gap-1;
+    }
+
+    .app-report-navigation-item {
+        @apply flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition;
+        color: rgba(203, 217, 240, 0.78);
+    }
+
+    .app-report-navigation-item:hover {
+        color: #ffffff;
+        background: rgba(255, 255, 255, 0.07);
+    }
+
+    .app-report-navigation-item.is-active {
+        color: #ffffff;
+        background: linear-gradient(135deg, rgba(39, 139, 247, 0.96), rgba(31, 101, 219, 0.96));
+        box-shadow: 0 14px 24px -18px rgba(35, 145, 255, 0.95);
+    }
+
+    .app-report-navigation-number {
+        @apply text-[10px] font-bold;
+        color: #45b2ff;
+    }
+
+    .app-report-navigation-item.is-active .app-report-navigation-number {
+        color: rgba(191, 229, 255, 0.74);
+    }
+
+    .app-report-navigation-item > span:last-child,
+    .app-report-navigation-item strong,
+    .app-report-navigation-item small {
+        @apply block min-w-0;
+    }
+
+    .app-report-navigation-item strong {
+        @apply text-sm;
+    }
+
+    .app-report-navigation-item small {
+        @apply mt-0.5 text-[10px];
+        color: rgba(177, 195, 222, 0.68);
+    }
+
+    .app-report-navigation-item.is-active small {
+        color: rgba(226, 240, 255, 0.76);
+    }
+
+    .app-report-navigation-status {
+        @apply mt-4 flex items-center gap-2 rounded-xl px-3 py-2.5 text-[11px];
+        color: rgba(184, 204, 232, 0.72);
+        background: rgba(7, 26, 45, 0.48);
+    }
+
+    .app-report-navigation-status > span {
+        @apply h-2 w-2 rounded-full;
+        background: #22c55e;
+        box-shadow: 0 0 0 4px rgba(34, 197, 94, 0.12);
+    }
+
+    .app-report-navigation-status > span.is-syncing {
+        background: #38bdf8;
+        animation: report-dashboard-pulse 1.4s ease-in-out infinite;
+    }
+
+    .app-report-navigation-status > div {
+        @apply min-w-0;
+    }
+
+    .app-report-navigation-status strong,
+    .app-report-navigation-status small {
+        @apply block;
+    }
+
+    .app-report-navigation-status strong {
+        @apply text-[11px] font-semibold;
+        color: rgba(218, 232, 250, 0.88);
+    }
+
+    .app-report-navigation-status small {
+        @apply mt-0.5 text-[10px] tabular-nums;
+        color: rgba(139, 188, 244, 0.78);
     }
 
     .app-user-panel {
@@ -1397,6 +1505,11 @@
         color: var(--accent-strong);
     }
 
+    .status-pill.warning {
+        background: rgba(245, 158, 11, 0.14);
+        color: #fbbf24;
+    }
+
     .dash-action-button {
         @apply mt-3 inline-flex rounded-xl px-4 py-2 text-sm font-semibold text-white transition;
         background: linear-gradient(135deg, var(--accent), var(--accent-strong));
@@ -2237,6 +2350,672 @@
         @apply rounded-2xl px-5 py-12 text-center text-sm;
     }
 
+    .report-dashboard-shell {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr);
+        gap: 1.25rem;
+        align-items: start;
+    }
+
+    .report-dashboard-navigation {
+        @apply sticky top-4 overflow-hidden rounded-[1.75rem] border p-3;
+        border-color: color-mix(in srgb, var(--accent) 22%, var(--line-color));
+        background:
+            radial-gradient(circle at 12% 8%, color-mix(in srgb, var(--accent) 18%, transparent), transparent 32%),
+            color-mix(in srgb, var(--card-bg) 96%, var(--accent-strong) 4%);
+        box-shadow: 0 24px 50px -38px color-mix(in srgb, var(--accent-strong) 55%, transparent);
+    }
+
+    .report-dashboard-navigation-brand {
+        @apply px-3 pb-4 pt-2;
+        border-bottom: 1px solid color-mix(in srgb, var(--accent) 16%, var(--line-color));
+    }
+
+    .report-dashboard-navigation-brand span,
+    .report-dashboard-navigation-brand strong {
+        @apply block uppercase;
+    }
+
+    .report-dashboard-navigation-brand span {
+        @apply text-[10px] font-semibold tracking-[0.22em];
+        color: var(--text-muted);
+    }
+
+    .report-dashboard-navigation-brand strong {
+        @apply mt-1 text-base tracking-[0.08em];
+        color: var(--text-main);
+    }
+
+    .report-dashboard-navigation-list {
+        @apply grid gap-2 py-4;
+    }
+
+    .report-dashboard-navigation-item {
+        @apply flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left transition;
+        color: var(--text-soft);
+    }
+
+    .report-dashboard-navigation-item:hover {
+        color: var(--text-main);
+        background: color-mix(in srgb, var(--accent) 8%, transparent);
+    }
+
+    .report-dashboard-navigation-item.is-active {
+        color: #ffffff;
+        background:
+            linear-gradient(135deg, color-mix(in srgb, var(--accent) 26%, transparent), transparent 55%),
+            var(--accent-strong);
+        box-shadow: 0 16px 28px -20px color-mix(in srgb, var(--accent-strong) 88%, transparent);
+    }
+
+    .report-dashboard-navigation-number {
+        @apply text-[10px] font-bold;
+        color: var(--accent);
+    }
+
+    .report-dashboard-navigation-item > span:last-child {
+        @apply min-w-0;
+    }
+
+    .report-dashboard-navigation-item strong,
+    .report-dashboard-navigation-item small {
+        @apply block;
+    }
+
+    .report-dashboard-navigation-item strong {
+        @apply text-sm;
+    }
+
+    .report-dashboard-navigation-item small {
+        @apply mt-0.5 text-[10px];
+        color: color-mix(in srgb, currentColor 70%, transparent);
+    }
+
+    .report-dashboard-navigation-status {
+        @apply flex items-center gap-2 rounded-2xl px-3 py-3 text-xs;
+        color: var(--text-muted);
+        background: color-mix(in srgb, var(--table-row-bg) 88%, var(--card-bg) 12%);
+    }
+
+    .report-dashboard-navigation-status > span {
+        @apply h-2 w-2 rounded-full;
+        background: #22c55e;
+        box-shadow: 0 0 0 4px color-mix(in srgb, #22c55e 14%, transparent);
+    }
+
+    .report-dashboard-navigation-status > span.is-syncing {
+        background: var(--accent);
+        animation: report-dashboard-pulse 1.4s ease-in-out infinite;
+    }
+
+    .report-dashboard-navigation-status > div {
+        @apply min-w-0;
+    }
+
+    .report-dashboard-navigation-status strong,
+    .report-dashboard-navigation-status small {
+        @apply block;
+    }
+
+    .report-dashboard-navigation-status strong {
+        @apply text-xs font-semibold;
+        color: var(--text-soft);
+    }
+
+    .report-dashboard-navigation-status small {
+        @apply mt-0.5 text-[10px] tabular-nums;
+        color: var(--accent-strong);
+    }
+
+    .report-dashboard-content {
+        @apply min-w-0 space-y-5;
+    }
+
+    .report-dashboard-commandbar {
+        @apply flex items-center justify-between gap-4 rounded-[1.5rem] border px-5 py-4;
+        border-color: var(--line-color);
+        background: color-mix(in srgb, var(--card-bg) 94%, transparent);
+        backdrop-filter: blur(16px);
+    }
+
+    .report-dashboard-commandbar > div > span,
+    .report-dashboard-commandbar > div > strong,
+    .report-dashboard-commandbar > div > small {
+        @apply block;
+    }
+
+    .report-dashboard-commandbar-kicker {
+        @apply text-[9px] font-bold uppercase tracking-[0.18em];
+        color: var(--accent-strong);
+    }
+
+    .report-dashboard-commandbar > div > strong {
+        @apply mt-1 text-sm;
+        color: var(--text-main);
+    }
+
+    .report-dashboard-commandbar > div > small {
+        @apply mt-0.5 text-xs;
+        color: var(--text-muted);
+    }
+
+    .report-dashboard-commandbar-actions {
+        @apply flex items-center gap-3;
+    }
+
+    .report-dashboard-sync-countdown {
+        @apply min-w-36 rounded-xl border px-3 py-2 text-right;
+        border-color: color-mix(in srgb, var(--accent) 24%, var(--line-color));
+        background: color-mix(in srgb, var(--accent) 7%, var(--card-bg) 93%);
+    }
+
+    .report-dashboard-sync-countdown span,
+    .report-dashboard-sync-countdown strong {
+        @apply block;
+    }
+
+    .report-dashboard-sync-countdown span {
+        @apply text-[8px] font-bold uppercase tracking-[0.14em];
+        color: var(--text-muted);
+    }
+
+    .report-dashboard-sync-countdown strong {
+        @apply mt-0.5 text-sm font-bold tabular-nums;
+        color: var(--accent-strong);
+    }
+
+    .report-dashboard-filter-button {
+        @apply inline-flex items-center justify-center gap-2 rounded-xl border px-4 py-2.5 text-xs font-bold transition;
+        border-color: var(--line-color);
+        color: var(--text-main);
+        background: var(--card-bg);
+    }
+
+    .report-dashboard-filter-button:hover,
+    .report-dashboard-filter-button.is-active {
+        border-color: color-mix(in srgb, var(--accent) 55%, var(--line-color));
+        background: color-mix(in srgb, var(--accent) 10%, var(--card-bg) 90%);
+    }
+
+    .report-dashboard-filter-button span {
+        @apply inline-flex h-5 min-w-5 items-center justify-center rounded-full px-1 text-[10px];
+        color: #ffffff;
+        background: var(--accent-strong);
+    }
+
+    .report-dashboard-filter-panel {
+        @apply rounded-[1.5rem] border p-5;
+        border-color: color-mix(in srgb, var(--accent) 24%, var(--line-color));
+        background: color-mix(in srgb, var(--card-bg) 97%, var(--accent) 3%);
+        box-shadow: 0 24px 50px -40px color-mix(in srgb, var(--accent-strong) 60%, transparent);
+    }
+
+    .report-dashboard-filter-panel-header,
+    .report-dashboard-filter-actions {
+        @apply flex items-center justify-between gap-4;
+    }
+
+    .report-dashboard-filter-panel-header strong,
+    .report-dashboard-filter-panel-header span {
+        @apply block;
+    }
+
+    .report-dashboard-filter-panel-header strong {
+        @apply text-sm;
+        color: var(--text-main);
+    }
+
+    .report-dashboard-filter-panel-header span {
+        @apply mt-1 text-xs;
+        color: var(--text-muted);
+    }
+
+    .report-dashboard-filter-panel-header > button {
+        @apply inline-flex h-9 w-9 items-center justify-center rounded-full text-xl;
+        color: var(--text-muted);
+        background: color-mix(in srgb, var(--line-color) 55%, transparent);
+    }
+
+    .report-dashboard-filter-grid {
+        @apply mt-5 grid gap-4;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .report-dashboard-filter-grid label {
+        @apply min-w-0;
+    }
+
+    .report-dashboard-filter-grid .dash-input {
+        @apply block w-full min-w-0 rounded-xl border px-3 py-2.5 text-sm;
+        border-color: var(--card-border);
+        background: var(--input-bg);
+        color: var(--input-text);
+    }
+
+    .report-dashboard-filter-grid .dash-input:focus {
+        outline: 2px solid color-mix(in srgb, var(--accent) 42%, transparent);
+        outline-offset: 1px;
+        border-color: var(--accent);
+    }
+
+    .report-dashboard-filter-grid label > span {
+        @apply mb-1.5 block text-[10px] font-bold uppercase tracking-[0.09em];
+        color: var(--text-muted);
+    }
+
+    .report-dashboard-filter-actions {
+        @apply mt-5 justify-end;
+    }
+
+    .report-dashboard-view {
+        @apply space-y-6;
+        animation: report-dashboard-reveal 260ms ease-out both;
+    }
+
+    .report-dashboard-view-header {
+        @apply flex items-end justify-between gap-5 border-b pb-4;
+        border-color: var(--line-color);
+    }
+
+    .report-dashboard-view-header span,
+    .report-dashboard-section-heading span {
+        @apply text-[10px] font-bold uppercase tracking-[0.18em];
+        color: var(--accent-strong);
+    }
+
+    .report-dashboard-view-header h3,
+    .report-dashboard-section-heading h3 {
+        @apply mt-1 text-xl font-extrabold;
+        color: var(--text-main);
+    }
+
+    .report-dashboard-view-header p {
+        @apply mt-1 max-w-2xl text-sm leading-6;
+        color: var(--text-muted);
+    }
+
+    .report-dashboard-overview-hero {
+        @apply relative grid overflow-hidden rounded-[1.75rem] border px-7 py-7;
+        grid-template-columns: minmax(0, 1.4fr) minmax(14rem, 0.6fr);
+        gap: 2rem;
+        border-color: color-mix(in srgb, var(--accent) 34%, var(--accent-strong));
+        color: #ffffff;
+        background:
+            radial-gradient(circle at 88% 16%, color-mix(in srgb, var(--accent) 28%, transparent), transparent 28%),
+            linear-gradient(135deg, color-mix(in srgb, var(--accent-strong) 96%, #000000 4%), color-mix(in srgb, var(--accent-strong) 78%, #10253d 22%));
+        box-shadow: 0 28px 60px -40px color-mix(in srgb, var(--accent-strong) 90%, transparent);
+    }
+
+    .report-dashboard-overview-copy > span,
+    .report-dashboard-overview-copy > strong {
+        @apply block;
+    }
+
+    .report-dashboard-overview-copy > span {
+        @apply text-xs font-bold uppercase tracking-[0.16em];
+        color: color-mix(in srgb, #ffffff 72%, var(--accent) 28%);
+    }
+
+    .report-dashboard-overview-copy > strong {
+        @apply mt-3 text-4xl font-black tracking-tight;
+    }
+
+    .report-dashboard-day-list {
+        @apply mt-5 flex flex-wrap gap-2;
+    }
+
+    .report-dashboard-day-list > span {
+        @apply rounded-full border px-3 py-1.5 text-[11px];
+        border-color: color-mix(in srgb, #ffffff 20%, transparent);
+        color: color-mix(in srgb, #ffffff 75%, transparent);
+        background: color-mix(in srgb, #ffffff 8%, transparent);
+    }
+
+    .report-dashboard-day-list strong {
+        @apply ml-1 text-white;
+    }
+
+    .report-dashboard-overview-meta {
+        @apply self-end rounded-2xl border p-4;
+        border-color: color-mix(in srgb, #ffffff 16%, transparent);
+        background: color-mix(in srgb, #ffffff 8%, transparent);
+    }
+
+    .report-dashboard-overview-meta span,
+    .report-dashboard-overview-meta strong,
+    .report-dashboard-overview-meta small {
+        @apply block;
+    }
+
+    .report-dashboard-overview-meta span {
+        @apply text-[10px] uppercase tracking-[0.12em];
+        color: color-mix(in srgb, #ffffff 65%, transparent);
+    }
+
+    .report-dashboard-overview-meta strong {
+        @apply mt-2 text-sm;
+    }
+
+    .report-dashboard-overview-meta small {
+        @apply mt-1 text-[11px];
+        color: color-mix(in srgb, #ffffff 62%, transparent);
+    }
+
+    .report-dashboard-metric-card,
+    .report-dashboard-movement-card,
+    .report-dashboard-summary-card {
+        @apply rounded-2xl border px-5 py-5 text-left;
+        border-color: var(--line-color);
+        background: var(--card-bg);
+    }
+
+    .report-dashboard-movement-card.is-total {
+        border-color: color-mix(in srgb, var(--accent) 55%, var(--line-color));
+        background:
+            linear-gradient(135deg, color-mix(in srgb, var(--accent) 18%, transparent), transparent 72%),
+            var(--card-bg);
+    }
+
+    .report-dashboard-metric-card.is-featured {
+        border-color: color-mix(in srgb, var(--accent) 42%, var(--line-color));
+        background:
+            linear-gradient(135deg, color-mix(in srgb, var(--accent) 14%, transparent), transparent 70%),
+            var(--card-bg);
+    }
+
+    .report-dashboard-metric-card > span,
+    .report-dashboard-metric-card > strong,
+    .report-dashboard-metric-card > small,
+    .report-dashboard-movement-card > span,
+    .report-dashboard-movement-card > strong,
+    .report-dashboard-movement-card > small,
+    .report-dashboard-summary-card > span,
+    .report-dashboard-summary-card > strong,
+    .report-dashboard-summary-card > small {
+        @apply block;
+    }
+
+    .report-dashboard-metric-card > span,
+    .report-dashboard-movement-card > span,
+    .report-dashboard-summary-card > span {
+        @apply text-[10px] font-bold uppercase tracking-[0.09em];
+        color: var(--text-muted);
+    }
+
+    .report-dashboard-metric-card > strong,
+    .report-dashboard-movement-card > strong {
+        @apply mt-3 text-2xl font-extrabold;
+        color: var(--text-main);
+    }
+
+    .report-dashboard-summary-card > strong {
+        @apply mt-2 text-xl font-extrabold;
+        color: var(--text-main);
+    }
+
+    .report-dashboard-metric-card > small,
+    .report-dashboard-movement-card > small,
+    .report-dashboard-summary-card > small {
+        @apply mt-2 text-[11px];
+        color: var(--text-muted);
+    }
+
+    .report-dashboard-section-heading {
+        @apply mb-4;
+    }
+
+    .report-dashboard-topup {
+        @apply rounded-[1.75rem] border p-6;
+        border-color: color-mix(in srgb, var(--accent) 38%, var(--line-color));
+        background:
+            radial-gradient(circle at 80% 0%, color-mix(in srgb, var(--accent) 18%, transparent), transparent 32%),
+            color-mix(in srgb, var(--card-bg) 92%, var(--accent) 8%);
+    }
+
+    .report-dashboard-topup-flow {
+        @apply grid gap-3;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .report-dashboard-topup-flow article {
+        @apply flex items-start gap-3 rounded-2xl border p-4;
+        border-color: color-mix(in srgb, var(--accent) 20%, var(--line-color));
+        background: color-mix(in srgb, var(--card-bg) 78%, transparent);
+    }
+
+    .report-dashboard-topup-flow article > span {
+        @apply inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[10px] font-black;
+        color: var(--accent-strong);
+        background: color-mix(in srgb, var(--accent) 26%, transparent);
+    }
+
+    .report-dashboard-topup-flow small,
+    .report-dashboard-topup-flow strong,
+    .report-dashboard-topup-flow p {
+        @apply block;
+    }
+
+    .report-dashboard-topup-flow small {
+        @apply text-[10px] font-bold uppercase tracking-[0.08em];
+        color: var(--text-muted);
+    }
+
+    .report-dashboard-topup-flow strong {
+        @apply mt-2 text-xl;
+        color: var(--text-main);
+    }
+
+    .report-dashboard-topup-flow p {
+        @apply mt-1 text-[11px];
+        color: var(--text-muted);
+    }
+
+    .report-dashboard-segmented {
+        @apply flex flex-wrap gap-1 rounded-xl p-1;
+        background: color-mix(in srgb, var(--line-color) 52%, transparent);
+    }
+
+    .report-dashboard-segmented button {
+        @apply rounded-lg px-3 py-2 text-xs font-bold transition;
+        color: var(--text-muted);
+    }
+
+    .report-dashboard-segmented button.is-active {
+        color: #ffffff;
+        background: var(--accent-strong);
+    }
+
+    .report-dashboard-products-panel {
+        @apply p-6;
+    }
+
+    .report-dashboard-product-row > div {
+        @apply min-w-0 flex-1;
+    }
+
+    .report-dashboard-product-row small {
+        @apply mt-1 block text-[10px];
+        color: var(--text-muted);
+    }
+
+    .report-dashboard-table-shell {
+        @apply overflow-x-auto;
+    }
+
+    .report-dashboard-table {
+        @apply min-w-full;
+    }
+
+    .report-dashboard-table thead th {
+        @apply whitespace-nowrap;
+    }
+
+    .report-dashboard-reconciliation-table {
+        min-width: 68rem;
+    }
+
+    .report-dashboard-reconciliation-table td:first-child strong,
+    .report-dashboard-reconciliation-table td:first-child small {
+        @apply block;
+    }
+
+    .report-dashboard-reconciliation-table td:first-child small {
+        @apply mt-1 max-w-[15rem] truncate text-[10px];
+        color: var(--text-muted);
+    }
+
+    .report-dashboard-difference {
+        color: var(--text-main);
+    }
+
+    .report-dashboard-difference-pill {
+        @apply inline-flex whitespace-nowrap rounded-full px-2 py-1 text-[10px] font-bold;
+    }
+
+    .is-positive.report-dashboard-difference-pill {
+        color: #166534;
+        background: #dcfce7;
+    }
+
+    .is-negative.report-dashboard-difference-pill {
+        color: #991b1b;
+        background: #fee2e2;
+    }
+
+    .is-neutral.report-dashboard-difference-pill {
+        color: var(--text-muted);
+        background: color-mix(in srgb, var(--line-color) 58%, transparent);
+    }
+
+    .is-positive.report-dashboard-difference,
+    .report-dashboard-comparison-hero strong.is-positive,
+    .report-dashboard-comparison-grid em.is-positive {
+        color: #16a34a;
+    }
+
+    .is-negative.report-dashboard-difference,
+    .report-dashboard-comparison-hero strong.is-negative,
+    .report-dashboard-comparison-grid em.is-negative {
+        color: #dc2626;
+    }
+
+    .report-dashboard-comparison-hero {
+        @apply grid gap-6 rounded-[1.75rem] border p-6;
+        grid-template-columns: minmax(10rem, 0.35fr) minmax(0, 1fr);
+        border-color: color-mix(in srgb, var(--accent) 26%, var(--line-color));
+        background:
+            radial-gradient(circle at 10% 20%, color-mix(in srgb, var(--accent) 16%, transparent), transparent 30%),
+            var(--card-bg);
+    }
+
+    .report-dashboard-comparison-hero > div:first-child span,
+    .report-dashboard-comparison-hero > div:first-child strong,
+    .report-dashboard-comparison-hero > div:first-child small {
+        @apply block;
+    }
+
+    .report-dashboard-comparison-hero > div:first-child span {
+        @apply text-[10px] font-bold uppercase tracking-[0.12em];
+        color: var(--text-muted);
+    }
+
+    .report-dashboard-comparison-hero > div:first-child strong {
+        @apply mt-3 text-3xl font-black;
+        color: var(--text-main);
+    }
+
+    .report-dashboard-comparison-hero > div:first-child small {
+        @apply mt-1 text-[11px];
+        color: var(--text-muted);
+    }
+
+    .report-dashboard-comparison-bars {
+        @apply grid content-center gap-4;
+    }
+
+    .report-dashboard-comparison-bars article {
+        @apply grid gap-2;
+        grid-template-columns: minmax(0, 1fr) auto;
+    }
+
+    .report-dashboard-comparison-bars span {
+        @apply truncate text-xs;
+        color: var(--text-soft);
+    }
+
+    .report-dashboard-comparison-bars strong {
+        @apply text-xs;
+        color: var(--text-main);
+    }
+
+    .report-dashboard-comparison-bars i {
+        @apply col-span-2 block h-2 rounded-full;
+        background: color-mix(in srgb, var(--text-soft) 62%, transparent);
+    }
+
+    .report-dashboard-comparison-bars article.is-current i {
+        background: linear-gradient(90deg, var(--accent), var(--accent-strong));
+    }
+
+    .report-dashboard-comparison-grid {
+        @apply grid gap-3;
+        grid-template-columns: repeat(5, minmax(0, 1fr));
+    }
+
+    .report-dashboard-comparison-grid article {
+        @apply rounded-2xl border p-4;
+        border-color: var(--line-color);
+        background: var(--card-bg);
+    }
+
+    .report-dashboard-comparison-grid article > span {
+        @apply text-[10px] font-bold uppercase tracking-[0.08em];
+        color: var(--text-muted);
+    }
+
+    .report-dashboard-comparison-grid article div {
+        @apply mt-3;
+    }
+
+    .report-dashboard-comparison-grid small,
+    .report-dashboard-comparison-grid strong,
+    .report-dashboard-comparison-grid em {
+        @apply block;
+    }
+
+    .report-dashboard-comparison-grid small {
+        @apply text-xs line-through opacity-60;
+        color: var(--text-soft);
+    }
+
+    .report-dashboard-comparison-grid strong {
+        @apply mt-1 text-base;
+        color: var(--text-main);
+    }
+
+    .report-dashboard-comparison-grid em {
+        @apply mt-3 text-[10px] font-bold not-italic;
+        color: var(--text-muted);
+    }
+
+    @keyframes report-dashboard-reveal {
+        from {
+            opacity: 0;
+            transform: translateY(8px);
+        }
+        to {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    }
+
+    @keyframes report-dashboard-pulse {
+        50% {
+            opacity: 0.45;
+            transform: scale(0.8);
+        }
+    }
+
     @media (max-width: 1023px) {
         .app-header-actions {
             @apply hidden;
@@ -2286,6 +3065,35 @@
 
         .report-dashboard-zone-grid {
             grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .report-dashboard-shell {
+            grid-template-columns: 1fr;
+        }
+
+        .report-dashboard-navigation {
+            @apply static overflow-x-auto p-2;
+        }
+
+        .report-dashboard-navigation-brand,
+        .report-dashboard-navigation-status {
+            @apply hidden;
+        }
+
+        .report-dashboard-navigation-list {
+            @apply flex min-w-max gap-2 py-0;
+        }
+
+        .report-dashboard-navigation-item {
+            min-width: 9.5rem;
+        }
+
+        .report-dashboard-filter-grid {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .report-dashboard-comparison-grid {
+            grid-template-columns: repeat(3, minmax(0, 1fr));
         }
     }
 
@@ -2393,6 +3201,56 @@
         .report-dashboard-zone-row,
         .report-dashboard-zone-footer {
             @apply flex-col items-start;
+        }
+
+        .report-dashboard-commandbar,
+        .report-dashboard-view-header,
+        .report-dashboard-filter-panel-header,
+        .report-dashboard-filter-actions {
+            @apply items-stretch;
+        }
+
+        .report-dashboard-commandbar,
+        .report-dashboard-view-header {
+            @apply flex-col;
+        }
+
+        .report-dashboard-commandbar-actions {
+            @apply w-full flex-col items-stretch;
+        }
+
+        .report-dashboard-sync-countdown {
+            @apply w-full text-left;
+        }
+
+        .report-dashboard-filter-panel-header,
+        .report-dashboard-filter-actions {
+            @apply flex-wrap;
+        }
+
+        .report-dashboard-filter-button,
+        .report-dashboard-filter-actions > * {
+            @apply w-full;
+        }
+
+        .report-dashboard-filter-grid,
+        .report-dashboard-overview-hero,
+        .report-dashboard-topup-flow,
+        .report-dashboard-comparison-hero,
+        .report-dashboard-comparison-grid {
+            grid-template-columns: 1fr;
+        }
+
+        .report-dashboard-overview-copy > strong {
+            @apply text-3xl;
+        }
+
+        .report-dashboard-view-header .report-dashboard-segmented {
+            @apply w-full;
+        }
+
+        .report-dashboard-segmented button {
+            @apply flex-1;
         }
     }
 }

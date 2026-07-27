@@ -21,6 +21,8 @@ const form = useForm({
     title: '',
     description: '',
     event_date: '',
+    report_starts_at: '',
+    report_ends_at: '',
 });
 
 const submit = () => {
@@ -109,6 +111,35 @@ const submit = () => {
                             <InputError
                                 class="mt-2"
                                 :message="form.errors.event_date"
+                            />
+                        </div>
+
+                        <div>
+                            <InputLabel for="report_starts_at" value="Início do relatório (opcional)" />
+                            <TextInput
+                                id="report_starts_at"
+                                type="datetime-local"
+                                v-model="form.report_starts_at"
+                                class="mt-1 block w-full"
+                            />
+                            <InputError
+                                class="mt-2"
+                                :message="form.errors.report_starts_at"
+                            />
+                        </div>
+
+                        <div>
+                            <InputLabel for="report_ends_at" value="Fim do relatório" />
+                            <TextInput
+                                id="report_ends_at"
+                                type="datetime-local"
+                                v-model="form.report_ends_at"
+                                class="mt-1 block w-full"
+                                required
+                            />
+                            <InputError
+                                class="mt-2"
+                                :message="form.errors.report_ends_at"
                             />
                         </div>
 

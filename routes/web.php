@@ -6,10 +6,8 @@ use App\Http\Controllers\Admin\EventController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\EventDashboardController;
 use App\Http\Controllers\ProfileController;
-use Illuminate\Foundation\Application;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Route;
-use Inertia\Inertia;
 
 Route::get('/manifest.webmanifest', function () {
     $manifestPath = public_path('build/manifest.webmanifest');
@@ -37,12 +35,9 @@ Route::get('/sw.js', function () {
 });
 
 Route::get('/', function () {
-    return Inertia::render('Welcome', [
-        'canLogin' => Route::has('login'),
-        'canRegister' => Route::has('register'),
-        'laravelVersion' => Application::VERSION,
-        'phpVersion' => PHP_VERSION,
-    ]);
+    return auth()->check()
+        ? to_route('dashboard')
+        : to_route('login');
 });
 
 Route::get('/dashboard', DashboardController::class)
@@ -74,6 +69,8 @@ Route::middleware(['auth', 'active.client', 'admin'])
             ->name('clients.integrations.application.save');
         Route::post('clients/{client}/integrations/discover-stores', [ClientZoneSoftIntegrationController::class, 'discoverStores'])
             ->name('clients.integrations.discover-stores');
+        Route::post('clients/{client}/integrations/machines/validate-stores', [ClientZoneSoftIntegrationController::class, 'validateAllMachines'])
+            ->name('clients.integrations.machines.validate-all');
         Route::post('clients/{client}/integrations/machines', [ClientZoneSoftIntegrationController::class, 'storeMachine'])
             ->name('clients.integrations.machines.store');
         Route::put('clients/{client}/integrations/machines/{machine}', [ClientZoneSoftIntegrationController::class, 'updateMachine'])

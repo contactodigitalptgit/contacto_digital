@@ -55,7 +55,9 @@ const primaryNavigation = computed<NavItem[]>(() => {
 
 const mobileNavigation = computed<NavItem[]>(() => primaryNavigation.value);
 
-const isActive = (pattern: string) => route().current(pattern);
+const isActive = (item: NavItem) =>
+    route().current(item.pattern)
+    || (item.key === 'dashboard' && route().current('events.dashboard'));
 
 const applyTheme = (value: ThemeMode) => {
     if (typeof document === 'undefined') {
@@ -104,7 +106,7 @@ onMounted(() => {
                         :key="item.key"
                         :href="item.href"
                         class="app-nav-link"
-                        :class="{ 'is-active': isActive(item.pattern) }"
+                        :class="{ 'is-active': isActive(item) }"
                     >
                         <span class="app-nav-icon">
                             <svg
@@ -144,6 +146,8 @@ onMounted(() => {
                         </span>
                         <span>{{ item.label }}</span>
                     </Link>
+
+                    <slot name="sidebar-navigation" />
                 </nav>
             </aside>
 
@@ -364,7 +368,7 @@ onMounted(() => {
                     <Link
                         :href="item.href"
                         class="app-mobile-nav-link"
-                        :class="{ 'is-active': isActive(item.pattern) }"
+                        :class="{ 'is-active': isActive(item) }"
                     >
                         <svg
                             v-if="item.icon === 'dashboard'"

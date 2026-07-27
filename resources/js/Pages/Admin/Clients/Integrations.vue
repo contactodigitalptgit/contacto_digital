@@ -19,6 +19,8 @@ interface ApplicationData {
     base_url: string;
     app_key: string;
     has_secret: boolean;
+    has_usable_secret: boolean;
+    requires_secret_reconfiguration: boolean;
     is_active: boolean;
 }
 
@@ -52,6 +54,7 @@ const props = defineProps<{
 const showMachineModal = ref(false);
 const editingMachineId = ref<number | null>(null);
 const discoveringStores = ref(false);
+const validatingAllStores = ref(false);
 const discoveredStores = ref<StoreOption[]>([]);
 const storeDiscoveryError = ref('');
 const storeValidationSuccess = ref('');
@@ -73,9 +76,33 @@ const machineForm = useForm({
     is_active: true,
 });
 
-const hasConfiguredApplication = computed(
-    () => props.application !== null && props.application.has_secret && props.application.is_active,
+const applicationNeedsSecretReconfiguration = computed(
+    () => props.application?.requires_secret_reconfiguration ?? false,
 );
+
+const hasConfiguredApplication = computed(
+    () => props.application !== null && props.application.has_usable_secret && props.application.is_active,
+);
+
+const applicationStatusLabel = computed(() => {
+    if (!props.application) {
+        return 'Pendente';
+    }
+
+    if (applicationNeedsSecretReconfiguration.value) {
+        return 'Reconfigurar';
+    }
+
+    return hasConfiguredApplication.value ? 'Ativa' : 'Pendente';
+});
+
+const applicationStatusTone = computed(() => {
+    if (applicationNeedsSecretReconfiguration.value) {
+        return 'warning';
+    }
+
+    return hasConfiguredApplication.value ? 'success' : 'neutral';
+});
 
 const reusableLicense = computed(() => {
     const licenses = [...new Set(
@@ -220,6 +247,49 @@ const discoverStores = async () => {
     }
 };
 
+const validateAllStores = async () => {
+    if (!props.machines.length) {
+        return;
+    }
+
+    validatingAllStores.value = true;
+
+    try {
+        const response = await axios.post(
+            route('admin.clients.integrations.machines.validate-all', props.client.id),
+        );
+
+        const validated = Number(response.data.validated ?? 0);
+        const failed = Number(response.data.failed ?? 0);
+        const message =
+            (typeof response.data.message === 'string' && response.data.message !== ''
+                ? response.data.message
+                : null) ??
+            (failed === 0
+                ? `${validated} loja(s) validadas com sucesso.`
+                : `${validated} loja(s) validadas e ${failed} com erro.`);
+
+        if (failed === 0) {
+            void showSuccessToast(message);
+        } else {
+            void showErrorToast(message);
+        }
+
+        router.reload({
+            only: ['machines'],
+        });
+    } catch (error: unknown) {
+        const message = axios.isAxiosError(error)
+            ? (error.response?.data?.message as string | undefined) ||
+              'Nao foi possivel validar todas as lojas.'
+            : 'Nao foi possivel validar todas as lojas.';
+
+        void showErrorToast(message);
+    } finally {
+        validatingAllStores.value = false;
+    }
+};
+
 const submitMachine = () => {
     updateSelectedStoreLabel();
 
@@ -314,10 +384,18 @@ const deleteMachine = async (machine: MachineItem) => {
                     </div>
                     <span
                         class="status-pill"
-                        :class="hasConfiguredApplication && applicationForm.is_active ? 'success' : 'neutral'"
+                        :class="applicationStatusTone"
                     >
-                        {{ hasConfiguredApplication && applicationForm.is_active ? 'Ativa' : 'Pendente' }}
+                        {{ applicationStatusLabel }}
                     </span>
+                </div>
+
+                <div
+                    v-if="applicationNeedsSecretReconfiguration"
+                    class="rounded-2xl border border-amber-400/20 bg-amber-400/10 p-4 text-sm text-amber-100"
+                >
+                    O APP-SECRET importado desta base não pôde ser lido com a chave atual da aplicação.
+                    Introduza novamente o APP-SECRET e guarde para reativar a integração ZoneSoft.
                 </div>
 
                 <form class="dash-modal-grid" @submit.prevent="saveApplication">
@@ -378,7 +456,14 @@ const deleteMachine = async (machine: MachineItem) => {
                             v-model="applicationForm.app_secret"
                             class="dash-modal-input"
                             type="password"
-                            :placeholder="props.application?.has_secret ? 'Deixe em branco para manter o segredo atual' : ''"
+                            :required="applicationNeedsSecretReconfiguration"
+                            :placeholder="
+                                applicationNeedsSecretReconfiguration
+                                    ? 'Introduza novamente o APP-SECRET para esta base'
+                                    : props.application?.has_secret
+                                      ? 'Deixe em branco para manter o segredo atual'
+                                      : ''
+                            "
                         />
                         <p class="admin-event-input-hint">
                             O segredo fica guardado de forma protegida e não volta a ser exibido em texto aberto.
@@ -421,15 +506,27 @@ const deleteMachine = async (machine: MachineItem) => {
                         </p>
                     </div>
 
-                    <button
-                        type="button"
-                        class="dash-action-button dash-action-button-inline"
-                        :disabled="!hasConfiguredApplication"
-                        :class="{ 'opacity-60': !hasConfiguredApplication }"
-                        @click="openCreateMachineModal"
-                    >
-                        Novo Client ID
-                    </button>
+                    <div class="flex flex-wrap items-center gap-3">
+                        <button
+                            type="button"
+                            class="dash-link-button"
+                            :disabled="!hasConfiguredApplication || !props.machines.length || validatingAllStores"
+                            :class="{ 'opacity-60': !hasConfiguredApplication || !props.machines.length || validatingAllStores }"
+                            @click="validateAllStores"
+                        >
+                            {{ validatingAllStores ? 'A validar tudo...' : 'Validar todas as lojas' }}
+                        </button>
+
+                        <button
+                            type="button"
+                            class="dash-action-button dash-action-button-inline"
+                            :disabled="!hasConfiguredApplication"
+                            :class="{ 'opacity-60': !hasConfiguredApplication }"
+                            @click="openCreateMachineModal"
+                        >
+                            Novo Client ID
+                        </button>
+                    </div>
                 </div>
 
                 <div v-if="!hasConfiguredApplication" class="event-dashboard-empty">
