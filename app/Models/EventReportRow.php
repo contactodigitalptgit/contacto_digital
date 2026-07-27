@@ -64,9 +64,10 @@ class EventReportRow extends Model
 
     public function scopeFromActiveImports(Builder $query): void
     {
-        $query->whereHas(
-            'reportImport',
-            fn (Builder $reportImportQuery) => $reportImportQuery
+        $query->whereIn(
+            'event_report_import_id',
+            EventReportImport::query()
+                ->select('id')
                 ->where('is_active', true)
                 ->where('status', 'completed'),
         );

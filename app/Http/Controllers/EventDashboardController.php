@@ -4,6 +4,9 @@ namespace App\Http\Controllers;
 
 use App\Models\Event;
 use App\Models\EventReportRow;
+use App\Services\EventReportAutoSyncService;
+use App\Services\EventReportSyncService;
+use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
@@ -13,6 +16,12 @@ use Inertia\Response;
 
 class EventDashboardController extends Controller
 {
+    private const NON_SALES_DOCUMENT_TYPES = ['CM', 'ZT'];
+
+    public function __construct(
+        private readonly EventReportAutoSyncService $autoSync,
+    ) {}
+
     public function show(Request $request, Event $event): Response
     {
         $client = $request->user()->client()->firstOrFail();
@@ -49,7 +58,9 @@ class EventDashboardController extends Controller
         string $backUrl,
         string $backLabel,
     ): Response {
-        $event->load(['client', 'latestActiveReportImport'])
+        app(EventReportSyncService::class)->markStaleProcessingImportsAsFailed($event);
+
+        $event->load(['client', 'latestActiveReportImport', 'latestReportImport'])
             ->loadCount([
                 'activeReportImports',
                 'processingReportImports',
@@ -62,20 +73,42 @@ class EventDashboardController extends Controller
             : [];
 
         $filters = $this->normalizeFilters($request);
+        $makeBaseRowsQuery = fn (): Builder => $this->applySalesDocumentScope(
+            EventReportRow::query()
+                ->where('event_id', $event->id)
+                ->fromActiveImports(),
+        );
+        $makeFilteredRowsQuery = fn (): Builder => $this->applyFilters($makeBaseRowsQuery(), $filters);
+        $makeProductRowsQuery = fn (): Builder => $this->applyProductDocumentScope(
+            EventReportRow::query()
+                ->where('event_id', $event->id)
+                ->fromActiveImports(),
+        );
+        $makeFilteredProductRowsQuery = fn (): Builder => $this->applyFilters($makeProductRowsQuery(), $filters);
 
-        $baseRowsQuery = EventReportRow::query()
-            ->where('event_id', $event->id)
-            ->fromActiveImports();
+        /** @var array<int, array<string, mixed>>|null $documentTypes */
+        $documentTypes = null;
+        $resolveDocumentTypes = function () use (&$documentTypes, $makeFilteredRowsQuery): array {
+            if ($documentTypes === null) {
+                $documentTypes = $this->buildDocumentTypes($makeFilteredRowsQuery());
+            }
 
-        $filteredRowsQuery = $this->applyFilters(clone $baseRowsQuery, $filters);
-        $documentTypes = $this->buildDocumentTypes(clone $filteredRowsQuery);
+            return $documentTypes;
+        };
 
-        $rows = (clone $filteredRowsQuery)
-            ->orderByDesc('sale_datetime')
-            ->orderByDesc('sale_date')
-            ->orderByDesc('source_row_number')
-            ->paginate(15)
-            ->withQueryString();
+        $rows = null;
+        $resolveRows = function () use (&$rows, $makeFilteredRowsQuery) {
+            if ($rows === null) {
+                $rows = $makeFilteredRowsQuery()
+                    ->orderByDesc('sale_datetime')
+                    ->orderByDesc('sale_date')
+                    ->orderByDesc('source_row_number')
+                    ->paginate(15)
+                    ->withQueryString();
+            }
+
+            return $rows;
+        };
 
         return Inertia::render('Events/Dashboard', [
             'event' => [
@@ -95,28 +128,44 @@ class EventDashboardController extends Controller
                 'machines_count' => (int) ($event->latestActiveReportImport?->summary['machines_count'] ?? 0),
                 'last_synced_at' => $event->latestActiveReportImport?->imported_at?->toISOString(),
             ],
+            'autoSync' => $this->autoSync->status($event),
             'filters' => $filters,
-            'filterOptions' => [
-                'barGroups' => $this->buildBarGroupOptions(clone $baseRowsQuery),
-                'stores' => $this->buildStoreOptions(clone $baseRowsQuery),
-                'products' => $this->buildProductOptions(clone $baseRowsQuery),
+            'filterOptions' => fn (): array => [
+                'barGroups' => $this->buildBarGroupOptions($makeBaseRowsQuery()),
+                'stores' => $this->buildStoreOptions($makeBaseRowsQuery()),
+                'products' => $this->buildProductOptions($makeBaseRowsQuery()),
             ],
-            'summary' => $this->buildSummary(
-                clone $baseRowsQuery,
-                clone $filteredRowsQuery,
+            'summary' => fn (): array => $this->buildSummary(
+                $makeBaseRowsQuery(),
+                $makeFilteredRowsQuery(),
                 (int) $event->processing_report_imports_count,
                 $event->latestActiveReportImport?->imported_at?->toISOString(),
                 (int) ($event->latestActiveReportImport?->summary['machines_count'] ?? 0),
-                $documentTypes,
+                $resolveDocumentTypes(),
             ),
-            'barGroups' => $this->buildBarGroups(clone $filteredRowsQuery),
-            'zoneDevices' => $this->buildZoneDevices(clone $filteredRowsQuery),
-            'topStores' => $this->buildTopStores(clone $filteredRowsQuery),
-            'topProducts' => $this->buildTopProducts(clone $filteredRowsQuery),
-            'documentTypes' => $documentTypes,
-            'salesday' => $this->buildSalesDaySummary($latestActiveImportSummary, $filters),
-            'paymentSummary' => $this->buildPaymentSummary($latestActiveImportSummary, $filters),
-            'rows' => $rows->getCollection()->map(fn (EventReportRow $row): array => [
+            'barGroups' => fn (): array => $this->buildBarGroups($makeFilteredRowsQuery()),
+            'zoneDevices' => fn (): array => $this->buildZoneDevices($makeFilteredRowsQuery()),
+            'topStores' => fn (): array => $this->buildTopStores($makeFilteredRowsQuery()),
+            'topProducts' => fn (): array => $this->buildTopProducts($makeFilteredProductRowsQuery()),
+            'productBreakdowns' => fn (): array => $this->buildProductBreakdowns($makeFilteredProductRowsQuery()),
+            'dailySales' => fn (): array => $this->buildDailyFinancialTotals(
+                $latestActiveImportSummary,
+                $filters,
+                $makeFilteredProductRowsQuery(),
+            ),
+            'documentTypes' => fn (): array => $resolveDocumentTypes(),
+            'paymentSummary' => fn (): array => $this->buildPaymentSummary($latestActiveImportSummary, $filters),
+            'reconciliation' => fn (): array => $this->buildPaymentReconciliation(
+                $latestActiveImportSummary,
+                $makeFilteredRowsQuery(),
+                $filters,
+            ),
+            'comparison' => fn (): array => $this->buildComparison(
+                $event,
+                $makeBaseRowsQuery(),
+                $latestActiveImportSummary,
+            ),
+            'rows' => fn () => $resolveRows()->getCollection()->map(fn (EventReportRow $row): array => [
                 'id' => $row->id,
                 'store_code' => $row->store_code,
                 'store_name' => $row->store_name,
@@ -132,15 +181,15 @@ class EventDashboardController extends Controller
                 'discount' => (float) ($row->discount ?? 0),
                 'total' => (float) ($row->total ?? 0),
             ])->values(),
-            'pagination' => [
-                'current_page' => $rows->currentPage(),
-                'last_page' => $rows->lastPage(),
-                'per_page' => $rows->perPage(),
-                'total' => $rows->total(),
-                'from' => $rows->firstItem(),
-                'to' => $rows->lastItem(),
-                'prev_page_url' => $rows->previousPageUrl(),
-                'next_page_url' => $rows->nextPageUrl(),
+            'pagination' => fn (): array => [
+                'current_page' => $resolveRows()->currentPage(),
+                'last_page' => $resolveRows()->lastPage(),
+                'per_page' => $resolveRows()->perPage(),
+                'total' => $resolveRows()->total(),
+                'from' => $resolveRows()->firstItem(),
+                'to' => $resolveRows()->lastItem(),
+                'prev_page_url' => $resolveRows()->previousPageUrl(),
+                'next_page_url' => $resolveRows()->nextPageUrl(),
             ],
             'previewMode' => $previewMode,
             'backUrl' => $backUrl,
@@ -383,12 +432,17 @@ class EventDashboardController extends Controller
      */
     private function buildTopProducts(Builder $query): array
     {
+        $productCode = "CASE WHEN doc_type = 'ZT' THEN 'ZT-CARD' ELSE product_code END";
+        $productDescription = "CASE WHEN doc_type = 'ZT' THEN 'Contactless' ELSE description END";
+
         return $query
-            ->select('product_code', 'description')
+            ->selectRaw("{$productCode} as product_code")
+            ->selectRaw("{$productDescription} as description")
             ->selectRaw('COUNT(*) as rows_count')
             ->selectRaw('COALESCE(SUM(quantity), 0) as quantity_total')
             ->selectRaw('COALESCE(SUM(total), 0) as sales_total')
-            ->groupBy('product_code', 'description')
+            ->groupByRaw("{$productCode}, {$productDescription}")
+            ->orderByDesc('quantity_total')
             ->orderByDesc('sales_total')
             ->limit(12)
             ->get()
@@ -399,6 +453,126 @@ class EventDashboardController extends Controller
                 'quantity_total' => (float) ($row->quantity_total ?? 0),
                 'sales_total' => (float) ($row->sales_total ?? 0),
             ])
+            ->values()
+            ->all();
+    }
+
+    /**
+     * @return array{total: array<int, array<string, mixed>>, days: array<int, array<string, mixed>>}
+     */
+    private function buildProductBreakdowns(Builder $query): array
+    {
+        $dates = (clone $query)
+            ->select('sale_date')
+            ->whereNotNull('sale_date')
+            ->distinct()
+            ->orderBy('sale_date')
+            ->get()
+            ->map(fn (EventReportRow $row) => $row->sale_date)
+            ->filter();
+
+        return [
+            'total' => $this->buildTopProducts(clone $query),
+            'days' => $dates
+                ->map(fn ($date): array => [
+                    'date' => $date->toDateString(),
+                    'label' => $date->locale('pt_PT')->translatedFormat('d M'),
+                    'items' => $this->buildTopProducts(
+                        (clone $query)->whereDate('sale_date', $date->toDateString()),
+                    ),
+                ])
+                ->values()
+                ->all(),
+        ];
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    private function buildDailySales(Builder $query): array
+    {
+        /** @var Collection<int, EventReportRow> $rows */
+        $rows = $query
+            ->whereNotNull('sale_date')
+            ->get([
+                'id',
+                'sale_date',
+                'doc_type',
+                'document_series',
+                'document_number',
+                'store_code',
+                'quantity',
+                'total',
+            ]);
+
+        return $rows
+            ->groupBy(fn (EventReportRow $row): string => $row->sale_date->toDateString())
+            ->map(function (Collection $dayRows, string $date): array {
+                $day = $dayRows->first()?->sale_date;
+
+                return [
+                    'date' => $date,
+                    'label' => $day?->locale('pt_PT')->translatedFormat('d M') ?? $date,
+                    'sales_total' => round((float) $dayRows->sum('total'), 4),
+                    'quantity_total' => round((float) $dayRows->sum('quantity'), 4),
+                    'tickets_count' => $dayRows
+                        ->map(fn (EventReportRow $row): string => $this->buildTicketKey($row))
+                        ->unique()
+                        ->count(),
+                ];
+            })
+            ->sortKeys()
+            ->values()
+            ->all();
+    }
+
+    /**
+     * @param  array<string, mixed>  $latestImportSummary
+     * @param  array{bar_group: string, store: string, product: string, date_from: string, date_to: string, total_min: string, total_max: string}  $filters
+     * @return array<int, array<string, mixed>>
+     */
+    private function buildDailyFinancialTotals(
+        array $latestImportSummary,
+        array $filters,
+        Builder $fallbackRowsQuery,
+    ): array {
+        /** @var Collection<int, array<string, mixed>> $documents */
+        $documents = collect($latestImportSummary['payment_documents'] ?? [])
+            ->filter(fn (mixed $document): bool => is_array($document))
+            ->values();
+        $documents = $this->filterPaymentDocuments($documents, $filters)
+            ->filter(fn (array $document): bool => $this->isSalesPaymentDocument($document))
+            ->filter(fn (array $document): bool => filled($document['sale_date'] ?? null))
+            ->values();
+
+        if ($documents->isEmpty()) {
+            return $this->buildDailySales($fallbackRowsQuery);
+        }
+
+        return $documents
+            ->groupBy(fn (array $document): string => (string) $document['sale_date'])
+            ->map(function (Collection $dayDocuments, string $date): array {
+                $day = CarbonImmutable::parse($date);
+
+                return [
+                    'date' => $date,
+                    'label' => $day->locale('pt_PT')->translatedFormat('d M'),
+                    'sales_total' => round((float) $dayDocuments->sum(
+                        fn (array $document): float => (float) ($document['total'] ?? 0),
+                    ), 4),
+                    'quantity_total' => 0.0,
+                    'tickets_count' => $dayDocuments
+                        ->map(fn (array $document): string => implode('|', [
+                            $document['machine_client_id'] ?? '',
+                            $document['doc_type'] ?? '',
+                            $document['document_series'] ?? '',
+                            $document['document_number'] ?? '',
+                        ]))
+                        ->unique()
+                        ->count(),
+                ];
+            })
+            ->sortKeys()
             ->values()
             ->all();
     }
@@ -486,83 +660,6 @@ class EventDashboardController extends Controller
      * @param  array{bar_group: string, store: string, product: string, date_from: string, date_to: string, total_min: string, total_max: string}  $filters
      * @return array<string, mixed>
      */
-    private function buildSalesDaySummary(array $latestImportSummary, array $filters): array
-    {
-        /** @var Collection<int, array<string, mixed>> $records */
-        $records = collect($latestImportSummary['salesday_records'] ?? [])
-            ->filter(fn (mixed $record): bool => is_array($record))
-            ->values();
-        $warningsCount = count(array_filter($latestImportSummary['salesday_warnings'] ?? [], 'is_array'));
-
-        $records = $this->filterSalesDayRecords($records, $filters);
-
-        $totals = [
-            'fs' => 0.0,
-            'ft' => 0.0,
-            'tk' => 0.0,
-            'vd' => 0.0,
-            'enc' => 0.0,
-            'nc' => 0.0,
-            'rc' => 0.0,
-            'movimento' => 0.0,
-            'num' => 0.0,
-            'deb' => 0.0,
-            'crd' => 0.0,
-            'chq' => 0.0,
-            'cartoes' => 0.0,
-            'etk' => 0.0,
-        ];
-
-        foreach ($records as $record) {
-            foreach (array_keys($totals) as $field) {
-                $totals[$field] += (float) ($record[$field] ?? 0);
-            }
-        }
-
-        $hasProductSpecificFilters = $filters['product'] !== ''
-            || $filters['total_min'] !== ''
-            || $filters['total_max'] !== '';
-
-        return [
-            'available' => $records->isNotEmpty(),
-            'records_count' => $records->count(),
-            'stores_count' => $records
-                ->pluck('store_name')
-                ->filter(fn (mixed $value): bool => is_string($value) && trim($value) !== '')
-                ->unique()
-                ->count(),
-            'days_count' => $records
-                ->pluck('sale_date')
-                ->filter(fn (mixed $value): bool => is_string($value) && trim($value) !== '')
-                ->unique()
-                ->count(),
-            'cash_registers_count' => $records
-                ->pluck('cash_register_code')
-                ->filter(fn (mixed $value): bool => is_string($value) && trim($value) !== '')
-                ->unique()
-                ->count(),
-            'closed_records_count' => $records
-                ->filter(fn (array $record): bool => ($record['is_closed'] ?? null) === true)
-                ->count(),
-            'open_records_count' => $records
-                ->filter(fn (array $record): bool => ($record['is_closed'] ?? null) === false)
-                ->count(),
-            'totals' => array_map(
-                fn (float $value): float => round($value, 4),
-                $totals,
-            ),
-            'warnings_count' => $warningsCount,
-            'scope_note' => $hasProductSpecificFilters
-                ? 'Resumo Z agregado pela ultima sincronizacao. Filtros de produto e total nao alteram este bloco.'
-                : 'Resumo Z agregado pela ultima sincronizacao e alinhado com loja, bar e periodo quando aplicados.',
-        ];
-    }
-
-    /**
-     * @param  array<string, mixed>  $latestImportSummary
-     * @param  array{bar_group: string, store: string, product: string, date_from: string, date_to: string, total_min: string, total_max: string}  $filters
-     * @return array<string, mixed>
-     */
     private function buildPaymentSummary(array $latestImportSummary, array $filters): array
     {
         /** @var Collection<int, array<string, mixed>> $documents */
@@ -576,25 +673,27 @@ class EventDashboardController extends Controller
             || $filters['total_max'] !== '';
 
         if ($documents->isEmpty()) {
-            $salesday = $this->buildSalesDaySummary($latestImportSummary, $filters);
-            $multibanco = (float) ($salesday['totals']['deb'] ?? 0) + (float) ($salesday['totals']['crd'] ?? 0);
-            $cash = (float) ($salesday['totals']['num'] ?? 0);
-            $zticket = (float) ($salesday['totals']['etk'] ?? 0);
-
             return [
-                'available' => (bool) ($salesday['available'] ?? false),
-                'source' => 'salesday',
+                'available' => false,
+                'source' => 'unavailable',
                 'documents_count' => 0,
-                'multibanco' => round($multibanco, 4),
-                'cash' => round($cash, 4),
-                'zticket' => round($zticket, 4),
+                'movement_documents_count' => 0,
+                'multibanco' => 0.0,
+                'cash' => 0.0,
+                'zticket' => 0.0,
                 'other' => 0.0,
+                'sales_total' => 0.0,
+                'total_without_zt' => 0.0,
+                'total_with_zt' => 0.0,
+                'movement_total' => 0.0,
+                'other_movements' => 0.0,
+                'top_up_documents_count' => 0,
                 'top_up_loaded' => 0.0,
-                'top_up_spent' => round($zticket, 4),
+                'top_up_spent' => 0.0,
                 'top_up_remaining' => 0.0,
                 'scope_note' => $hasProductSpecificFilters
-                    ? 'Pagamentos indisponiveis nos documentos sincronizados. Foi usado o resumo Salesday como fallback.'
-                    : 'Pagamentos calculados pelo resumo Salesday, porque a ultima sincronizacao nao guardou os documentos de pagamento.',
+                    ? 'Pagamentos indisponiveis nos documentos sincronizados. Este bloco nao usa mais fallback externo.'
+                    : 'Pagamentos indisponiveis porque a ultima sincronizacao nao guardou os documentos de pagamento.',
             ];
         }
 
@@ -605,81 +704,359 @@ class EventDashboardController extends Controller
             'other' => 0.0,
             'top_up_loaded' => 0.0,
             'top_up_spent' => 0.0,
+            'other_movements' => 0.0,
         ];
+        $salesDocumentsCount = 0;
+        $topUpDocumentsCount = 0;
 
         foreach ($documents as $document) {
             $amount = (float) ($document['total'] ?? 0);
             $category = $this->resolvePaymentCategory((string) ($document['payment_code'] ?? ''));
             $isTopUp = $this->isTopUpDocument($document);
 
-            $totals[$category] += $amount;
-
             if ($isTopUp) {
                 $totals['top_up_loaded'] += $amount;
+                $topUpDocumentsCount++;
+
+                continue;
             }
 
-            if ($category === 'zticket' && ! $isTopUp) {
+            if (! $this->isSalesPaymentDocument($document)) {
+                $totals['other_movements'] += $amount;
+
+                continue;
+            }
+
+            $totals[$category] += $amount;
+            $salesDocumentsCount++;
+
+            if ($category === 'zticket') {
                 $totals['top_up_spent'] += $amount;
             }
         }
 
+        $salesTotal = $totals['multibanco']
+            + $totals['cash']
+            + $totals['zticket']
+            + $totals['other'];
+        $movementTotal = $salesTotal
+            + $totals['top_up_loaded']
+            + $totals['other_movements'];
+        $totalWithZt = $salesTotal + $totals['top_up_loaded'];
+
         return [
             'available' => true,
             'source' => 'documents_headers',
-            'documents_count' => $documents->count(),
+            'documents_count' => $salesDocumentsCount,
+            'movement_documents_count' => $documents->count(),
             'multibanco' => round($totals['multibanco'], 4),
             'cash' => round($totals['cash'], 4),
             'zticket' => round($totals['zticket'], 4),
             'other' => round($totals['other'], 4),
+            'sales_total' => round($salesTotal, 4),
+            'total_without_zt' => round($salesTotal, 4),
+            'total_with_zt' => round($totalWithZt, 4),
+            'movement_total' => round($movementTotal, 4),
+            'other_movements' => round($totals['other_movements'], 4),
+            'top_up_documents_count' => $topUpDocumentsCount,
             'top_up_loaded' => round($totals['top_up_loaded'], 4),
             'top_up_spent' => round($totals['top_up_spent'], 4),
             'top_up_remaining' => round(max($totals['top_up_loaded'] - $totals['top_up_spent'], 0), 4),
             'scope_note' => $hasProductSpecificFilters
-                ? 'Pagamentos calculados pelos documentos sincronizados. Filtros de produto e total nao alteram este bloco.'
-                : 'Pagamentos calculados pelos documentos sincronizados e alinhados com loja, zona e periodo quando aplicados.',
+                ? 'Pagamentos de vendas calculados pelos documentos sincronizados. Filtros de produto e total nao alteram este bloco.'
+                : 'Faturacao, carregamentos e outros movimentos sao apresentados separadamente para alinhar com o ZPOS.',
         ];
     }
 
     /**
-     * @param  Collection<int, array<string, mixed>>  $records
+     * @param  array<string, mixed>  $latestImportSummary
      * @param  array{bar_group: string, store: string, product: string, date_from: string, date_to: string, total_min: string, total_max: string}  $filters
-     * @return Collection<int, array<string, mixed>>
+     * @return array<string, mixed>
      */
-    private function filterSalesDayRecords(Collection $records, array $filters): Collection
+    private function buildPaymentReconciliation(
+        array $latestImportSummary,
+        Builder $rowsQuery,
+        array $filters,
+    ): array {
+        /** @var Collection<int, array<string, mixed>> $documents */
+        $documents = collect($latestImportSummary['payment_documents'] ?? [])
+            ->filter(fn (mixed $document): bool => is_array($document))
+            ->values();
+        $documents = $this->filterPaymentDocuments($documents, $filters)
+            ->filter(fn (array $document): bool => $this->isSalesPaymentDocument($document))
+            ->values();
+
+        $hasProductSpecificFilters = $filters['product'] !== ''
+            || $filters['total_min'] !== ''
+            || $filters['total_max'] !== '';
+
+        $items = [];
+
+        foreach ((clone $rowsQuery)
+            ->select('store_code', 'store_name')
+            ->selectRaw('COALESCE(SUM(total), 0) as sales_total')
+            ->groupBy('store_code', 'store_name')
+            ->get() as $row) {
+            $key = $this->buildStoreKey($row->store_code, $row->store_name);
+
+            if (! isset($items[$key])) {
+                $items[$key] = $this->emptyReconciliationItem(
+                    $row->store_code,
+                    $row->store_name,
+                );
+            }
+
+            $items[$key]['sales_total'] += (float) ($row->sales_total ?? 0);
+        }
+
+        foreach ($documents as $document) {
+            $storeCode = isset($document['store_code']) ? (string) $document['store_code'] : null;
+            $storeName = isset($document['store_name']) ? (string) $document['store_name'] : null;
+            $key = $this->buildStoreKey($storeCode, $storeName);
+
+            if (! isset($items[$key])) {
+                $items[$key] = $this->emptyReconciliationItem($storeCode, $storeName);
+            }
+
+            $category = $this->resolvePaymentCategory((string) ($document['payment_code'] ?? ''));
+            $items[$key][$category] += (float) ($document['total'] ?? 0);
+            $items[$key]['documents_count']++;
+        }
+
+        $normalizedItems = collect($items)
+            ->map(function (array $item) use ($hasProductSpecificFilters): array {
+                $item['payments_total'] = round(
+                    (float) $item['multibanco']
+                    + (float) $item['cash']
+                    + (float) $item['zticket']
+                    + (float) $item['other'],
+                    4,
+                );
+                $item['sales_total'] = round((float) $item['sales_total'], 4);
+                $item['difference'] = $hasProductSpecificFilters
+                    ? null
+                    : round($item['payments_total'] - $item['sales_total'], 4);
+
+                foreach (['multibanco', 'cash', 'zticket', 'other'] as $category) {
+                    $item[$category] = round((float) $item[$category], 4);
+                }
+
+                return $item;
+            })
+            ->sortByDesc('payments_total')
+            ->values();
+
+        return [
+            'available' => $documents->isNotEmpty(),
+            'documents_count' => $documents->count(),
+            'comparable' => ! $hasProductSpecificFilters,
+            'scope_note' => $hasProductSpecificFilters
+                ? 'Os pagamentos nao podem ser repartidos por produto ou valor de linha. A diferenca fica oculta com estes filtros.'
+                : 'Conferencia entre vendas e documentos de pagamento devolvidos pela ZoneSoft.',
+            'totals' => [
+                'multibanco' => round((float) $normalizedItems->sum('multibanco'), 4),
+                'cash' => round((float) $normalizedItems->sum('cash'), 4),
+                'zticket' => round((float) $normalizedItems->sum('zticket'), 4),
+                'other' => round((float) $normalizedItems->sum('other'), 4),
+                'payments_total' => round((float) $normalizedItems->sum('payments_total'), 4),
+                'sales_total' => round((float) $normalizedItems->sum('sales_total'), 4),
+                'difference' => $hasProductSpecificFilters
+                    ? null
+                    : round((float) $normalizedItems->sum('difference'), 4),
+            ],
+            'items' => $normalizedItems->all(),
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function emptyReconciliationItem(?string $storeCode, ?string $storeName): array
     {
-        if ($filters['bar_group'] !== '') {
-            $records = $records->filter(function (array $record) use ($filters): bool {
-                $storeName = is_string($record['store_name'] ?? null)
-                    ? $record['store_name']
-                    : null;
+        return [
+            'store_code' => $storeCode,
+            'store_name' => filled($storeName) ? $storeName : 'Sem device',
+            'documents_count' => 0,
+            'multibanco' => 0.0,
+            'cash' => 0.0,
+            'zticket' => 0.0,
+            'other' => 0.0,
+            'payments_total' => 0.0,
+            'sales_total' => 0.0,
+            'difference' => 0.0,
+        ];
+    }
 
-                return $this->resolveBarGroupLabel($storeName) === $filters['bar_group'];
-            })->values();
+    private function buildStoreKey(?string $storeCode, ?string $storeName): string
+    {
+        if (filled($storeCode)) {
+            return 'code:'.trim((string) $storeCode);
         }
 
-        if ($filters['store'] !== '') {
-            $records = $records->filter(
-                fn (array $record): bool => ($record['store_name'] ?? null) === $filters['store'],
-            )->values();
+        return 'name:'.Str::lower(trim((string) $storeName));
+    }
+
+    /**
+     * @param  array<string, mixed>  $currentImportSummary
+     * @return array<string, mixed>
+     */
+    private function buildComparison(
+        Event $event,
+        Builder $currentRowsQuery,
+        array $currentImportSummary,
+    ): array {
+        $previousEvent = Event::query()
+            ->where('client_id', $event->client_id)
+            ->where('id', '!=', $event->id)
+            ->where('event_date', '<', $event->event_date)
+            ->whereHas('activeReportImports')
+            ->with('latestActiveReportImport')
+            ->orderByDesc('event_date')
+            ->first();
+
+        if (! $previousEvent) {
+            $previousEvent = Event::query()
+                ->where('client_id', $event->client_id)
+                ->where('id', '!=', $event->id)
+                ->whereHas('activeReportImports')
+                ->with('latestActiveReportImport')
+                ->orderByDesc('event_date')
+                ->first();
         }
 
-        if ($filters['date_from'] !== '') {
-            $records = $records->filter(function (array $record) use ($filters): bool {
-                $saleDate = $record['sale_date'] ?? null;
-
-                return ! is_string($saleDate) || $saleDate >= $filters['date_from'];
-            })->values();
+        if (! $previousEvent || ! $previousEvent->latestActiveReportImport) {
+            return [
+                'available' => false,
+                'message' => 'Ainda nao existe outro evento sincronizado para comparar.',
+            ];
         }
 
-        if ($filters['date_to'] !== '') {
-            $records = $records->filter(function (array $record) use ($filters): bool {
-                $saleDate = $record['sale_date'] ?? null;
+        $current = $this->buildComparisonSnapshot(
+            $event,
+            clone $currentRowsQuery,
+            $currentImportSummary,
+        );
+        $previous = $this->buildComparisonSnapshot(
+            $previousEvent,
+            $this->applySalesDocumentScope(
+                EventReportRow::query()
+                    ->where('event_id', $previousEvent->id)
+                    ->fromActiveImports(),
+            ),
+            is_array($previousEvent->latestActiveReportImport->summary)
+                ? $previousEvent->latestActiveReportImport->summary
+                : [],
+        );
 
-                return ! is_string($saleDate) || $saleDate <= $filters['date_to'];
-            })->values();
+        $metricDefinitions = [
+            ['key' => 'total_sales', 'label' => 'Total faturado', 'format' => 'currency'],
+            ['key' => 'machines_count', 'label' => 'Devices', 'format' => 'number'],
+            ['key' => 'zones_count', 'label' => 'Zonas', 'format' => 'number'],
+            ['key' => 'average_ticket', 'label' => 'Ticket medio', 'format' => 'currency'],
+            ['key' => 'average_per_device', 'label' => 'Media por device', 'format' => 'currency'],
+        ];
+        $paymentDefinitions = [
+            ['key' => 'multibanco', 'label' => 'Multibanco'],
+            ['key' => 'zticket', 'label' => 'ZT - Card'],
+            ['key' => 'cash', 'label' => 'Dinheiro'],
+            ['key' => 'other', 'label' => 'Outros'],
+        ];
+
+        return [
+            'available' => true,
+            'current' => $current,
+            'previous' => $previous,
+            'total_variation' => $this->calculateVariation(
+                (float) $current['total_sales'],
+                (float) $previous['total_sales'],
+            ),
+            'metrics' => collect($metricDefinitions)
+                ->map(fn (array $definition): array => [
+                    ...$definition,
+                    'current' => (float) $current[$definition['key']],
+                    'previous' => (float) $previous[$definition['key']],
+                    'variation' => $this->calculateVariation(
+                        (float) $current[$definition['key']],
+                        (float) $previous[$definition['key']],
+                    ),
+                ])
+                ->all(),
+            'payments' => collect($paymentDefinitions)
+                ->map(fn (array $definition): array => [
+                    ...$definition,
+                    'current' => (float) $current['payments'][$definition['key']],
+                    'previous' => (float) $previous['payments'][$definition['key']],
+                    'variation' => $this->calculateVariation(
+                        (float) $current['payments'][$definition['key']],
+                        (float) $previous['payments'][$definition['key']],
+                    ),
+                ])
+                ->all(),
+        ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $importSummary
+     * @return array<string, mixed>
+     */
+    private function buildComparisonSnapshot(Event $event, Builder $rowsQuery, array $importSummary): array
+    {
+        $documentTypes = $this->buildDocumentTypes(clone $rowsQuery);
+        $summary = $this->buildSummary(
+            clone $rowsQuery,
+            clone $rowsQuery,
+            0,
+            $event->latestActiveReportImport?->imported_at?->toISOString(),
+            (int) ($importSummary['machines_count'] ?? 0),
+            $documentTypes,
+        );
+        $payments = $this->buildPaymentSummary($importSummary, $this->emptyFilters());
+        $machinesCount = (int) $summary['machines_count'];
+
+        return [
+            'event_id' => $event->id,
+            'title' => $event->title,
+            'event_date' => $event->event_date->toISOString(),
+            'total_sales' => (float) $summary['total_sales'],
+            'machines_count' => $machinesCount,
+            'zones_count' => (int) $summary['bar_groups_count'],
+            'tickets_count' => (int) $summary['tickets_count'],
+            'average_ticket' => (float) $summary['average_ticket'],
+            'average_per_device' => $machinesCount > 0
+                ? round((float) $summary['total_sales'] / $machinesCount, 4)
+                : 0.0,
+            'payments' => [
+                'multibanco' => (float) $payments['multibanco'],
+                'cash' => (float) $payments['cash'],
+                'zticket' => (float) $payments['zticket'],
+                'other' => (float) $payments['other'],
+            ],
+        ];
+    }
+
+    /**
+     * @return array{bar_group: string, store: string, product: string, date_from: string, date_to: string, total_min: string, total_max: string}
+     */
+    private function emptyFilters(): array
+    {
+        return [
+            'bar_group' => '',
+            'store' => '',
+            'product' => '',
+            'date_from' => '',
+            'date_to' => '',
+            'total_min' => '',
+            'total_max' => '',
+        ];
+    }
+
+    private function calculateVariation(float $current, float $previous): ?float
+    {
+        if (abs($previous) < 0.0001) {
+            return null;
         }
 
-        return $records;
+        return round((($current - $previous) / abs($previous)) * 100, 1);
     }
 
     /**
@@ -740,13 +1117,46 @@ class EventDashboardController extends Controller
     private function isTopUpDocument(array $document): bool
     {
         $docType = Str::upper(trim((string) ($document['doc_type'] ?? '')));
-        $storeName = trim((string) ($document['store_name'] ?? ''));
 
-        if ($docType === 'ZT') {
-            return true;
+        if ($docType !== '') {
+            return $docType === 'ZT';
         }
 
+        $storeName = trim((string) ($document['store_name'] ?? ''));
+
         return preg_match('/^(top\s*up|bc\s*top)\b/i', $storeName) === 1;
+    }
+
+    /**
+     * @param  array<string, mixed>  $document
+     */
+    private function isSalesPaymentDocument(array $document): bool
+    {
+        if ($this->isTopUpDocument($document)) {
+            return false;
+        }
+
+        $docType = Str::upper(trim((string) ($document['doc_type'] ?? '')));
+
+        return ! in_array($docType, self::NON_SALES_DOCUMENT_TYPES, true);
+    }
+
+    private function applySalesDocumentScope(Builder $query): Builder
+    {
+        return $query->where(function (Builder $builder): void {
+            $builder
+                ->whereNull('doc_type')
+                ->orWhereNotIn('doc_type', self::NON_SALES_DOCUMENT_TYPES);
+        });
+    }
+
+    private function applyProductDocumentScope(Builder $query): Builder
+    {
+        return $query->where(function (Builder $builder): void {
+            $builder
+                ->whereNull('doc_type')
+                ->orWhere('doc_type', '!=', 'CM');
+        });
     }
 
     private function buildTicketKey(EventReportRow $row): string

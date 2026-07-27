@@ -92,7 +92,7 @@ const startEventsPolling = () => {
             preserveState: true,
             replace: true,
         });
-    }, 5000);
+    }, 2500);
 };
 
 const stopEventsPolling = () => {
@@ -804,13 +804,14 @@ const deleteEvent = async (event: EventItem) => {
 
                     <div class="dash-modal-field dash-modal-field-full">
                         <label class="dash-modal-label" for="event_report_ends_at_create">
-                            Fim do relatório (opcional)
+                            Fim do relatório
                         </label>
                         <input
                             id="event_report_ends_at_create"
                             v-model="createEventForm.report_ends_at"
                             class="dash-modal-input"
                             type="datetime-local"
+                            required
                         />
                         <p
                             v-if="createEventForm.errors.report_ends_at"
@@ -973,13 +974,14 @@ const deleteEvent = async (event: EventItem) => {
 
                     <div class="dash-modal-field dash-modal-field-full">
                         <label class="dash-modal-label" for="event_report_ends_at_edit">
-                            Fim do relatório (opcional)
+                            Fim do relatório
                         </label>
                         <input
                             id="event_report_ends_at_edit"
                             v-model="editEventForm.report_ends_at"
                             class="dash-modal-input"
                             type="datetime-local"
+                            required
                         />
                         <p
                             v-if="editEventForm.errors.report_ends_at"

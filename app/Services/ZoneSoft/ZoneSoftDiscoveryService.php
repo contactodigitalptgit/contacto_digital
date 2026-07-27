@@ -3,18 +3,39 @@
 namespace App\Services\ZoneSoft;
 
 use App\Models\ZoneSoftApplication;
+use Illuminate\Support\Facades\Cache;
 
 class ZoneSoftDiscoveryService
 {
+    private const STORE_CACHE_TTL_MINUTES = 15;
+
     public function __construct(
         private readonly ZoneSoftApiClient $client,
-    ) {
+    ) {}
+
+    /**
+     * @return list<array{id: int, label: string, display_label: string, details: string|null, country: string|null}>
+     */
+    public function discoverStores(
+        ZoneSoftApplication $application,
+        string $zsClientId,
+        bool $useCache = true,
+    ): array {
+        if (! $useCache) {
+            return $this->fetchStores($application, $zsClientId);
+        }
+
+        return Cache::remember(
+            $this->buildCacheKey($application, $zsClientId),
+            now()->addMinutes(self::STORE_CACHE_TTL_MINUTES),
+            fn (): array => $this->fetchStores($application, $zsClientId),
+        );
     }
 
     /**
      * @return list<array{id: int, label: string, display_label: string, details: string|null, country: string|null}>
      */
-    public function discoverStores(ZoneSoftApplication $application, string $zsClientId): array
+    private function fetchStores(ZoneSoftApplication $application, string $zsClientId): array
     {
         $response = $this->client->post(
             $application,
@@ -47,6 +68,19 @@ class ZoneSoftDiscoveryService
             ->sortBy('id')
             ->values()
             ->all();
+    }
+
+    private function buildCacheKey(ZoneSoftApplication $application, string $zsClientId): string
+    {
+        return sprintf(
+            'zonesoft:stores:%d:%s',
+            $application->id,
+            sha1(implode('|', [
+                $application->base_url,
+                $application->app_key,
+                $zsClientId,
+            ])),
+        );
     }
 
     private function resolveStoreLabel(array $store, int $id): string
