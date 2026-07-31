@@ -37,7 +37,6 @@ test -f "${release_dir}/proxy/portal.contactodigital.pt.conf"
 test -f "${release_dir}/app-runtime/artisan"
 test -f "${release_dir}/app-runtime/public/index.php"
 test -f "${release_dir}/app-runtime/public/build/manifest.json"
-test -f "${release_dir}/seed/contacto_digital_bd.sqlite"
 
 if find "${release_dir}" -type l -print -quit | grep -q .; then
   echo "Release archives may not contain symbolic links." >&2
@@ -87,7 +86,7 @@ rsync -a --delete "${release_dir}/app-runtime/" "${project_dir}/app-runtime/"
 rm -f "${project_dir}/app-runtime/public/storage"
 ln -s /var/www/html/storage/app/public "${project_dir}/app-runtime/public/storage"
 
-if [ ! -f "${project_dir}/shared/database/contacto_digital_bd.sqlite" ]; then
+if [ ! -f "${project_dir}/shared/database/contacto_digital_bd.sqlite" ] && [ -f "${release_dir}/seed/contacto_digital_bd.sqlite" ]; then
   install -m 0644 "${release_dir}/seed/contacto_digital_bd.sqlite" \
     "${project_dir}/shared/database/contacto_digital_bd.sqlite"
 fi
