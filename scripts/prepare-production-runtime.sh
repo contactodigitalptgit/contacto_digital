@@ -47,7 +47,9 @@ install -d -m 0755 \
   "${runtime_dir}/storage/framework/views" \
   "${runtime_dir}/storage/logs"
 
-install -m 0644 "database/contacto_digital_bd.sqlite" "${seed_dir}/contacto_digital_bd.sqlite"
+if [[ -f "database/contacto_digital_bd.sqlite" ]]; then
+  install -m 0644 "database/contacto_digital_bd.sqlite" "${seed_dir}/contacto_digital_bd.sqlite"
+fi
 
 test -f "${runtime_dir}/artisan"
 test -f "${runtime_dir}/bootstrap/app.php"
@@ -55,4 +57,3 @@ test -f "${runtime_dir}/vendor/autoload.php"
 test -f "${runtime_dir}/public/index.php"
 test -f "${runtime_dir}/public/build/manifest.json"
 test -f "${runtime_dir}/bootstrap/ssr/ssr.js"
-test -f "${seed_dir}/contacto_digital_bd.sqlite"
