@@ -1,0 +1,83 @@
+name: Deploy production
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: contacto-digital-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: bcmath, exif, gd, intl, mbstring, pcntl, pdo_sqlite, zip
+          coverage: none
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install PHP dependencies
+        run: composer install --no-dev --prefer-dist --optimize-autoloader --no-interaction
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: Build application runtime
+        run: |
+          npm run build
+          bash scripts/prepare-production-runtime.sh
+
+      - name: Package release
+        run: |
+          tar -czf /tmp/contacto-digital-release.tgz \
+            -C deploy \
+            Dockerfile \
+            compose.yaml \
+            nginx \
+            proxy \
+            seed \
+            app-runtime
+
+      - name: Configure deployment key
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          install -d -m 0700 ~/.ssh
+          printf '%s\n' "${DEPLOY_SSH_KEY}" > ~/.ssh/contacto_digital_deploy
+          chmod 0600 ~/.ssh/contacto_digital_deploy
+          ssh-keyscan -H 185.32.190.86 > ~/.ssh/known_hosts
+
+      - name: Deploy
+        env:
+          GITHUB_SHA: ${{ github.sha }}
+        run: |
+          ssh \
+            -i ~/.ssh/contacto_digital_deploy \
+            -o IdentitiesOnly=yes \
+            root@185.32.190.86 "${GITHUB_SHA}" \
+            < /tmp/contacto-digital-release.tgz
+
+      - name: Verify production
+        run: |
+          curl --fail --silent --show-error \
+            --retry 10 --retry-delay 6 \
+            https://portal.contactodigital.pt/up

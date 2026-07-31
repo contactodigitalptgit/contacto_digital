@@ -18,6 +18,7 @@ class ClientZoneSoftMachine extends Model
      */
     protected $fillable = [
         'client_id',
+        'event_id',
         'zonesoft_application_id',
         'zs_client_id',
         'license',
@@ -48,5 +49,10 @@ class ClientZoneSoftMachine extends Model
     public function application(): BelongsTo
     {
         return $this->belongsTo(ZoneSoftApplication::class, 'zonesoft_application_id');
+    }
+
+    public function event(): BelongsTo
+    {
+        return $this->belongsTo(Event::class);
     }
 }

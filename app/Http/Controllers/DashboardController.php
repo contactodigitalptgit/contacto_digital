@@ -4,13 +4,14 @@ namespace App\Http\Controllers;
 
 use App\Models\Client;
 use App\Models\Event;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
 use Inertia\Response;
 
 class DashboardController extends Controller
 {
-    public function __invoke(Request $request): Response
+    public function __invoke(Request $request): Response|RedirectResponse
     {
         $user = $request->user();
 
@@ -62,9 +63,14 @@ class DashboardController extends Controller
             ->with([
                 'events' => fn ($query) => $query
                     ->where('is_active', true)
-                    ->orderBy('event_date'),
+                    ->orderByDesc('event_date')
+                    ->orderByDesc('id'),
             ])
             ->firstOrFail();
+
+        if ($client->events->isNotEmpty()) {
+            return to_route('events.dashboard', $client->events->first());
+        }
 
         return Inertia::render('Dashboard', [
             'type' => 'client',

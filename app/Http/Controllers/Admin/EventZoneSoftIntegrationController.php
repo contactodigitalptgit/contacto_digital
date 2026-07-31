@@ -3,37 +3,43 @@
 namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
-use App\Models\Client;
 use App\Models\ClientZoneSoftMachine;
+use App\Models\Event;
 use App\Models\ZoneSoftApplication;
 use App\Services\ZoneSoft\ZoneSoftApiException;
 use App\Services\ZoneSoft\ZoneSoftDiscoveryService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Crypt;
 use Illuminate\Validation\Rule;
 use Inertia\Inertia;
 use Inertia\Response;
 use Throwable;
 
-class ClientZoneSoftIntegrationController extends Controller
+class EventZoneSoftIntegrationController extends Controller
 {
     private const DEFAULT_MACHINE_PERMISSIONS = 'API + All document interfaces';
 
     private const VALIDATE_ALL_DISCOVERY_PAUSE_MICROSECONDS = 500000;
 
-    public function show(Client $client): Response
+    public function show(Event $event): Response
     {
-        $client->load('user');
+        $event->load('client.user');
         $application = ZoneSoftApplication::query()->latest('id')->first();
 
-        return Inertia::render('Admin/Clients/Integrations', [
+        return Inertia::render('Admin/Events/Integrations', [
+            'event' => [
+                'id' => $event->id,
+                'title' => $event->title,
+                'event_date' => $event->event_date->toISOString(),
+            ],
             'client' => [
-                'id' => $client->id,
-                'name' => $client->name,
-                'business_name' => $client->business_name,
-                'email' => $client->user?->email,
+                'id' => $event->client->id,
+                'name' => $event->client->name,
+                'business_name' => $event->client->business_name,
+                'email' => $event->client->user?->email,
             ],
             'application' => $application ? [
                 'id' => $application->id,
@@ -46,7 +52,7 @@ class ClientZoneSoftIntegrationController extends Controller
                 'is_active' => $application->is_active,
             ] : null,
             'defaultMachinePermissions' => self::DEFAULT_MACHINE_PERMISSIONS,
-            'machines' => $client->zonesoftMachines()
+            'machines' => $event->zonesoftMachines()
                 ->orderBy('store_id')
                 ->get()
                 ->map(fn (ClientZoneSoftMachine $machine): array => [
@@ -64,7 +70,7 @@ class ClientZoneSoftIntegrationController extends Controller
         ]);
     }
 
-    public function saveApplication(Request $request, Client $client): RedirectResponse
+    public function saveApplication(Request $request, Event $event): RedirectResponse
     {
         $existing = ZoneSoftApplication::query()->latest('id')->first();
         $secretRequired = ! $existing
@@ -91,7 +97,7 @@ class ClientZoneSoftIntegrationController extends Controller
                     'updated_at' => now(),
                 ]);
 
-            return to_route('admin.clients.integrations.show', $client);
+            return to_route('admin.events.integrations.show', $event);
         }
 
         $application = $existing ?? new ZoneSoftApplication;
@@ -106,38 +112,126 @@ class ClientZoneSoftIntegrationController extends Controller
 
         $application->save();
 
-        return to_route('admin.clients.integrations.show', $client);
+        return to_route('admin.events.integrations.show', $event);
     }
 
     public function discoverStores(
         Request $request,
-        Client $client,
+        Event $event,
         ZoneSoftDiscoveryService $discoveryService,
     ): JsonResponse {
         $validated = $request->validate([
             'zs_client_id' => ['required', 'string', 'max:64'],
         ]);
 
-        $application = $this->getReadableApplication();
-
         return response()->json([
-            'stores' => $discoveryService->discoverStores($application, $validated['zs_client_id']),
+            'stores' => $discoveryService->discoverStores(
+                $this->getReadableApplication(),
+                $validated['zs_client_id'],
+            ),
         ]);
     }
 
     public function validateAllMachines(
-        Client $client,
+        Event $event,
         ZoneSoftDiscoveryService $discoveryService,
     ): JsonResponse {
+        return $this->validateMachines(
+            $event->zonesoftMachines()->orderBy('store_id')->get(),
+            $discoveryService,
+            'Nenhum Client ID registado para este evento.',
+        );
+    }
+
+    public function storeMachine(Request $request, Event $event): RedirectResponse
+    {
         $application = $this->getReadableApplication();
+        $validated = $request->validate([
+            'zs_client_id' => ['required', 'string', 'max:64'],
+            'license' => ['nullable', 'string', 'max:64'],
+            'store_id' => [
+                'required',
+                'integer',
+                'min:0',
+                Rule::unique('client_zonesoft_machines')->where(
+                    fn ($query) => $query
+                        ->where('event_id', $event->id)
+                        ->where('zs_client_id', $request->string('zs_client_id')->toString()),
+                ),
+            ],
+            'store_label' => ['nullable', 'string', 'max:255'],
+            'is_active' => ['required', 'boolean'],
+        ]);
 
-        $machinesByClientId = $client->zonesoftMachines()
-            ->orderBy('store_id')
-            ->get()
-            ->groupBy('zs_client_id');
+        $event->zonesoftMachines()->create([
+            ...$validated,
+            'client_id' => $event->client_id,
+            'zonesoft_application_id' => $application->id,
+            'permissions' => self::DEFAULT_MACHINE_PERMISSIONS,
+            'last_validated_at' => now(),
+            'last_error' => null,
+        ]);
 
-        abort_if($machinesByClientId->isEmpty(), 422, 'Nenhum Client ID registado para este cliente.');
+        return to_route('admin.events.integrations.show', $event);
+    }
 
+    public function updateMachine(
+        Request $request,
+        Event $event,
+        ClientZoneSoftMachine $machine,
+    ): RedirectResponse {
+        abort_unless($machine->event_id === $event->id && $machine->client_id === $event->client_id, 404);
+
+        $validated = $request->validate([
+            'zs_client_id' => ['required', 'string', 'max:64'],
+            'license' => ['nullable', 'string', 'max:64'],
+            'store_id' => [
+                'required',
+                'integer',
+                'min:0',
+                Rule::unique('client_zonesoft_machines')
+                    ->ignore($machine->id)
+                    ->where(
+                        fn ($query) => $query
+                            ->where('event_id', $event->id)
+                            ->where('zs_client_id', $request->string('zs_client_id')->toString()),
+                    ),
+            ],
+            'store_label' => ['nullable', 'string', 'max:255'],
+            'is_active' => ['required', 'boolean'],
+        ]);
+
+        $machine->update([
+            ...$validated,
+            'permissions' => self::DEFAULT_MACHINE_PERMISSIONS,
+            'last_validated_at' => now(),
+            'last_error' => null,
+        ]);
+
+        return to_route('admin.events.integrations.show', $event);
+    }
+
+    public function destroyMachine(Event $event, ClientZoneSoftMachine $machine): RedirectResponse
+    {
+        abort_unless($machine->event_id === $event->id && $machine->client_id === $event->client_id, 404);
+
+        $machine->delete();
+
+        return to_route('admin.events.integrations.show', $event);
+    }
+
+    /**
+     * @param  Collection<int, ClientZoneSoftMachine>  $machines
+     */
+    private function validateMachines(
+        Collection $machines,
+        ZoneSoftDiscoveryService $discoveryService,
+        string $emptyMessage,
+    ): JsonResponse {
+        $application = $this->getReadableApplication();
+        $machinesByClientId = $machines->groupBy('zs_client_id');
+
+        abort_if($machinesByClientId->isEmpty(), 422, $emptyMessage);
         $validatedAt = now();
         $validatedCount = 0;
         $failedCount = 0;
@@ -223,83 +317,6 @@ class ClientZoneSoftIntegrationController extends Controller
         return $exception->getMessage() !== ''
             ? $exception->getMessage()
             : 'Nao foi possivel validar as lojas deste Client ID.';
-    }
-
-    public function storeMachine(Request $request, Client $client): RedirectResponse
-    {
-        $application = $this->getReadableApplication();
-
-        $validated = $request->validate([
-            'zs_client_id' => ['required', 'string', 'max:64'],
-            'license' => ['nullable', 'string', 'max:64'],
-            'store_id' => [
-                'required',
-                'integer',
-                'min:0',
-                Rule::unique('client_zonesoft_machines')->where(
-                    fn ($query) => $query
-                        ->where('client_id', $client->id)
-                        ->where('zs_client_id', $request->string('zs_client_id')->toString()),
-                ),
-            ],
-            'store_label' => ['nullable', 'string', 'max:255'],
-            'is_active' => ['required', 'boolean'],
-        ]);
-
-        $client->zonesoftMachines()->create([
-            ...$validated,
-            'zonesoft_application_id' => $application->id,
-            'permissions' => self::DEFAULT_MACHINE_PERMISSIONS,
-            'last_validated_at' => now(),
-            'last_error' => null,
-        ]);
-
-        return to_route('admin.clients.integrations.show', $client);
-    }
-
-    public function updateMachine(
-        Request $request,
-        Client $client,
-        ClientZoneSoftMachine $machine,
-    ): RedirectResponse {
-        abort_unless($machine->client_id === $client->id, 404);
-
-        $validated = $request->validate([
-            'zs_client_id' => ['required', 'string', 'max:64'],
-            'license' => ['nullable', 'string', 'max:64'],
-            'store_id' => [
-                'required',
-                'integer',
-                'min:0',
-                Rule::unique('client_zonesoft_machines')
-                    ->ignore($machine->id)
-                    ->where(
-                        fn ($query) => $query
-                            ->where('client_id', $client->id)
-                            ->where('zs_client_id', $request->string('zs_client_id')->toString()),
-                    ),
-            ],
-            'store_label' => ['nullable', 'string', 'max:255'],
-            'is_active' => ['required', 'boolean'],
-        ]);
-
-        $machine->update([
-            ...$validated,
-            'permissions' => self::DEFAULT_MACHINE_PERMISSIONS,
-            'last_validated_at' => now(),
-            'last_error' => null,
-        ]);
-
-        return to_route('admin.clients.integrations.show', $client);
-    }
-
-    public function destroyMachine(Client $client, ClientZoneSoftMachine $machine): RedirectResponse
-    {
-        abort_unless($machine->client_id === $client->id, 404);
-
-        $machine->delete();
-
-        return to_route('admin.clients.integrations.show', $client);
     }
 
     private function getReadableApplication(): ZoneSoftApplication

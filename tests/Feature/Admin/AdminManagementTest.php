@@ -3,8 +3,10 @@
 namespace Tests\Feature\Admin;
 
 use App\Models\Client;
+use App\Models\ClientZoneSoftMachine;
 use App\Models\Event;
 use App\Models\User;
+use App\Models\ZoneSoftApplication;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Inertia\Testing\AssertableInertia;
 use Tests\TestCase;
@@ -85,6 +87,7 @@ class AdminManagementTest extends TestCase
                 'description' => 'Descricao',
                 'event_date' => now()->addDay()->toDateTimeString(),
                 'report_ends_at' => now()->addDays(2)->toDateTimeString(),
+                'show_zt_card' => false,
             ]);
 
         $response->assertRedirect(route('admin.events.index'));
@@ -93,10 +96,114 @@ class AdminManagementTest extends TestCase
             'client_id' => $client->id,
             'title' => 'Evento de Teste',
             'is_active' => true,
+            'show_zt_card' => false,
         ]);
     }
 
-    public function test_admin_can_view_client_dashboard_preview(): void
+    public function test_admin_can_update_event_zt_card_visibility(): void
+    {
+        $admin = User::factory()->create([
+            'role' => 'admin',
+        ]);
+
+        $clientUser = User::factory()->create([
+            'role' => 'client',
+        ]);
+
+        $client = Client::create([
+            'user_id' => $clientUser->id,
+            'name' => 'Cliente ZT',
+            'business_name' => null,
+            'address' => 'Rua ZT',
+            'phone' => '+351 922000000',
+            'is_active' => true,
+        ]);
+
+        $event = Event::create([
+            'client_id' => $client->id,
+            'title' => 'Evento ZT',
+            'description' => 'Descricao',
+            'event_date' => now()->addDay(),
+            'report_ends_at' => now()->addDays(2),
+            'show_zt_card' => true,
+            'is_active' => true,
+        ]);
+
+        $this
+            ->actingAs($admin)
+            ->put(route('admin.events.update', $event), [
+                'client_id' => $client->id,
+                'title' => 'Evento ZT editado',
+                'description' => 'Descricao',
+                'event_date' => now()->addDay()->toDateTimeString(),
+                'report_ends_at' => now()->addDays(2)->toDateTimeString(),
+                'show_zt_card' => false,
+            ])
+            ->assertRedirect(route('admin.events.index'));
+
+        $this->assertDatabaseHas('events', [
+            'id' => $event->id,
+            'title' => 'Evento ZT editado',
+            'show_zt_card' => false,
+        ]);
+    }
+
+    public function test_admin_events_index_counts_event_scoped_zonesoft_machines(): void
+    {
+        $admin = User::factory()->create([
+            'role' => 'admin',
+        ]);
+
+        $clientUser = User::factory()->create([
+            'role' => 'client',
+        ]);
+
+        $client = Client::create([
+            'user_id' => $clientUser->id,
+            'name' => 'Cliente Maquinas',
+            'business_name' => null,
+            'address' => 'Rua Maquinas',
+            'phone' => '+351 921000000',
+            'is_active' => true,
+        ]);
+
+        $event = Event::create([
+            'client_id' => $client->id,
+            'title' => 'Evento com Maquinas',
+            'event_date' => now()->addDay(),
+            'report_ends_at' => now()->addDays(2),
+            'is_active' => true,
+        ]);
+
+        $application = ZoneSoftApplication::create([
+            'name' => 'ZoneSoft Principal',
+            'base_url' => 'https://api.zonesoft.org/v3',
+            'app_key' => 'app-key-123',
+            'app_secret' => 'secret-123',
+            'is_active' => true,
+        ]);
+
+        ClientZoneSoftMachine::create([
+            'client_id' => $client->id,
+            'event_id' => $event->id,
+            'zonesoft_application_id' => $application->id,
+            'zs_client_id' => 'CLIENTE-ZS-1',
+            'store_id' => 10,
+            'store_label' => 'Loja 10',
+            'is_active' => true,
+        ]);
+
+        $this
+            ->actingAs($admin)
+            ->get(route('admin.events.index'))
+            ->assertOk()
+            ->assertInertia(fn (AssertableInertia $page) => $page
+                ->component('Admin/Events/Index')
+                ->where('events.0.id', $event->id)
+                ->where('events.0.available_machine_count', 1));
+    }
+
+    public function test_admin_client_dashboard_redirects_to_latest_active_event(): void
     {
         $admin = User::factory()->create([
             'role' => 'admin',
@@ -115,11 +222,21 @@ class AdminManagementTest extends TestCase
             'is_active' => true,
         ]);
 
-        Event::create([
+        $olderEvent = Event::create([
             'client_id' => $client->id,
-            'title' => 'Evento Preview',
+            'title' => 'Evento Antigo',
             'description' => 'Descricao',
-            'event_date' => now()->addDays(2),
+            'event_date' => now()->addDay(),
+            'report_ends_at' => now()->addDays(2),
+            'is_active' => true,
+        ]);
+
+        $latestEvent = Event::create([
+            'client_id' => $client->id,
+            'title' => 'Evento Recente',
+            'description' => 'Descricao',
+            'event_date' => now()->addDays(3),
+            'report_ends_at' => now()->addDays(4),
             'is_active' => true,
         ]);
 
@@ -127,13 +244,8 @@ class AdminManagementTest extends TestCase
             ->actingAs($admin)
             ->get(route('admin.clients.dashboard', $client));
 
-        $response->assertOk();
-        $response->assertInertia(fn (AssertableInertia $page) => $page
-            ->component('Dashboard')
-            ->where('type', 'client')
-            ->where('previewMode', true)
-            ->where('client.name', 'Cliente Preview')
-            ->where('events.0.title', 'Evento Preview'));
+        $response->assertRedirect(route('admin.events.dashboard', $latestEvent));
+        $this->assertNotSame($olderEvent->id, $latestEvent->id);
     }
 
     public function test_admin_can_toggle_event_status_without_deleting_data(): void

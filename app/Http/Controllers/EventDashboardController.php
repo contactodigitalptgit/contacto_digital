@@ -64,13 +64,12 @@ class EventDashboardController extends Controller
             ->loadCount([
                 'activeReportImports',
                 'processingReportImports',
+                'zonesoftMachines as active_zonesoft_machines_count' => fn ($query) => $query->where('is_active', true),
             ]);
-        $event->client->loadCount([
-            'zonesoftMachines as active_zonesoft_machines_count' => fn ($query) => $query->where('is_active', true),
-        ]);
         $latestActiveImportSummary = is_array($event->latestActiveReportImport?->summary)
             ? $event->latestActiveReportImport->summary
             : [];
+        $eventOptions = $this->buildEventOptions($event, $previewMode);
 
         $filters = $this->normalizeFilters($request);
         $makeBaseRowsQuery = fn (): Builder => $this->applySalesDocumentScope(
@@ -83,6 +82,7 @@ class EventDashboardController extends Controller
             EventReportRow::query()
                 ->where('event_id', $event->id)
                 ->fromActiveImports(),
+            $event->show_zt_card,
         );
         $makeFilteredProductRowsQuery = fn (): Builder => $this->applyFilters($makeProductRowsQuery(), $filters);
 
@@ -94,6 +94,25 @@ class EventDashboardController extends Controller
             }
 
             return $documentTypes;
+        };
+
+        /** @var array<int, array<string, mixed>>|null $dailyBreakdowns */
+        $dailyBreakdowns = null;
+        $resolveDailyBreakdowns = function () use (
+            &$dailyBreakdowns,
+            $latestActiveImportSummary,
+            $filters,
+            $makeFilteredProductRowsQuery,
+        ): array {
+            if ($dailyBreakdowns === null) {
+                $dailyBreakdowns = $this->buildDailyBreakdowns(
+                    $latestActiveImportSummary,
+                    $filters,
+                    $makeFilteredProductRowsQuery(),
+                );
+            }
+
+            return $dailyBreakdowns;
         };
 
         $rows = null;
@@ -121,10 +140,12 @@ class EventDashboardController extends Controller
                 'active_imports_count' => (int) $event->active_report_imports_count,
                 'processing_imports_count' => (int) $event->processing_report_imports_count,
                 'last_synced_at' => $event->latestActiveReportImport?->imported_at?->toISOString(),
+                'show_zt_card' => $event->show_zt_card,
             ],
+            'eventOptions' => $eventOptions,
             'integration' => [
                 'source' => 'ZoneSoft API',
-                'configured_client_ids_count' => (int) ($event->client->active_zonesoft_machines_count ?? 0),
+                'configured_client_ids_count' => (int) ($event->active_zonesoft_machines_count ?? 0),
                 'machines_count' => (int) ($event->latestActiveReportImport?->summary['machines_count'] ?? 0),
                 'last_synced_at' => $event->latestActiveReportImport?->imported_at?->toISOString(),
             ],
@@ -148,11 +169,8 @@ class EventDashboardController extends Controller
             'topStores' => fn (): array => $this->buildTopStores($makeFilteredRowsQuery()),
             'topProducts' => fn (): array => $this->buildTopProducts($makeFilteredProductRowsQuery()),
             'productBreakdowns' => fn (): array => $this->buildProductBreakdowns($makeFilteredProductRowsQuery()),
-            'dailySales' => fn (): array => $this->buildDailyFinancialTotals(
-                $latestActiveImportSummary,
-                $filters,
-                $makeFilteredProductRowsQuery(),
-            ),
+            'dailySales' => fn (): array => $resolveDailyBreakdowns(),
+            'dailyBreakdowns' => fn (): array => $resolveDailyBreakdowns(),
             'documentTypes' => fn (): array => $resolveDocumentTypes(),
             'paymentSummary' => fn (): array => $this->buildPaymentSummary($latestActiveImportSummary, $filters),
             'reconciliation' => fn (): array => $this->buildPaymentReconciliation(
@@ -198,6 +216,30 @@ class EventDashboardController extends Controller
     }
 
     /**
+     * @return array<int, array{id: int, title: string, event_date: string, url: string, is_current: bool}>
+     */
+    private function buildEventOptions(Event $event, bool $previewMode): array
+    {
+        return Event::query()
+            ->where('client_id', $event->client_id)
+            ->where('is_active', true)
+            ->orderByDesc('event_date')
+            ->orderByDesc('id')
+            ->get(['id', 'title', 'event_date'])
+            ->map(fn (Event $option): array => [
+                'id' => $option->id,
+                'title' => $option->title,
+                'event_date' => $option->event_date->toISOString(),
+                'url' => $previewMode
+                    ? route('admin.events.dashboard', $option)
+                    : route('events.dashboard', $option),
+                'is_current' => $option->id === $event->id,
+            ])
+            ->values()
+            ->all();
+    }
+
+    /**
      * @return array{bar_group: string, store: string, product: string, date_from: string, date_to: string, total_min: string, total_max: string}
      */
     private function normalizeFilters(Request $request): array
@@ -238,11 +280,11 @@ class EventDashboardController extends Controller
         }
 
         if ($filters['date_from'] !== '') {
-            $query->whereDate('sale_date', '>=', $filters['date_from']);
+            $this->applyReportingDateFilter($query, '>=', $filters['date_from']);
         }
 
         if ($filters['date_to'] !== '') {
-            $query->whereDate('sale_date', '<=', $filters['date_to']);
+            $this->applyReportingDateFilter($query, '<=', $filters['date_to']);
         }
 
         if ($filters['total_min'] !== '') {
@@ -414,7 +456,6 @@ class EventDashboardController extends Controller
             ->selectRaw('COALESCE(SUM(total), 0) as sales_total')
             ->groupBy('store_name', 'store_code')
             ->orderByDesc('sales_total')
-            ->limit(5)
             ->get()
             ->map(fn (EventReportRow $row): array => [
                 'label' => $row->store_name ?: 'Sem loja',
@@ -463,22 +504,24 @@ class EventDashboardController extends Controller
     private function buildProductBreakdowns(Builder $query): array
     {
         $dates = (clone $query)
-            ->select('sale_date')
-            ->whereNotNull('sale_date')
-            ->distinct()
-            ->orderBy('sale_date')
-            ->get()
-            ->map(fn (EventReportRow $row) => $row->sale_date)
-            ->filter();
+            ->where(fn (Builder $dateQuery) => $dateQuery
+                ->whereNotNull('sale_datetime')
+                ->orWhereNotNull('sale_date'))
+            ->get(['sale_datetime', 'sale_date'])
+            ->map(fn (EventReportRow $row): ?string => $this->resolveRowReportingDate($row))
+            ->filter()
+            ->unique()
+            ->sort()
+            ->values();
 
         return [
             'total' => $this->buildTopProducts(clone $query),
             'days' => $dates
-                ->map(fn ($date): array => [
-                    'date' => $date->toDateString(),
-                    'label' => $date->locale('pt_PT')->translatedFormat('d M'),
+                ->map(fn (string $date): array => [
+                    'date' => $date,
+                    'label' => CarbonImmutable::parse($date)->locale('pt_PT')->translatedFormat('d M'),
                     'items' => $this->buildTopProducts(
-                        (clone $query)->whereDate('sale_date', $date->toDateString()),
+                        $this->applyReportingDateFilter(clone $query, '=', $date),
                     ),
                 ])
                 ->values()
@@ -493,10 +536,13 @@ class EventDashboardController extends Controller
     {
         /** @var Collection<int, EventReportRow> $rows */
         $rows = $query
-            ->whereNotNull('sale_date')
+            ->where(fn (Builder $dateQuery) => $dateQuery
+                ->whereNotNull('sale_datetime')
+                ->orWhereNotNull('sale_date'))
             ->get([
                 'id',
                 'sale_date',
+                'sale_datetime',
                 'doc_type',
                 'document_series',
                 'document_number',
@@ -506,13 +552,12 @@ class EventDashboardController extends Controller
             ]);
 
         return $rows
-            ->groupBy(fn (EventReportRow $row): string => $row->sale_date->toDateString())
+            ->groupBy(fn (EventReportRow $row): string => $this->resolveRowReportingDate($row) ?? '')
+            ->forget('')
             ->map(function (Collection $dayRows, string $date): array {
-                $day = $dayRows->first()?->sale_date;
-
                 return [
                     'date' => $date,
-                    'label' => $day?->locale('pt_PT')->translatedFormat('d M') ?? $date,
+                    'label' => CarbonImmutable::parse($date)->locale('pt_PT')->translatedFormat('d M'),
                     'sales_total' => round((float) $dayRows->sum('total'), 4),
                     'quantity_total' => round((float) $dayRows->sum('quantity'), 4),
                     'tickets_count' => $dayRows
@@ -542,7 +587,7 @@ class EventDashboardController extends Controller
             ->values();
         $documents = $this->filterPaymentDocuments($documents, $filters)
             ->filter(fn (array $document): bool => $this->isSalesPaymentDocument($document))
-            ->filter(fn (array $document): bool => filled($document['sale_date'] ?? null))
+            ->filter(fn (array $document): bool => $this->resolveDocumentReportingDate($document) !== null)
             ->values();
 
         if ($documents->isEmpty()) {
@@ -550,7 +595,8 @@ class EventDashboardController extends Controller
         }
 
         return $documents
-            ->groupBy(fn (array $document): string => (string) $document['sale_date'])
+            ->groupBy(fn (array $document): string => $this->resolveDocumentReportingDate($document) ?? '')
+            ->forget('')
             ->map(function (Collection $dayDocuments, string $date): array {
                 $day = CarbonImmutable::parse($date);
 
@@ -573,6 +619,100 @@ class EventDashboardController extends Controller
                 ];
             })
             ->sortKeys()
+            ->values()
+            ->all();
+    }
+
+    /**
+     * @param  array<string, mixed>  $latestImportSummary
+     * @param  array{bar_group: string, store: string, product: string, date_from: string, date_to: string, total_min: string, total_max: string}  $filters
+     * @return array<int, array<string, mixed>>
+     */
+    private function buildDailyBreakdowns(
+        array $latestImportSummary,
+        array $filters,
+        Builder $fallbackRowsQuery,
+    ): array {
+        $dailySales = collect($this->buildDailyFinancialTotals(
+            $latestImportSummary,
+            $filters,
+            $fallbackRowsQuery,
+        ));
+
+        /** @var Collection<int, array<string, mixed>> $documents */
+        $documents = collect($latestImportSummary['payment_documents'] ?? [])
+            ->filter(fn (mixed $document): bool => is_array($document))
+            ->values();
+        $documents = $this->filterPaymentDocuments($documents, $filters)
+            ->filter(fn (array $document): bool => $this->resolveDocumentReportingDate($document) !== null)
+            ->values();
+
+        $dates = $dailySales
+            ->pluck('date')
+            ->merge($documents->map(fn (array $document): ?string => $this->resolveDocumentReportingDate($document)))
+            ->filter(fn (mixed $date): bool => is_string($date) && $date !== '')
+            ->unique()
+            ->sort()
+            ->values();
+
+        return $dates
+            ->map(function (string $date) use ($dailySales, $documents): array {
+                $dailySale = $dailySales->firstWhere('date', $date) ?? [];
+                $dayDocuments = $documents
+                    ->filter(fn (array $document): bool => $this->resolveDocumentReportingDate($document) === $date)
+                    ->values();
+                $payments = [
+                    'multibanco' => 0.0,
+                    'cash' => 0.0,
+                    'zticket' => 0.0,
+                    'other' => 0.0,
+                ];
+                $topUpLoaded = 0.0;
+                $topUpDocumentsCount = 0;
+                $otherMovements = 0.0;
+
+                foreach ($dayDocuments as $document) {
+                    $amount = (float) ($document['total'] ?? 0);
+
+                    if ($this->isTopUpDocument($document)) {
+                        $topUpLoaded += $amount;
+                        $topUpDocumentsCount++;
+
+                        continue;
+                    }
+
+                    if (! $this->isSalesPaymentDocument($document)) {
+                        $otherMovements += $amount;
+
+                        continue;
+                    }
+
+                    $payments[$this->resolvePaymentCategory((string) ($document['payment_code'] ?? ''))] += $amount;
+                }
+
+                $salesTotal = (float) ($dailySale['sales_total'] ?? array_sum($payments));
+                $ticketsCount = (int) ($dailySale['tickets_count'] ?? 0);
+                $topUpSpent = $payments['zticket'];
+
+                return [
+                    'date' => $date,
+                    'label' => (string) ($dailySale['label'] ?? CarbonImmutable::parse($date)->locale('pt_PT')->translatedFormat('d M')),
+                    'sales_total' => round($salesTotal, 4),
+                    'quantity_total' => round((float) ($dailySale['quantity_total'] ?? 0), 4),
+                    'tickets_count' => $ticketsCount,
+                    'average_ticket' => $ticketsCount > 0 ? round($salesTotal / $ticketsCount, 4) : 0.0,
+                    'multibanco' => round($payments['multibanco'], 4),
+                    'cash' => round($payments['cash'], 4),
+                    'zticket' => round($payments['zticket'], 4),
+                    'other' => round($payments['other'], 4),
+                    'top_up_documents_count' => $topUpDocumentsCount,
+                    'top_up_loaded' => round($topUpLoaded, 4),
+                    'top_up_spent' => round($topUpSpent, 4),
+                    'top_up_remaining' => round(max($topUpLoaded - $topUpSpent, 0), 4),
+                    'total_with_zt' => round($salesTotal + $topUpLoaded, 4),
+                    'other_movements' => round($otherMovements, 4),
+                ];
+            })
             ->values()
             ->all();
     }
@@ -1084,21 +1224,65 @@ class EventDashboardController extends Controller
 
         if ($filters['date_from'] !== '') {
             $documents = $documents->filter(function (array $document) use ($filters): bool {
-                $saleDate = $document['sale_date'] ?? null;
+                $saleDate = $this->resolveDocumentReportingDate($document);
 
-                return ! is_string($saleDate) || $saleDate >= $filters['date_from'];
+                return $saleDate === null || $saleDate >= $filters['date_from'];
             })->values();
         }
 
         if ($filters['date_to'] !== '') {
             $documents = $documents->filter(function (array $document) use ($filters): bool {
-                $saleDate = $document['sale_date'] ?? null;
+                $saleDate = $this->resolveDocumentReportingDate($document);
 
-                return ! is_string($saleDate) || $saleDate <= $filters['date_to'];
+                return $saleDate === null || $saleDate <= $filters['date_to'];
             })->values();
         }
 
         return $documents;
+    }
+
+    private function applyReportingDateFilter(Builder $query, string $operator, string $date): Builder
+    {
+        return $query->where(function (Builder $dateQuery) use ($operator, $date): void {
+            $dateQuery
+                ->whereDate('sale_datetime', $operator, $date)
+                ->orWhere(function (Builder $fallbackQuery) use ($operator, $date): void {
+                    $fallbackQuery
+                        ->whereNull('sale_datetime')
+                        ->whereDate('sale_date', $operator, $date);
+                });
+        });
+    }
+
+    private function resolveRowReportingDate(EventReportRow $row): ?string
+    {
+        return $row->sale_datetime?->toDateString()
+            ?? $row->sale_date?->toDateString();
+    }
+
+    /**
+     * ZoneSoft can keep the business date on day one after midnight.
+     * The transaction timestamp is therefore the source for calendar-day reports.
+     *
+     * @param  array<string, mixed>  $document
+     */
+    private function resolveDocumentReportingDate(array $document): ?string
+    {
+        foreach (['sale_datetime', 'sale_date'] as $key) {
+            $value = $document[$key] ?? null;
+
+            if (! is_string($value) || trim($value) === '') {
+                continue;
+            }
+
+            try {
+                return CarbonImmutable::parse($value)->toDateString();
+            } catch (\Throwable) {
+                continue;
+            }
+        }
+
+        return null;
     }
 
     private function resolvePaymentCategory(string $paymentCode): string
@@ -1150,13 +1334,23 @@ class EventDashboardController extends Controller
         });
     }
 
-    private function applyProductDocumentScope(Builder $query): Builder
+    private function applyProductDocumentScope(Builder $query, bool $includeZt): Builder
     {
-        return $query->where(function (Builder $builder): void {
+        $query->where(function (Builder $builder): void {
             $builder
                 ->whereNull('doc_type')
                 ->orWhere('doc_type', '!=', 'CM');
         });
+
+        if (! $includeZt) {
+            $query->where(function (Builder $builder): void {
+                $builder
+                    ->whereNull('doc_type')
+                    ->orWhere('doc_type', '!=', 'ZT');
+            });
+        }
+
+        return $query;
     }
 
     private function buildTicketKey(EventReportRow $row): string
@@ -1218,14 +1412,27 @@ class EventDashboardController extends Controller
         }
 
         if (preg_match('/^bar\s+\d+$/i', $normalizedBarGroup) === 1) {
-            $normalizedLower = Str::lower($normalizedBarGroup);
+            preg_match('/\d+/', $normalizedBarGroup, $numberMatches);
+            $barNumber = $numberMatches[0] ?? '';
+            $spacedLabel = 'bar '.$barNumber;
+            $compactLabel = 'bar'.$barNumber;
 
-            $query->where(function (Builder $builder) use ($normalizedLower): void {
+            $query->where(function (Builder $builder) use ($spacedLabel, $compactLabel): void {
                 $builder
-                    ->whereRaw('LOWER(COALESCE(store_name, \'\')) = ?', [$normalizedLower])
-                    ->orWhereRaw('LOWER(COALESCE(store_name, \'\')) LIKE ?', [$normalizedLower.' %'])
-                    ->orWhereRaw('LOWER(COALESCE(store_name, \'\')) LIKE ?', [$normalizedLower.'-%']);
+                    ->whereRaw('LOWER(COALESCE(store_name, \'\')) = ?', [$spacedLabel])
+                    ->orWhereRaw('LOWER(COALESCE(store_name, \'\')) LIKE ?', ['%'.$spacedLabel.' %'])
+                    ->orWhereRaw('LOWER(COALESCE(store_name, \'\')) LIKE ?', ['%'.$spacedLabel.'-%'])
+                    ->orWhereRaw('LOWER(COALESCE(store_name, \'\')) LIKE ?', ['%'.$spacedLabel])
+                    ->orWhereRaw('LOWER(COALESCE(store_name, \'\')) LIKE ?', ['%'.$compactLabel.' %'])
+                    ->orWhereRaw('LOWER(COALESCE(store_name, \'\')) LIKE ?', ['%'.$compactLabel.'-%'])
+                    ->orWhereRaw('LOWER(COALESCE(store_name, \'\')) LIKE ?', ['%'.$compactLabel]);
             });
+
+            return;
+        }
+
+        if (Str::lower($normalizedBarGroup) === 'bar vip') {
+            $query->whereRaw('LOWER(COALESCE(store_name, \'\')) LIKE ?', ['%bar vip%']);
 
             return;
         }
@@ -1262,16 +1469,20 @@ class EventDashboardController extends Controller
             return 'Sem loja';
         }
 
-        if (preg_match('/^(bar\s+\d+)/i', $storeName, $matches) === 1) {
-            return Str::title($matches[1]);
+        if (preg_match('/\b(top\s*up|bc\s*top)\b/i', $storeName) === 1) {
+            return 'Top Up';
+        }
+
+        if (preg_match('/\bbar\s*vip\b/i', $storeName) === 1) {
+            return 'Bar Vip';
+        }
+
+        if (preg_match('/\bbar\s*(\d+)\b/i', $storeName, $matches) === 1) {
+            return 'Bar '.$matches[1];
         }
 
         if (preg_match('/^(vip)\b/i', $storeName) === 1) {
-            return 'VIP';
-        }
-
-        if (preg_match('/^(top\s*up|bc\s*top)\b/i', $storeName) === 1) {
-            return 'Top Up';
+            return 'Bar Vip';
         }
 
         if (preg_match('/^(bengaleiro)\b/i', $storeName) === 1) {

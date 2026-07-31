@@ -161,6 +161,7 @@ class AutomaticEventReportSyncTest extends TestCase
 
         ClientZoneSoftMachine::create([
             'client_id' => $client->id,
+            'event_id' => $event->id,
             'zonesoft_application_id' => $application->id,
             'zs_client_id' => 'AUTOMATIC-CLIENT-ID',
             'license' => 'AUTOMATIC-LICENSE',

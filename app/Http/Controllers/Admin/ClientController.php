@@ -22,7 +22,6 @@ class ClientController extends Controller
             ->with('user')
             ->withCount([
                 'events',
-                'zonesoftMachines as active_zonesoft_machines_count' => fn ($query) => $query->where('is_active', true),
             ])
             ->orderBy('name')
             ->get()
@@ -34,7 +33,6 @@ class ClientController extends Controller
                 'phone' => $client->phone,
                 'email' => $client->user->email,
                 'events_count' => $client->events_count,
-                'zonesoft_machines_count' => (int) $client->active_zonesoft_machines_count,
                 'is_active' => $client->is_active,
             ]);
 
@@ -97,32 +95,22 @@ class ClientController extends Controller
         ]);
     }
 
-    public function dashboard(Client $client): Response
+    public function dashboard(Client $client): RedirectResponse
     {
-        $client->load([
-            'events' => fn ($query) => $query
-                ->where('is_active', true)
-                ->orderBy('event_date'),
-        ]);
+        $event = $this->latestActiveEventForClient($client);
 
-        return Inertia::render('Dashboard', [
-            'type' => 'client',
-            'client' => [
-                'id' => $client->id,
-                'name' => $client->name,
-                'business_name' => $client->business_name,
-                'address' => $client->address,
-                'phone' => $client->phone,
-            ],
-            'events' => $client->events->map(fn (Event $event): array => [
-                'id' => $event->id,
-                'title' => $event->title,
-                'description' => $event->description,
-                'event_date' => $event->event_date->toISOString(),
-            ]),
-            'previewMode' => true,
-            'previewBackUrl' => route('admin.clients.index'),
-        ]);
+        abort_unless($event, 404);
+
+        return to_route('admin.events.dashboard', $event);
+    }
+
+    private function latestActiveEventForClient(Client $client): ?Event
+    {
+        return $client->events()
+            ->where('is_active', true)
+            ->orderByDesc('event_date')
+            ->orderByDesc('id')
+            ->first();
     }
 
     public function update(Request $request, Client $client): RedirectResponse

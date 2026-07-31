@@ -61,7 +61,7 @@ class EventReportAutoSyncService
             ->where('is_active', true)
             ->whereNotNull('report_ends_at')
             ->whereHas('client', fn ($query) => $query->where('is_active', true))
-            ->whereHas('client.zonesoftMachines', fn ($query) => $query
+            ->whereHas('zonesoftMachines', fn ($query) => $query
                 ->where('is_active', true)
                 ->whereHas('application', fn ($application) => $application->where('is_active', true)))
             ->with(['latestActiveReportImport', 'latestReportImport'])

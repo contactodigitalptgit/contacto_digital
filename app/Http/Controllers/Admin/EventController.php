@@ -10,6 +10,7 @@ use App\Services\EventReportSyncService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Process;
+use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -24,11 +25,10 @@ class EventController extends Controller
                 ->with([
                     'latestActiveReportImport',
                     'latestReportImport',
-                    'client' => fn ($query) => $query->withCount([
-                        'zonesoftMachines as active_zonesoft_machines_count' => fn ($machineQuery) => $machineQuery->where('is_active', true),
-                    ]),
+                    'client',
                 ])
                 ->withCount([
+                    'zonesoftMachines as active_zonesoft_machines_count' => fn ($query) => $query->where('is_active', true),
                     'activeReportImports as active_report_imports_count',
                     'processingReportImports as processing_report_imports_count',
                     'reportRows as active_report_rows_count' => fn ($query) => $query->whereHas(
@@ -61,10 +61,11 @@ class EventController extends Controller
                         'report_starts_at_input' => $event->report_starts_at?->format('Y-m-d\TH:i') ?? '',
                         'report_ends_at' => $event->report_ends_at?->toISOString(),
                         'report_ends_at_input' => $event->report_ends_at?->format('Y-m-d\TH:i') ?? '',
+                        'show_zt_card' => $event->show_zt_card,
                         'client_name' => $event->client->name,
                         'client_id' => $event->client_id,
                         'is_active' => $event->is_active,
-                        'available_machine_count' => (int) ($event->client->active_zonesoft_machines_count ?? 0),
+                        'available_machine_count' => (int) ($event->active_zonesoft_machines_count ?? 0),
                         'report_summary' => $hasAnyImport ? [
                             'active_syncs_count' => (int) $event->processing_report_imports_count,
                             'active_rows_count' => (int) $event->active_report_rows_count,
@@ -103,7 +104,10 @@ class EventController extends Controller
             'event_date' => ['required', 'date'],
             'report_starts_at' => ['nullable', 'date'],
             'report_ends_at' => ['required', 'date', 'after_or_equal:event_date', 'after_or_equal:report_starts_at'],
+            'show_zt_card' => ['sometimes', 'boolean'],
         ]);
+
+        $validated['show_zt_card'] = $request->boolean('show_zt_card', true);
 
         Event::create($validated);
 
@@ -121,6 +125,7 @@ class EventController extends Controller
                 'event_date' => $event->event_date->format('Y-m-d\TH:i'),
                 'report_starts_at' => $event->report_starts_at?->format('Y-m-d\TH:i'),
                 'report_ends_at' => $event->report_ends_at?->format('Y-m-d\TH:i'),
+                'show_zt_card' => $event->show_zt_card,
             ],
             'clients' => Client::query()
                 ->orderBy('name')
@@ -137,7 +142,19 @@ class EventController extends Controller
             'event_date' => ['required', 'date'],
             'report_starts_at' => ['nullable', 'date'],
             'report_ends_at' => ['required', 'date', 'after_or_equal:event_date', 'after_or_equal:report_starts_at'],
+            'show_zt_card' => ['sometimes', 'boolean'],
         ]);
+
+        $validated['show_zt_card'] = $request->boolean('show_zt_card', true);
+
+        if (
+            (int) $validated['client_id'] !== $event->client_id
+            && $event->zonesoftMachines()->exists()
+        ) {
+            throw ValidationException::withMessages([
+                'client_id' => 'Não é possível alterar o cliente enquanto o evento tiver integrações configuradas.',
+            ]);
+        }
 
         $event->update($validated);
 

@@ -249,14 +249,14 @@ class EventReportSyncService
      */
     private function resolveMachines(Event $event): Collection
     {
-        $machines = $event->client->zonesoftMachines()
+        $machines = $event->zonesoftMachines()
             ->with('application')
             ->where('is_active', true)
             ->get();
 
         if ($machines->isEmpty()) {
             throw ValidationException::withMessages([
-                'integration' => 'Este cliente ainda nao possui Client IDs ativos para sincronizar.',
+                'integration' => 'Este evento ainda nao possui Client IDs ativos atribuidos para sincronizar.',
             ]);
         }
 

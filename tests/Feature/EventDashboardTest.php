@@ -39,6 +39,26 @@ class EventDashboardTest extends TestCase
         }
     }
 
+    public function test_client_dashboard_redirects_to_latest_active_event(): void
+    {
+        [, $clientUser, $olderEvent] = $this->makeDashboardContext();
+
+        $latestEvent = Event::create([
+            'client_id' => $olderEvent->client_id,
+            'title' => 'Evento Mais Recente',
+            'description' => 'Dashboard direto',
+            'event_date' => now()->addDays(8),
+            'report_starts_at' => now()->addDays(8),
+            'report_ends_at' => now()->addDays(9),
+            'is_active' => true,
+        ]);
+
+        $this
+            ->actingAs($clientUser)
+            ->get(route('dashboard'))
+            ->assertRedirect(route('events.dashboard', $latestEvent));
+    }
+
     public function test_client_can_view_event_dashboard_with_filters(): void
     {
         [$admin, $clientUser, $event] = $this->makeDashboardContext();
@@ -100,6 +120,86 @@ class EventDashboardTest extends TestCase
             )));
     }
 
+    public function test_event_dashboard_exposes_client_events_for_switcher(): void
+    {
+        [$admin, , $event] = $this->makeDashboardContext();
+
+        $latestEvent = Event::create([
+            'client_id' => $event->client_id,
+            'title' => 'Evento Seguinte',
+            'description' => 'Troca de evento',
+            'event_date' => now()->addDays(10),
+            'report_starts_at' => now()->addDays(10),
+            'report_ends_at' => now()->addDays(11),
+            'is_active' => true,
+        ]);
+
+        $this
+            ->actingAs($admin)
+            ->get(route('admin.events.dashboard', $event))
+            ->assertOk()
+            ->assertInertia(fn (AssertableInertia $page) => $page
+                ->component('Events/Dashboard')
+                ->has('eventOptions', 2)
+                ->where('eventOptions.0.id', $latestEvent->id)
+                ->where('eventOptions.0.url', route('admin.events.dashboard', $latestEvent))
+                ->where('eventOptions.1.id', $event->id)
+                ->where('eventOptions.1.is_current', true));
+    }
+
+    public function test_dashboard_groups_embedded_bar_names_into_operational_zones(): void
+    {
+        [$admin, , $event] = $this->makeDashboardContext();
+        $this->seedSyncedRows($event, $admin);
+        $activeImport = $event->activeReportImports()->firstOrFail();
+        $stores = [
+            ['Tpa 6 - Bar 1 Rodolfo - POS 1', '6', '2.0000'],
+            ['Tpa 3 - Bar 2 Vitor - POS 1', '3', '3.0000'],
+            ['Tpa 13 - Bar 2 Claudia - POS 1', '13', '4.0000'],
+            ['Tpa 8 - Bar Vip Alison - POS 1', '8', '5.0000'],
+            ['Tpa 15 - Bar Vip Simao - POS 1', '15', '6.0000'],
+        ];
+
+        foreach ($stores as $index => [$storeName, $storeCode, $total]) {
+            EventReportRow::create([
+                'event_id' => $event->id,
+                'event_report_import_id' => $activeImport->id,
+                'source_sheet' => 'zonesoft:grouping-test',
+                'source_row_number' => 100 + $index,
+                'store_code' => $storeCode,
+                'store_name' => $storeName,
+                'sale_date' => '2026-03-14',
+                'sale_datetime' => '2026-03-14 14:00:00',
+                'doc_type' => 'FS',
+                'document_series' => 'GROUP',
+                'document_number' => (string) ($index + 1),
+                'value' => $total,
+                'total' => $total,
+                'discount' => '0.0000',
+                'quantity' => '1.0000',
+                'product_code' => 'GROUP',
+                'description' => 'Produto de teste',
+                'raw_row' => ['index' => 100 + $index],
+            ]);
+        }
+
+        $this
+            ->actingAs($admin)
+            ->get(route('admin.events.dashboard', $event))
+            ->assertOk()
+            ->assertInertia(fn (AssertableInertia $page) => $page
+                ->where('barGroups', fn ($groups): bool => collect($groups)->contains(
+                    fn (array $group): bool => $group['label'] === 'Bar 1'
+                        && in_array('Tpa 6 - Bar 1 Rodolfo - POS 1', $group['members'], true),
+                ) && collect($groups)->contains(
+                    fn (array $group): bool => $group['label'] === 'Bar 2'
+                        && $group['stores_count'] === 2,
+                ) && collect($groups)->contains(
+                    fn (array $group): bool => $group['label'] === 'Bar Vip'
+                        && $group['stores_count'] === 2,
+                )));
+    }
+
     public function test_client_can_not_view_dashboard_of_other_client_event(): void
     {
         [, , $event] = $this->makeDashboardContext();
@@ -142,6 +242,7 @@ class EventDashboardTest extends TestCase
             ->where('integration.source', 'ZoneSoft API')
             ->where('integration.configured_client_ids_count', 2)
             ->where('integration.machines_count', 2)
+            ->where('event.show_zt_card', true)
             ->where('event.processing_imports_count', 0)
             ->where('summary.total_rows', 6)
             ->where('summary.processing_imports_count', 0)
@@ -158,6 +259,24 @@ class EventDashboardTest extends TestCase
             ->where('paymentSummary.total_with_zt', 17)
             ->where('dailySales', fn ($days): bool => count($days) === 2
                 && collect($days)->sum('sales_total') === 14.25)
+            ->where('dailyBreakdowns', function ($days): bool {
+                $firstDay = collect($days)->firstWhere('date', '2026-03-14');
+                $secondDay = collect($days)->firstWhere('date', '2026-03-15');
+
+                return count($days) === 2
+                    && (float) ($firstDay['sales_total'] ?? 0) === 13.25
+                    && (float) ($firstDay['multibanco'] ?? 0) === 3.2
+                    && (float) ($firstDay['cash'] ?? 0) === 4.55
+                    && (float) ($firstDay['zticket'] ?? 0) === 5.5
+                    && (int) ($firstDay['tickets_count'] ?? 0) === 4
+                    && (float) ($firstDay['average_ticket'] ?? 0) === 3.3125
+                    && (float) ($secondDay['sales_total'] ?? 0) === 1.0
+                    && (float) ($secondDay['multibanco'] ?? 0) === 1.0
+                    && (float) ($secondDay['top_up_loaded'] ?? 0) === 2.75
+                    && (float) ($secondDay['total_with_zt'] ?? 0) === 3.75
+                    && (int) ($secondDay['tickets_count'] ?? 0) === 1
+                    && (float) ($secondDay['average_ticket'] ?? 0) === 1.0;
+            })
             ->where('productBreakdowns.total', fn ($products): bool => collect($products)->contains(
                 fn (array $product): bool => $product['label'] === 'Contactless'
                     && $product['code'] === 'ZT-CARD'
@@ -184,6 +303,30 @@ class EventDashboardTest extends TestCase
                     && in_array('Bar 1 Joana C', $group['members'], true),
             ))
             ->where('event.client_name', 'Cliente Dashboard'));
+    }
+
+    public function test_dashboard_hides_zt_product_breakdowns_when_event_disables_zt_card(): void
+    {
+        [$admin, , $event] = $this->makeDashboardContext();
+
+        $event->update(['show_zt_card' => false]);
+        $this->seedSyncedRows($event, $admin);
+
+        $response = $this
+            ->actingAs($admin)
+            ->get(route('admin.events.dashboard', $event));
+
+        $response->assertOk();
+        $response->assertInertia(fn (AssertableInertia $page) => $page
+            ->component('Events/Dashboard')
+            ->where('event.show_zt_card', false)
+            ->where('paymentSummary.top_up_loaded', 2.75)
+            ->where('productBreakdowns.total', fn ($products): bool => collect($products)->doesntContain(
+                fn (array $product): bool => $product['code'] === 'ZT-CARD',
+            ))
+            ->where('topProducts', fn ($products): bool => collect($products)->doesntContain(
+                fn (array $product): bool => $product['code'] === 'ZT-CARD',
+            )));
     }
 
     public function test_dashboard_compares_with_previous_synced_event(): void
@@ -365,6 +508,7 @@ class EventDashboardTest extends TestCase
 
         ClientZoneSoftMachine::create([
             'client_id' => $event->client_id,
+            'event_id' => $event->id,
             'zonesoft_application_id' => $application->id,
             'zs_client_id' => 'CLIENT-ID-001',
             'license' => 'Z11JSMZIYP',
@@ -377,6 +521,7 @@ class EventDashboardTest extends TestCase
 
         ClientZoneSoftMachine::create([
             'client_id' => $event->client_id,
+            'event_id' => $event->id,
             'zonesoft_application_id' => $application->id,
             'zs_client_id' => 'CLIENT-ID-002',
             'license' => 'Z11JSMZIYP',
@@ -404,6 +549,7 @@ class EventDashboardTest extends TestCase
                         'store_code' => '1',
                         'store_name' => 'Bar 1 - Joao',
                         'sale_date' => '2026-03-14',
+                        'sale_datetime' => '2026-03-14 12:00:00',
                         'cash_register_code' => '1',
                         'is_closed' => true,
                         'fs' => '2.7500',
@@ -500,6 +646,7 @@ class EventDashboardTest extends TestCase
                         'store_code' => '1',
                         'store_name' => 'Bar 1 Joana C',
                         'sale_date' => '2026-03-14',
+                        'sale_datetime' => '2026-03-14 12:05:00',
                         'doc_type' => 'FT',
                         'document_series' => 'A2026',
                         'document_number' => '2',
@@ -510,6 +657,7 @@ class EventDashboardTest extends TestCase
                         'store_code' => '2',
                         'store_name' => 'Top Up 1 - POS 1',
                         'sale_date' => '2026-03-14',
+                        'sale_datetime' => '2026-03-14 12:10:00',
                         'doc_type' => 'FS',
                         'document_series' => 'A2026',
                         'document_number' => '3',
@@ -520,6 +668,7 @@ class EventDashboardTest extends TestCase
                         'store_code' => '3',
                         'store_name' => 'Bar 3 - Luis',
                         'sale_date' => '2026-03-14',
+                        'sale_datetime' => '2026-03-14 12:15:00',
                         'doc_type' => 'VD',
                         'document_series' => 'A2026',
                         'document_number' => '4',
@@ -529,7 +678,8 @@ class EventDashboardTest extends TestCase
                     [
                         'store_code' => '4',
                         'store_name' => 'Bar 4 - Ana',
-                        'sale_date' => '2026-03-15',
+                        'sale_date' => '2026-03-14',
+                        'sale_datetime' => '2026-03-15 00:05:00',
                         'doc_type' => 'TK',
                         'document_series' => 'A2026',
                         'document_number' => '5',
@@ -539,7 +689,8 @@ class EventDashboardTest extends TestCase
                     [
                         'store_code' => '5',
                         'store_name' => 'BC TOP BAR 2 - POS 1',
-                        'sale_date' => '2026-03-15',
+                        'sale_date' => '2026-03-14',
+                        'sale_datetime' => '2026-03-15 00:10:00',
                         'doc_type' => 'ZT',
                         'document_series' => 'A2026',
                         'document_number' => '6',

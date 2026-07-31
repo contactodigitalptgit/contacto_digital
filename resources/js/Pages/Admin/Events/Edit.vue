@@ -20,6 +20,7 @@ interface EventData {
     event_date: string;
     report_starts_at: string | null;
     report_ends_at: string | null;
+    show_zt_card: boolean;
 }
 
 const props = defineProps<{
@@ -34,6 +35,7 @@ const form = useForm({
     event_date: props.event.event_date,
     report_starts_at: props.event.report_starts_at ?? '',
     report_ends_at: props.event.report_ends_at ?? '',
+    show_zt_card: props.event.show_zt_card,
 });
 
 const submit = () => {
@@ -150,6 +152,40 @@ const submit = () => {
                                 :message="form.errors.report_ends_at"
                             />
                         </div>
+
+                        <section class="rounded-2xl border border-gray-200 bg-gray-50 p-4">
+                            <div class="flex items-center gap-3">
+                                <img
+                                    src="/images/zicket-logo.png"
+                                    alt="Zicket"
+                                    class="h-12 w-12 rounded-xl object-contain"
+                                />
+                                <div>
+                                    <p class="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                                        Integrações
+                                    </p>
+                                    <h3 class="text-sm font-semibold text-gray-900">
+                                        Zicket / ZT - Card
+                                    </h3>
+                                </div>
+                            </div>
+
+                            <label class="mt-4 flex items-start gap-3 text-sm text-gray-700">
+                                <input
+                                    v-model="form.show_zt_card"
+                                    type="checkbox"
+                                    class="mt-1 rounded border-gray-300 text-blue-600 shadow-sm focus:ring-blue-500"
+                                />
+                                <span>
+                                    <strong class="block text-gray-900">Mostrar ZT - Card no dashboard</strong>
+                                    Desligue para eventos sem carregamentos ZT.
+                                </span>
+                            </label>
+                            <InputError
+                                class="mt-2"
+                                :message="form.errors.show_zt_card"
+                            />
+                        </section>
 
                         <div class="flex justify-end">
                             <PrimaryButton

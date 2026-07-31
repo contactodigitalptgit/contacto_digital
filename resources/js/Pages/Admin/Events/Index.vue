@@ -32,6 +32,7 @@ interface EventItem {
     report_starts_at_input: string;
     report_ends_at: string | null;
     report_ends_at_input: string;
+    show_zt_card: boolean;
     client_name: string;
     client_id: number;
     available_machine_count: number;
@@ -59,6 +60,7 @@ const createEventForm = useForm({
     event_date: '',
     report_starts_at: '',
     report_ends_at: '',
+    show_zt_card: true,
 });
 
 const editEventForm = useForm({
@@ -68,6 +70,7 @@ const editEventForm = useForm({
     event_date: '',
     report_starts_at: '',
     report_ends_at: '',
+    show_zt_card: true,
 });
 
 const reportSyncIntegrationError = ref('');
@@ -146,6 +149,7 @@ const openEditEventModal = (event: EventItem) => {
     editEventForm.event_date = event.event_date_input;
     editEventForm.report_starts_at = event.report_starts_at_input;
     editEventForm.report_ends_at = event.report_ends_at_input;
+    editEventForm.show_zt_card = event.show_zt_card;
     editEventForm.clearErrors();
     showEditEventModal.value = true;
 };
@@ -399,6 +403,25 @@ const deleteEvent = async (event: EventItem) => {
                                 </svg>
                             </Link>
 
+                            <Link
+                                :href="route('admin.events.integrations.show', event.id)"
+                                class="admin-event-icon-btn"
+                                title="Gerir integrações deste evento"
+                                aria-label="Gerir integrações deste evento"
+                            >
+                                <svg
+                                    class="h-4 w-4"
+                                    viewBox="0 0 24 24"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    stroke-width="2"
+                                >
+                                    <path d="M8 12h8" />
+                                    <path d="M12 8v8" />
+                                    <rect x="3" y="3" width="18" height="18" rx="4" />
+                                </svg>
+                            </Link>
+
                             <button
                                 type="button"
                                 class="admin-event-icon-btn"
@@ -581,6 +604,25 @@ const deleteEvent = async (event: EventItem) => {
                                                 stroke-width="2"
                                             >
                                                 <path d="M3 12h4l3-8 4 16 3-8h4" />
+                                            </svg>
+                                        </Link>
+
+                                        <Link
+                                            :href="route('admin.events.integrations.show', event.id)"
+                                            class="admin-event-icon-btn"
+                                            title="Gerir integrações deste evento"
+                                            aria-label="Gerir integrações deste evento"
+                                        >
+                                            <svg
+                                                class="h-4 w-4"
+                                                viewBox="0 0 24 24"
+                                                fill="none"
+                                                stroke="currentColor"
+                                                stroke-width="2"
+                                            >
+                                                <path d="M8 12h8" />
+                                                <path d="M12 8v8" />
+                                                <rect x="3" y="3" width="18" height="18" rx="4" />
                                             </svg>
                                         </Link>
 
@@ -838,6 +880,34 @@ const deleteEvent = async (event: EventItem) => {
                             {{ createEventForm.errors.description }}
                         </p>
                     </div>
+
+                    <section class="admin-event-integration-card dash-modal-field-full">
+                        <div class="admin-event-integration-brand">
+                            <img src="/images/zicket-logo.png" alt="Zicket" />
+                            <div>
+                                <span>Integrações</span>
+                                <strong>Zicket / ZT - Card</strong>
+                            </div>
+                        </div>
+
+                        <label class="admin-event-integration-toggle" for="event_show_zt_card_create">
+                            <input
+                                id="event_show_zt_card_create"
+                                v-model="createEventForm.show_zt_card"
+                                type="checkbox"
+                            />
+                            <span>
+                                <strong>Mostrar ZT - Card no dashboard</strong>
+                                <small>Use quando o evento tiver carregamentos ou pagamentos ZT.</small>
+                            </span>
+                        </label>
+                        <p
+                            v-if="createEventForm.errors.show_zt_card"
+                            class="dash-modal-error"
+                        >
+                            {{ createEventForm.errors.show_zt_card }}
+                        </p>
+                    </section>
                 </div>
 
                 <div class="dash-modal-actions">
@@ -1008,6 +1078,34 @@ const deleteEvent = async (event: EventItem) => {
                             {{ editEventForm.errors.description }}
                         </p>
                     </div>
+
+                    <section class="admin-event-integration-card dash-modal-field-full">
+                        <div class="admin-event-integration-brand">
+                            <img src="/images/zicket-logo.png" alt="Zicket" />
+                            <div>
+                                <span>Integrações</span>
+                                <strong>Zicket / ZT - Card</strong>
+                            </div>
+                        </div>
+
+                        <label class="admin-event-integration-toggle" for="event_show_zt_card_edit">
+                            <input
+                                id="event_show_zt_card_edit"
+                                v-model="editEventForm.show_zt_card"
+                                type="checkbox"
+                            />
+                            <span>
+                                <strong>Mostrar ZT - Card no dashboard</strong>
+                                <small>Desligue para eventos sem carregamentos ZT.</small>
+                            </span>
+                        </label>
+                        <p
+                            v-if="editEventForm.errors.show_zt_card"
+                            class="dash-modal-error"
+                        >
+                            {{ editEventForm.errors.show_zt_card }}
+                        </p>
+                    </section>
                 </div>
 
                 <div class="dash-modal-actions">

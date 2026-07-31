@@ -23,6 +23,7 @@ class Event extends Model
         'event_date',
         'report_starts_at',
         'report_ends_at',
+        'show_zt_card',
         'is_active',
     ];
 
@@ -35,6 +36,7 @@ class Event extends Model
             'event_date' => 'datetime',
             'report_starts_at' => 'datetime',
             'report_ends_at' => 'datetime',
+            'show_zt_card' => 'boolean',
             'is_active' => 'boolean',
         ];
     }
@@ -76,5 +78,10 @@ class Event extends Model
     public function reportRows(): HasMany
     {
         return $this->hasMany(EventReportRow::class);
+    }
+
+    public function zonesoftMachines(): HasMany
+    {
+        return $this->hasMany(ClientZoneSoftMachine::class);
     }
 }

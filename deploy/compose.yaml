@@ -1,0 +1,86 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: contacto-digital-portal-app:latest
+    container_name: contacto_digital_portal_app
+    env_file:
+      - .env.production
+    volumes:
+      - ./shared/storage:/var/www/html/storage
+      - ./shared/database:/var/www/shared/database
+    networks:
+      - internal
+      - proxy
+    restart: unless-stopped
+    mem_limit: 512m
+    cpus: 1.0
+    pids_limit: 256
+
+  web:
+    image: nginx:alpine
+    container_name: contacto_digital_portal_web
+    depends_on:
+      - app
+    volumes:
+      - ./app-runtime:/var/www/html:ro
+      - ./shared/storage:/var/www/html/storage
+      - ./nginx:/etc/nginx/conf.d:ro
+    networks:
+      - internal
+      - proxy
+    restart: unless-stopped
+    mem_limit: 128m
+    cpus: 0.5
+    pids_limit: 128
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/up"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  worker:
+    image: contacto-digital-portal-app:latest
+    container_name: contacto_digital_portal_worker
+    depends_on:
+      - app
+    command: php artisan queue:work --sleep=3 --tries=1 --timeout=0
+    env_file:
+      - .env.production
+    volumes:
+      - ./shared/storage:/var/www/html/storage
+      - ./shared/database:/var/www/shared/database
+    networks:
+      - internal
+    restart: unless-stopped
+    mem_limit: 512m
+    cpus: 1.0
+    pids_limit: 256
+
+  scheduler:
+    image: contacto-digital-portal-app:latest
+    container_name: contacto_digital_portal_scheduler
+    depends_on:
+      - app
+    command: php artisan schedule:work --no-interaction
+    env_file:
+      - .env.production
+    volumes:
+      - ./shared/storage:/var/www/html/storage
+      - ./shared/database:/var/www/shared/database
+    networks:
+      - internal
+    restart: unless-stopped
+    mem_limit: 256m
+    cpus: 0.75
+    pids_limit: 128
+
+networks:
+  internal:
+    name: contacto-digital-portal-internal
+    internal: true
+  proxy:
+    external: true
+    name: proxy_default

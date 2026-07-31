@@ -13,6 +13,12 @@ interface ClientData {
     email: string | null;
 }
 
+interface EventData {
+    id: number;
+    title: string;
+    event_date: string;
+}
+
 interface ApplicationData {
     id: number;
     name: string;
@@ -46,10 +52,25 @@ interface StoreOption {
 
 const props = defineProps<{
     client: ClientData;
+    event: EventData;
     application: ApplicationData | null;
     defaultMachinePermissions: string;
     machines: MachineItem[];
 }>();
+
+const integrationRoute = (action: string, machineId?: number) => {
+    const makeRoute = route as unknown as (
+        name: string,
+        parameters: number | number[],
+    ) => string;
+
+    return makeRoute(
+        `admin.events.integrations.${action}`,
+        machineId === undefined
+            ? props.event.id
+            : [props.event.id, machineId],
+    );
+};
 
 const showMachineModal = ref(false);
 const editingMachineId = ref<number | null>(null);
@@ -187,7 +208,7 @@ const closeMachineModal = () => {
 };
 
 const saveApplication = () => {
-    applicationForm.post(route('admin.clients.integrations.application.save', props.client.id), {
+    applicationForm.post(integrationRoute('application.save'), {
         preserveScroll: true,
         onSuccess: () => {
             applicationForm.app_secret = '';
@@ -217,7 +238,7 @@ const discoverStores = async () => {
 
     try {
         const response = await axios.post(
-            route('admin.clients.integrations.discover-stores', props.client.id),
+            integrationRoute('discover-stores'),
             {
                 zs_client_id: machineForm.zs_client_id,
             },
@@ -256,7 +277,7 @@ const validateAllStores = async () => {
 
     try {
         const response = await axios.post(
-            route('admin.clients.integrations.machines.validate-all', props.client.id),
+            integrationRoute('machines.validate-all'),
         );
 
         const validated = Number(response.data.validated ?? 0);
@@ -306,10 +327,7 @@ const submitMachine = () => {
 
     if (editingMachineId.value) {
         machineForm.put(
-            route('admin.clients.integrations.machines.update', [
-                props.client.id,
-                editingMachineId.value,
-            ]),
+            integrationRoute('machines.update', editingMachineId.value),
             requestOptions,
         );
 
@@ -317,7 +335,7 @@ const submitMachine = () => {
     }
 
     machineForm.post(
-        route('admin.clients.integrations.machines.store', props.client.id),
+        integrationRoute('machines.store'),
         requestOptions,
     );
 };
@@ -325,7 +343,7 @@ const submitMachine = () => {
 const deleteMachine = async (machine: MachineItem) => {
     const confirmed = await confirmAction({
         title: 'Remover Client ID?',
-        text: `O Client ID ${machine.zs_client_id} será removido deste cliente.`,
+        text: `O Client ID ${machine.zs_client_id} será removido deste evento.`,
         confirmButtonText: 'Remover',
     });
 
@@ -334,10 +352,7 @@ const deleteMachine = async (machine: MachineItem) => {
     }
 
     router.delete(
-        route('admin.clients.integrations.machines.destroy', [
-            props.client.id,
-            machine.id,
-        ]),
+        integrationRoute('machines.destroy', machine.id),
         {
             preserveScroll: true,
             onSuccess: () => {
@@ -352,7 +367,7 @@ const deleteMachine = async (machine: MachineItem) => {
 </script>
 
 <template>
-    <Head :title="`Integrações - ${props.client.name}`" />
+    <Head :title="`Integrações - ${props.event.title}`" />
 
     <AuthenticatedLayout>
         <template #header>
@@ -360,15 +375,15 @@ const deleteMachine = async (machine: MachineItem) => {
                 <div>
                     <h2 class="dash-page-title">Integrações ZoneSoft</h2>
                     <p class="dash-muted-text">
-                        {{ props.client.name }}{{ props.client.business_name ? ` - ${props.client.business_name}` : '' }}
+                        {{ props.event.title }} · {{ props.client.name }}
                     </p>
                 </div>
 
                 <Link
-                    :href="route('admin.clients.index')"
+                    :href="route('admin.events.index')"
                     class="dash-link-button"
                 >
-                    Voltar para clientes
+                    Voltar para eventos
                 </Link>
             </div>
         </template>
@@ -500,9 +515,11 @@ const deleteMachine = async (machine: MachineItem) => {
             <section class="dash-card space-y-5">
                 <div class="dash-recent-header">
                     <div>
-                        <h3 class="dash-card-title mb-0">Client IDs do cliente</h3>
+                        <h3 class="dash-card-title mb-0">
+                            Client IDs do evento
+                        </h3>
                         <p class="dash-recent-subtitle">
-                            Cada Client ID representa uma máquina autorizada no mesmo cliente.
+                            Cada Client ID representa uma máquina autorizada exclusivamente para este evento.
                         </p>
                     </div>
 
