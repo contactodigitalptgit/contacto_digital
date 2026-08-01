@@ -54,6 +54,7 @@ services:
       - ./shared/database:/var/www/shared/database
     networks:
       - internal
+      - egress
     restart: unless-stopped
     mem_limit: 512m
     cpus: 1.0
@@ -81,6 +82,8 @@ networks:
   internal:
     name: contacto-digital-portal-internal
     internal: true
+  egress:
+    name: contacto-digital-portal-egress
   proxy:
     external: true
     name: proxy_default
