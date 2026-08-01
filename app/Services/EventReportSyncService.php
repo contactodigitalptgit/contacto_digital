@@ -42,6 +42,8 @@ class EventReportSyncService
 
     private const RATE_LIMIT_SERIAL_RETRY_MACHINE_PAUSE_MICROSECONDS = 350000;
 
+    private const FINALIZATION_TRANSACTION_ATTEMPTS = 5;
+
     public function __construct(
         private readonly ZoneSoftApiClient $apiClient,
         private readonly ProcessFactory $processFactory,
@@ -224,7 +226,7 @@ class EventReportSyncService
                 ]);
 
                 return $lockedSyncLog->fresh();
-            });
+            }, self::FINALIZATION_TRANSACTION_ATTEMPTS);
 
             if ($completedSync->status !== 'completed') {
                 throw new \RuntimeException(

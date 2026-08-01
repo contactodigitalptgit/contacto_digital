@@ -8,6 +8,7 @@ use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Route;
+use Illuminate\Support\Str;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -33,7 +34,17 @@ class AuthenticatedSessionController extends Controller
 
         $request->session()->regenerate();
 
-        return redirect()->intended(route('dashboard', absolute: false));
+        $user = $request->user();
+        $fallback = route('dashboard', absolute: false);
+        $intended = (string) $request->session()->pull('url.intended', $fallback);
+
+        if ($user && ! $user->isAdmin()) {
+            if (! Str::startsWith($intended, ['/dashboard', '/events/'])) {
+                return redirect()->to($fallback);
+            }
+        }
+
+        return redirect()->to($intended ?: $fallback);
     }
 
     /**

@@ -56,6 +56,15 @@ install -d -m 0755 \
   "${project_dir}/shared/storage/logs" \
   "${proxy_conf_dir}"
 
+chown -R 33:33 \
+  "${project_dir}/shared/storage" \
+  "${project_dir}/shared/database"
+
+find "${project_dir}/shared/storage" -type d -exec chmod 0775 {} \;
+find "${project_dir}/shared/storage" -type f -exec chmod 0664 {} \;
+find "${project_dir}/shared/database" -type d -exec chmod 0775 {} \;
+find "${project_dir}/shared/database" -type f -exec chmod 0664 {} \;
+
 if [ -f "${project_dir}/Dockerfile" ]; then
   cp -a "${project_dir}/Dockerfile" "${backup_dir}/Dockerfile"
 fi
@@ -90,6 +99,15 @@ if [ ! -f "${project_dir}/shared/database/contacto_digital_bd.sqlite" ] && [ -f 
   install -m 0644 "${release_dir}/seed/contacto_digital_bd.sqlite" \
     "${project_dir}/shared/database/contacto_digital_bd.sqlite"
 fi
+
+chown -R 33:33 \
+  "${project_dir}/shared/storage" \
+  "${project_dir}/shared/database"
+
+find "${project_dir}/shared/storage" -type d -exec chmod 0775 {} \;
+find "${project_dir}/shared/storage" -type f -exec chmod 0664 {} \;
+find "${project_dir}/shared/database" -type d -exec chmod 0775 {} \;
+find "${project_dir}/shared/database" -type f -exec chmod 0664 {} \;
 
 install -m 0644 "${release_dir}/proxy/portal.contactodigital.pt.conf" "${proxy_conf_file}"
 
