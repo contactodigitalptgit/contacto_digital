@@ -2579,11 +2579,13 @@
     }
 
     .report-dashboard-event-switcher {
-        @apply relative min-w-0 shrink-0;
+        @apply relative min-w-0;
+        flex: 1 1 18rem;
+        max-width: 30rem;
     }
 
     .report-dashboard-event-pill {
-        @apply flex h-12 max-w-[30rem] items-center gap-3 rounded-2xl border px-4;
+        @apply flex h-12 w-full max-w-[30rem] min-w-0 items-center gap-3 rounded-2xl border px-4;
         border-color: color-mix(in srgb, var(--accent) 26%, var(--line-color));
         color: var(--text-main);
         background: color-mix(in srgb, var(--card-bg) 78%, var(--accent-strong) 22%);
@@ -3332,8 +3334,12 @@
         @apply w-full;
     }
 
-    .report-dashboard-toolbar > div:last-child {
-        @apply flex-wrap justify-end;
+    .report-dashboard-toolbar-actions {
+        @apply flex min-w-0 flex-1 items-center justify-end gap-2;
+    }
+
+    .report-dashboard-toolbar-actions > .dash-action-button {
+        @apply shrink-0 whitespace-nowrap;
     }
 
     .report-dashboard-toolbar-tagline {
@@ -4518,6 +4524,10 @@
             @apply flex-col;
         }
 
+        .report-dashboard-toolbar-actions {
+            @apply flex-wrap items-stretch;
+        }
+
         .report-dashboard-commandbar-actions {
             @apply w-full flex-col items-stretch;
         }
@@ -4654,6 +4664,10 @@
 
         .report-dashboard-header-action {
             @apply flex-1;
+        }
+
+        .report-dashboard-toolbar-actions > .dash-action-button {
+            @apply w-full;
         }
 
         .report-dashboard-filter-panel {

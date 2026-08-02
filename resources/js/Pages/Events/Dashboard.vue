@@ -1152,7 +1152,7 @@ function getDifferenceClass(value: number | null) {
             <div class="report-dashboard-toolbar">
                 <p class="report-dashboard-toolbar-tagline">Relatórios inteligentes para decisões com impacto.</p>
 
-                <div class="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center">
+                <div class="report-dashboard-toolbar-actions">
                     <button
                         v-if="props.previewMode"
                         type="button"
@@ -1241,10 +1241,6 @@ function getDifferenceClass(value: number | null) {
                         </svg>
                         Ajuda
                     </a>
-
-                    <Link :href="props.backUrl" class="dash-link-button">
-                        {{ props.backLabel }}
-                    </Link>
                 </div>
             </div>
         </template>
@@ -1514,17 +1510,6 @@ function getDifferenceClass(value: number | null) {
                     </div>
 
                     <div v-else-if="activeSection === 'charts'" class="report-dashboard-view report-dashboard-analytics-view">
-                        <header class="report-dashboard-view-header">
-                            <div>
-                                <span>Análise visual</span>
-                                <h3>O evento em gráficos</h3>
-                                <p>Evolução das vendas, distribuição dos pagamentos e desempenho das principais zonas.</p>
-                            </div>
-                            <span class="report-dashboard-analytics-filter-note">
-                                {{ activeFilterCount > 0 ? `${activeFilterCount} filtro(s) aplicado(s)` : 'Evento completo' }}
-                            </span>
-                        </header>
-
                         <div class="report-dashboard-analytics-grid">
                             <section v-if="showZtCard" class="dash-card report-dashboard-analytics-card report-dashboard-analytics-financial-card">
                                 <header>
