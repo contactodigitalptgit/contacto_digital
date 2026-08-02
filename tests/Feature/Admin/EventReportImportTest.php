@@ -23,6 +23,13 @@ class EventReportImportTest extends TestCase
 {
     use RefreshDatabase;
 
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        config(['event-reports.zonesoft.complete_documents' => false]);
+    }
+
     public function test_admin_can_save_zonesoft_application_and_machine(): void
     {
         [$admin, $client] = $this->makeAdminClientContext();
@@ -568,6 +575,99 @@ class EventReportImportTest extends TestCase
             'description' => 'Agua',
             'store_name' => 'Loja 1 - POS 1',
         ]);
+    }
+
+    public function test_sync_uses_complete_documents_without_per_document_sales_requests(): void
+    {
+        config(['event-reports.zonesoft.complete_documents' => true]);
+
+        [$admin, $client] = $this->makeAdminClientContext();
+        $application = $this->makeApplication();
+        $event = $this->makeEvent($client);
+
+        ClientZoneSoftMachine::create([
+            'client_id' => $client->id,
+            'event_id' => $event->id,
+            'zonesoft_application_id' => $application->id,
+            'zs_client_id' => 'COMPLETE-DOCUMENTS-CLIENT',
+            'license' => 'Z11JSMZIYP',
+            'store_id' => 1,
+            'store_label' => 'Loja completa',
+            'permissions' => 'API + All document interfaces',
+            'is_active' => true,
+            'last_validated_at' => now(),
+        ]);
+
+        Http::fake([
+            'https://api.zonesoft.org/v3/documents/getInstances' => Http::response([
+                'Response' => [
+                    'StatusCode' => 200,
+                    'StatusMessage' => 'OK',
+                    'Content' => [
+                        'document' => [
+                            [
+                                'numero' => 601,
+                                'doc' => 'FS',
+                                'serie' => 'A2026',
+                                'data' => '2026-06-20',
+                                'datahora' => '2026-06-20 12:05:00',
+                                'pagamento' => 9,
+                                'total' => 8.70,
+                                'pago' => 1,
+                                'documentos_pagamento' => [
+                                    ['doc' => 'PG', 'serie' => 'A2026', 'numero' => 1, 'tipo' => 1, 'valor' => 2.00],
+                                    ['doc' => 'PG', 'serie' => 'A2026', 'numero' => 2, 'tipo' => 3, 'valor' => 5.20],
+                                ],
+                                'vendas' => [
+                                    [
+                                        'loja' => 1,
+                                        'numero' => 601,
+                                        'doc' => 'FS',
+                                        'serie' => 'A2026',
+                                        'data' => '2026-06-20',
+                                        'datahora' => '2026-06-20 12:05:00',
+                                        'codigo' => 730,
+                                        'descricao' => 'Agua',
+                                        'qtd' => 1,
+                                        'valor' => 7.0732,
+                                        'desconto' => 0,
+                                        'desconto2' => 0,
+                                        'total' => 8.70,
+                                        'posto' => 1,
+                                    ],
+                                ],
+                            ],
+                        ],
+                    ],
+                ],
+            ], 200),
+        ]);
+
+        $this
+            ->actingAs($admin)
+            ->post(route('admin.events.reports.store', $event))
+            ->assertRedirect(route('admin.events.index'));
+
+        $import = EventReportImport::query()->latest('id')->firstOrFail();
+
+        $this->assertSame('completed', $import->status);
+        $this->assertSame(1, $import->imported_rows_count);
+        $this->assertSame(1, $import->summary['api_requests_count'] ?? null);
+        $this->assertSame(1, $import->summary['documents_processed'] ?? null);
+        $this->assertCount(3, $import->summary['payment_documents'] ?? []);
+        $this->assertSame('2.0000', $import->summary['payment_documents'][0]['total'] ?? null);
+        $this->assertSame('5.2000', $import->summary['payment_documents'][1]['total'] ?? null);
+        $this->assertSame('1.5000', $import->summary['payment_documents'][2]['total'] ?? null);
+        $this->assertTrue($import->summary['payment_documents'][2]['is_unallocated'] ?? false);
+        $this->assertDatabaseHas('event_report_rows', [
+            'event_report_import_id' => $import->id,
+            'document_number' => '601',
+            'description' => 'Agua',
+            'total' => 8.7,
+        ]);
+        Http::assertSentCount(1);
+        Http::assertNotSent(fn ($request) => str_contains($request->url(), '/sales/getInstancesFromDocument'));
+        Http::assertNotSent(fn ($request) => str_contains($request->url(), '/documents/getDocumentsHeaders'));
     }
 
     public function test_sync_retries_rate_limited_machines_in_serial_pass(): void
@@ -1613,6 +1713,15 @@ class EventReportImportTest extends TestCase
             'is_active' => false,
             'status' => 'processing',
         ]);
+        EventReportRow::create([
+            'event_id' => $event->id,
+            'event_report_import_id' => $processingImport->id,
+            'source_sheet' => 'zonesoft:staged-test',
+            'source_row_number' => 1,
+            'document_number' => 'STAGED-1',
+            'total' => '2.7500',
+            'raw_row' => ['staged' => true],
+        ]);
 
         (new SyncEventReportJob($processingImport->id, $event->id))
             ->failed(new \RuntimeException('Worker stopped'));
@@ -1622,6 +1731,78 @@ class EventReportImportTest extends TestCase
         $this->assertSame('failed', $processingImport->status);
         $this->assertFalse($processingImport->is_active);
         $this->assertSame('Worker stopped', $processingImport->summary['error'] ?? null);
+        $this->assertDatabaseMissing('event_report_rows', [
+            'event_report_import_id' => $processingImport->id,
+            'document_number' => 'STAGED-1',
+        ]);
+    }
+
+    public function test_superseded_cleanup_preserves_rows_being_staged_by_a_new_sync(): void
+    {
+        [$admin, $client] = $this->makeAdminClientContext();
+        $event = $this->makeEvent($client);
+        $activeImport = $this->makeActiveReportImport($event, $admin);
+        $supersededImport = EventReportImport::create([
+            'event_id' => $event->id,
+            'uploaded_by_user_id' => $admin->id,
+            'import_strategy' => 'replace',
+            'original_filename' => 'zonesoft-api',
+            'stored_path' => 'zonesoft://old-sync',
+            'mime_type' => 'application/json',
+            'file_hash' => hash('sha256', 'old-sync'),
+            'headers' => ['source' => 'zonesoft_api'],
+            'summary' => ['source' => 'zonesoft_api'],
+            'imported_rows_count' => 1,
+            'imported_at' => now()->subMinute(),
+            'is_active' => false,
+            'status' => 'completed',
+        ]);
+        $processingImport = EventReportImport::create([
+            'event_id' => $event->id,
+            'uploaded_by_user_id' => $admin->id,
+            'import_strategy' => 'replace',
+            'original_filename' => 'zonesoft-api',
+            'stored_path' => 'zonesoft://new-sync',
+            'mime_type' => 'application/json',
+            'file_hash' => hash('sha256', 'new-sync'),
+            'headers' => ['source' => 'zonesoft_api'],
+            'summary' => ['source' => 'zonesoft_api'],
+            'imported_rows_count' => 0,
+            'is_active' => false,
+            'status' => 'processing',
+        ]);
+
+        foreach ([
+            [$activeImport, 'ACTIVE-1'],
+            [$supersededImport, 'OLD-1'],
+            [$processingImport, 'STAGING-1'],
+        ] as [$import, $documentNumber]) {
+            EventReportRow::create([
+                'event_id' => $event->id,
+                'event_report_import_id' => $import->id,
+                'source_sheet' => 'zonesoft:cleanup-test',
+                'source_row_number' => 1,
+                'document_number' => $documentNumber,
+                'total' => '1.0000',
+                'raw_row' => ['cleanup_test' => true],
+            ]);
+        }
+
+        $cleanup = new \ReflectionMethod(EventReportSyncService::class, 'cleanupSupersededRows');
+        $cleanup->invoke(app(EventReportSyncService::class), $event->id, $activeImport->id);
+
+        $this->assertDatabaseHas('event_report_rows', [
+            'event_report_import_id' => $activeImport->id,
+            'document_number' => 'ACTIVE-1',
+        ]);
+        $this->assertDatabaseMissing('event_report_rows', [
+            'event_report_import_id' => $supersededImport->id,
+            'document_number' => 'OLD-1',
+        ]);
+        $this->assertDatabaseHas('event_report_rows', [
+            'event_report_import_id' => $processingImport->id,
+            'document_number' => 'STAGING-1',
+        ]);
     }
 
     /**

@@ -150,6 +150,7 @@ class EventDashboardController extends Controller
                 'last_synced_at' => $event->latestActiveReportImport?->imported_at?->toISOString(),
             ],
             'autoSync' => $this->autoSync->status($event),
+            'syncStatus' => $this->buildSyncStatus($event),
             'filters' => $filters,
             'filterOptions' => fn (): array => [
                 'barGroups' => $this->buildBarGroupOptions($makeBaseRowsQuery()),
@@ -214,6 +215,60 @@ class EventDashboardController extends Controller
             'backUrl' => $backUrl,
             'backLabel' => $backLabel,
         ]);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function buildSyncStatus(Event $event): array
+    {
+        $latestAttempt = $event->latestReportImport;
+        $latestSuccess = $event->latestActiveReportImport;
+        $attemptSummary = is_array($latestAttempt?->summary) ? $latestAttempt->summary : [];
+        $attemptStatus = $latestAttempt?->status ?? 'idle';
+        $latestAttemptAt = $latestAttempt
+            ? ($latestAttempt->imported_at ?? $latestAttempt->updated_at ?? $latestAttempt->created_at)
+            : null;
+        $isStale = $attemptStatus === 'failed'
+            && (! $latestSuccess || $latestAttempt?->id !== $latestSuccess->id);
+
+        return [
+            'status' => $attemptStatus,
+            'is_stale' => $isStale,
+            'latest_attempt_at' => $latestAttemptAt?->toISOString(),
+            'last_success_at' => $latestSuccess?->imported_at?->toISOString(),
+            'stage' => (string) ($attemptSummary['stage'] ?? ($attemptStatus === 'processing' ? 'queued' : $attemptStatus)),
+            'machines_total' => (int) ($attemptSummary['machines_total'] ?? $attemptSummary['machines_count'] ?? 0),
+            'machines_processed' => (int) ($attemptSummary['machines_processed'] ?? 0),
+            'documents_processed' => (int) ($attemptSummary['documents_processed'] ?? 0),
+            'message' => $this->buildSyncStatusMessage($attemptStatus, $attemptSummary, $isStale),
+        ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $summary
+     */
+    private function buildSyncStatusMessage(string $status, array $summary, bool $isStale): ?string
+    {
+        if ($status === 'processing') {
+            return 'A sincronização está em curso. Os valores continuam a mostrar o último relatório válido até a nova versão ficar completa.';
+        }
+
+        if ($status !== 'failed' || ! $isStale) {
+            return null;
+        }
+
+        $error = Str::lower((string) ($summary['error'] ?? ''));
+
+        if (Str::contains($error, ['could not resolve host', 'curl error 6', 'ligacao a zonesoft'])) {
+            return 'A última tentativa não conseguiu comunicar com a ZoneSoft. Os valores apresentados são da última sincronização válida.';
+        }
+
+        if (Str::contains($error, ['database is locked', 'database locked'])) {
+            return 'A última tentativa terminou antes de publicar os dados. O último relatório válido foi mantido.';
+        }
+
+        return 'A última tentativa não foi concluída. Os valores apresentados são da última sincronização válida.';
     }
 
     /**
@@ -720,7 +775,7 @@ class EventDashboardController extends Controller
                     'other' => 0.0,
                 ];
                 $topUpLoaded = 0.0;
-                $topUpDocumentsCount = 0;
+                $topUpDocumentKeys = [];
                 $otherMovements = 0.0;
 
                 foreach ($dayDocuments as $document) {
@@ -728,7 +783,7 @@ class EventDashboardController extends Controller
 
                     if ($this->isTopUpDocument($document)) {
                         $topUpLoaded += $amount;
-                        $topUpDocumentsCount++;
+                        $topUpDocumentKeys[$this->buildPaymentDocumentKey($document)] = true;
 
                         continue;
                     }
@@ -757,7 +812,7 @@ class EventDashboardController extends Controller
                     'cash' => round($payments['cash'], 4),
                     'zticket' => round($payments['zticket'], 4),
                     'other' => round($payments['other'], 4),
-                    'top_up_documents_count' => $topUpDocumentsCount,
+                    'top_up_documents_count' => count($topUpDocumentKeys),
                     'top_up_loaded' => round($topUpLoaded, 4),
                     'top_up_spent' => round($topUpSpent, 4),
                     'top_up_remaining' => round(max($topUpLoaded - $topUpSpent, 0), 4),
@@ -898,17 +953,20 @@ class EventDashboardController extends Controller
             'top_up_spent' => 0.0,
             'other_movements' => 0.0,
         ];
-        $salesDocumentsCount = 0;
-        $topUpDocumentsCount = 0;
+        $movementDocumentKeys = [];
+        $salesDocumentKeys = [];
+        $topUpDocumentKeys = [];
 
         foreach ($documents as $document) {
             $amount = (float) ($document['total'] ?? 0);
             $category = $this->resolvePaymentCategory((string) ($document['payment_code'] ?? ''));
             $isTopUp = $this->isTopUpDocument($document);
+            $documentKey = $this->buildPaymentDocumentKey($document);
+            $movementDocumentKeys[$documentKey] = true;
 
             if ($isTopUp) {
                 $totals['top_up_loaded'] += $amount;
-                $topUpDocumentsCount++;
+                $topUpDocumentKeys[$documentKey] = true;
 
                 continue;
             }
@@ -920,7 +978,7 @@ class EventDashboardController extends Controller
             }
 
             $totals[$category] += $amount;
-            $salesDocumentsCount++;
+            $salesDocumentKeys[$documentKey] = true;
 
             if ($category === 'zticket') {
                 $totals['top_up_spent'] += $amount;
@@ -939,8 +997,8 @@ class EventDashboardController extends Controller
         return [
             'available' => true,
             'source' => 'documents_headers',
-            'documents_count' => $salesDocumentsCount,
-            'movement_documents_count' => $documents->count(),
+            'documents_count' => count($salesDocumentKeys),
+            'movement_documents_count' => count($movementDocumentKeys),
             'multibanco' => round($totals['multibanco'], 4),
             'cash' => round($totals['cash'], 4),
             'zticket' => round($totals['zticket'], 4),
@@ -950,7 +1008,7 @@ class EventDashboardController extends Controller
             'total_with_zt' => round($totalWithZt, 4),
             'movement_total' => round($movementTotal, 4),
             'other_movements' => round($totals['other_movements'], 4),
-            'top_up_documents_count' => $topUpDocumentsCount,
+            'top_up_documents_count' => count($topUpDocumentKeys),
             'top_up_loaded' => round($totals['top_up_loaded'], 4),
             'top_up_spent' => round($totals['top_up_spent'], 4),
             'top_up_remaining' => round(max($totals['top_up_loaded'] - $totals['top_up_spent'], 0), 4),
@@ -983,6 +1041,7 @@ class EventDashboardController extends Controller
             || $filters['total_max'] !== '';
 
         $items = [];
+        $documentKeys = [];
 
         foreach ((clone $rowsQuery)
             ->select('store_code', 'store_name')
@@ -1012,7 +1071,12 @@ class EventDashboardController extends Controller
 
             $category = $this->resolvePaymentCategory((string) ($document['payment_code'] ?? ''));
             $items[$key][$category] += (float) ($document['total'] ?? 0);
-            $items[$key]['documents_count']++;
+            $paymentDocumentKey = $this->buildPaymentDocumentKey($document);
+
+            if (! isset($documentKeys[$key][$paymentDocumentKey])) {
+                $items[$key]['documents_count']++;
+                $documentKeys[$key][$paymentDocumentKey] = true;
+            }
         }
 
         $normalizedItems = collect($items)
@@ -1040,7 +1104,10 @@ class EventDashboardController extends Controller
 
         return [
             'available' => $documents->isNotEmpty(),
-            'documents_count' => $documents->count(),
+            'documents_count' => count(array_unique(array_map(
+                fn (array $document): string => $this->buildPaymentDocumentKey($document),
+                $documents->all(),
+            ))),
             'comparable' => ! $hasProductSpecificFilters,
             'scope_note' => $hasProductSpecificFilters
                 ? 'Os pagamentos nao podem ser repartidos por produto ou valor de linha. A diferenca fica oculta com estes filtros.'
@@ -1086,6 +1153,19 @@ class EventDashboardController extends Controller
         }
 
         return 'name:'.Str::lower(trim((string) $storeName));
+    }
+
+    /**
+     * @param  array<string, mixed>  $document
+     */
+    private function buildPaymentDocumentKey(array $document): string
+    {
+        return implode('|', [
+            $document['machine_client_id'] ?? $document['store_code'] ?? '',
+            $document['doc_type'] ?? '',
+            $document['document_series'] ?? '',
+            $document['document_number'] ?? '',
+        ]);
     }
 
     /**

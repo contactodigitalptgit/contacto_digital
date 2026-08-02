@@ -55,6 +55,18 @@ interface AutoSyncMeta {
     next_sync_at: string | null;
 }
 
+interface SyncStatusMeta {
+    status: 'idle' | 'processing' | 'completed' | 'failed';
+    is_stale: boolean;
+    latest_attempt_at: string | null;
+    last_success_at: string | null;
+    stage: string;
+    machines_total: number;
+    machines_processed: number;
+    documents_processed: number;
+    message: string | null;
+}
+
 interface BreakdownItem {
     label: string;
     code: string | null;
@@ -289,6 +301,7 @@ const props = defineProps<{
     filters: DashboardFilters;
     filterOptions: FilterOptions;
     autoSync: AutoSyncMeta;
+    syncStatus: SyncStatusMeta;
     previewMode?: boolean;
     backUrl: string;
     backLabel: string;
@@ -338,7 +351,9 @@ const hasImportedData = computed(
     () => props.summary.total_rows > 0 || props.paymentSummary.movement_documents_count > 0,
 );
 const hasProcessingSync = computed(
-    () => props.summary.processing_imports_count > 0 || props.autoSync.state === 'processing',
+    () => props.summary.processing_imports_count > 0
+        || props.autoSync.state === 'processing'
+        || props.syncStatus.status === 'processing',
 );
 const nextSyncSeconds = computed(() => {
     if (!props.autoSync.enabled || !props.autoSync.next_sync_at) {
@@ -374,9 +389,24 @@ const autoSyncStatusLabel = computed(() => {
         return 'Sincronização em curso';
     }
 
+    if (props.syncStatus.is_stale) {
+        return 'Última tentativa falhou';
+    }
+
     return props.autoSync.enabled
         ? `Automática a cada ${props.autoSync.interval_minutes} min`
         : 'Sincronização automática encerrada';
+});
+const syncProgressLabel = computed(() => {
+    if (props.syncStatus.status !== 'processing') {
+        return `Tentativa em ${formatDateTime(props.syncStatus.latest_attempt_at)}`;
+    }
+
+    if (props.syncStatus.machines_total > 0) {
+        return `${formatNumber(props.syncStatus.machines_processed)} de ${formatNumber(props.syncStatus.machines_total)} máquinas · ${formatNumber(props.syncStatus.documents_processed)} documentos`;
+    }
+
+    return 'A preparar a leitura das máquinas';
 });
 const activeFilterCount = computed(
     () => Object.values(props.filters).filter((value) => value !== '').length,
@@ -887,7 +917,7 @@ const startDashboardPolling = () => {
 
         router.visit(getCurrentDashboardUrl(), {
             method: 'get',
-            only: ['event', 'summary', 'autoSync'],
+            only: ['event', 'summary', 'autoSync', 'syncStatus'],
             preserveState: true,
             preserveScroll: true,
             replace: true,
@@ -905,7 +935,7 @@ const refreshAutoSyncStatus = () => {
 
     router.visit(getCurrentDashboardUrl(), {
         method: 'get',
-        only: ['event', 'summary', 'autoSync'],
+        only: ['event', 'summary', 'autoSync', 'syncStatus'],
         preserveState: true,
         preserveScroll: true,
         replace: true,
@@ -1212,7 +1242,7 @@ function getDifferenceClass(value: number | null) {
                 </div>
 
                 <div class="app-report-navigation-status">
-                    <span :class="{ 'is-syncing': hasProcessingSync }" />
+                    <span :class="{ 'is-syncing': hasProcessingSync, 'is-failed': props.syncStatus.is_stale }" />
                     <div>
                         <strong>{{ autoSyncStatusLabel }}</strong>
                         <small v-if="props.autoSync.enabled">Próxima em {{ autoSyncCountdown }}</small>
@@ -1333,6 +1363,20 @@ function getDifferenceClass(value: number | null) {
         </template>
 
         <div class="dash-page">
+            <section
+                v-if="hasProcessingSync || props.syncStatus.is_stale"
+                class="report-dashboard-sync-status"
+                :class="{ 'is-processing': hasProcessingSync, 'is-failed': props.syncStatus.is_stale }"
+                role="status"
+            >
+                <span class="report-dashboard-sync-status-indicator" aria-hidden="true" />
+                <div>
+                    <strong>{{ hasProcessingSync ? 'Atualização dos dados em curso' : 'Atenção à última sincronização' }}</strong>
+                    <p>{{ props.syncStatus.message }}</p>
+                    <small>{{ syncProgressLabel }}</small>
+                </div>
+            </section>
+
             <section v-if="!hasImportedData" class="dash-card report-dashboard-empty">
                 Nenhum relatório sincronizado para este evento.
             </section>
@@ -1362,7 +1406,7 @@ function getDifferenceClass(value: number | null) {
                     </nav>
 
                     <div class="report-dashboard-navigation-status">
-                        <span :class="{ 'is-syncing': hasProcessingSync }" />
+                        <span :class="{ 'is-syncing': hasProcessingSync, 'is-failed': props.syncStatus.is_stale }" />
                         <div>
                             <strong>{{ autoSyncStatusLabel }}</strong>
                             <small v-if="props.autoSync.enabled">Próxima em {{ autoSyncCountdown }}</small>

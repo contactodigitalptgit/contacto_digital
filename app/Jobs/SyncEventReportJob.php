@@ -47,15 +47,11 @@ class SyncEventReportJob implements ShouldQueue
             return;
         }
 
-        $syncLog->update([
-            'status' => 'failed',
-            'is_active' => false,
-            'summary' => [
-                ...($syncLog->summary ?? []),
-                'error' => $exception && trim($exception->getMessage()) !== ''
-                    ? $exception->getMessage()
-                    : 'O processo de sincronizacao terminou sem concluir.',
-            ],
-        ]);
+        app(EventReportSyncService::class)->fail(
+            $syncLog,
+            $exception && trim($exception->getMessage()) !== ''
+                ? $exception->getMessage()
+                : 'O processo de sincronizacao terminou sem concluir.',
+        );
     }
 }

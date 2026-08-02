@@ -513,6 +513,87 @@ class EventDashboardTest extends TestCase
         $this->assertSame(1, EventReportImport::query()->where('status', 'failed')->count());
     }
 
+    public function test_dashboard_exposes_a_safe_warning_after_a_failed_sync(): void
+    {
+        [$admin, $clientUser, $event] = $this->makeDashboardContext();
+        $this->seedSyncedRows($event, $admin);
+
+        EventReportImport::create([
+            'event_id' => $event->id,
+            'uploaded_by_user_id' => $admin->id,
+            'import_strategy' => 'replace',
+            'original_filename' => 'zonesoft-api',
+            'stored_path' => 'zonesoft://sync',
+            'mime_type' => 'application/json',
+            'file_hash' => hash('sha256', 'failed-dashboard-sync-'.$event->id),
+            'headers' => ['source' => 'zonesoft_api'],
+            'summary' => [
+                'source' => 'zonesoft_api',
+                'stage' => 'fetching',
+                'machines_total' => 43,
+                'machines_processed' => 9,
+                'documents_processed' => 721,
+                'error' => 'cURL error 6: Could not resolve host: api.zonesoft.org for CLIENT-ID-SECRET',
+            ],
+            'imported_rows_count' => 0,
+            'is_active' => false,
+            'status' => 'failed',
+        ]);
+
+        $this->actingAs($clientUser)
+            ->get(route('events.dashboard', $event))
+            ->assertOk()
+            ->assertInertia(fn (AssertableInertia $page) => $page
+                ->where('syncStatus.status', 'failed')
+                ->where('syncStatus.is_stale', true)
+                ->where('syncStatus.machines_total', 43)
+                ->where('syncStatus.machines_processed', 9)
+                ->where('syncStatus.documents_processed', 721)
+                ->where(
+                    'syncStatus.message',
+                    'A última tentativa não conseguiu comunicar com a ZoneSoft. Os valores apresentados são da última sincronização válida.',
+                ));
+    }
+
+    public function test_dashboard_exposes_processing_progress_without_replacing_valid_values(): void
+    {
+        [$admin, , $event] = $this->makeDashboardContext();
+        $this->seedSyncedRows($event, $admin);
+
+        EventReportImport::create([
+            'event_id' => $event->id,
+            'uploaded_by_user_id' => $admin->id,
+            'import_strategy' => 'replace',
+            'original_filename' => 'zonesoft-api',
+            'stored_path' => 'zonesoft://sync',
+            'mime_type' => 'application/json',
+            'file_hash' => hash('sha256', 'processing-dashboard-sync-'.$event->id),
+            'headers' => ['source' => 'zonesoft_api'],
+            'summary' => [
+                'source' => 'zonesoft_api',
+                'stage' => 'fetching',
+                'machines_total' => 43,
+                'machines_processed' => 17,
+                'documents_processed' => 1840,
+            ],
+            'imported_rows_count' => 0,
+            'is_active' => false,
+            'status' => 'processing',
+        ]);
+
+        $this->actingAs($admin)
+            ->get(route('admin.events.dashboard', $event))
+            ->assertOk()
+            ->assertInertia(fn (AssertableInertia $page) => $page
+                ->where('syncStatus.status', 'processing')
+                ->where('syncStatus.is_stale', false)
+                ->where('syncStatus.stage', 'fetching')
+                ->where('syncStatus.machines_total', 43)
+                ->where('syncStatus.machines_processed', 17)
+                ->where('syncStatus.documents_processed', 1840)
+                ->where('summary.total_sales', 15.75));
+    }
+
     /**
      * @return array{0: User, 1: User, 2: Event}
      */

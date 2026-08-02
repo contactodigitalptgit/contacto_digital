@@ -10,6 +10,7 @@ use App\Models\User;
 use App\Services\ZoneSoft\ZoneSoftApiClient;
 use App\Services\ZoneSoft\ZoneSoftApiException;
 use Carbon\CarbonImmutable;
+use Carbon\CarbonInterface;
 use Illuminate\Console\Application as ConsoleApplication;
 use Illuminate\Process\Factory as ProcessFactory;
 use Illuminate\Process\Pool as ProcessPool;
@@ -110,13 +111,28 @@ class EventReportSyncService
                     'error' => 'A sincronizacao anterior foi marcada como falhada por falta de conclusao.',
                 ],
             ]);
+            $this->cleanupImportRows($staleImport->id);
         }
 
         return $staleImports->count();
     }
 
+    /**
+     * @param  array<string, mixed>|null  $summary
+     */
+    public function fail(
+        EventReportImport $syncLog,
+        string $message,
+        ?array $summary = null,
+    ): void {
+        $this->markSyncAsFailed($syncLog, $message, $summary);
+        $this->cleanupImportRows($syncLog->id);
+    }
+
     public function run(EventReportImport $syncLog): EventReportImport
     {
+        $runStartedAt = microtime(true);
+        $failureSummary = null;
         $this->prepareLongRunningSync();
         $syncLog->loadMissing('event.client');
 
@@ -131,7 +147,9 @@ class EventReportSyncService
 
         try {
             $machines = $this->resolveMachines($event);
+            $fetchStartedAt = microtime(true);
             $machineSync = $this->fetchRows($event, $machines, $syncLog);
+            $fetchDurationMs = (int) round((microtime(true) - $fetchStartedAt) * 1000);
 
             $rows = $machineSync['rows'];
             $successfulMachinesCount = $machineSync['successful_machines_count'];
@@ -153,11 +171,16 @@ class EventReportSyncService
                 $machineWarnings,
                 $paymentDocuments,
                 $reusedRowsCount,
+                $machineSync['metrics'],
             );
+            $summary['performance'] = [
+                ...($summary['performance'] ?? []),
+                'fetch_duration_ms' => $fetchDurationMs,
+            ];
+            $failureSummary = $summary;
 
             if ($failedMachines !== [] || $machineWarnings !== []) {
                 $message = $this->buildIncompleteSyncMessage($failedMachines, $machineWarnings);
-                $this->markSyncAsFailed($syncLog, $message, $summary);
 
                 throw ValidationException::withMessages([
                     'integration' => $message,
@@ -165,6 +188,15 @@ class EventReportSyncService
             }
 
             $timestamp = now();
+            $stagingStartedAt = microtime(true);
+            $this->stageRows($event, $syncLog, $rows, $timestamp);
+            $summary['performance'] = [
+                ...($summary['performance'] ?? []),
+                'staging_duration_ms' => (int) round((microtime(true) - $stagingStartedAt) * 1000),
+                'total_duration_ms' => (int) round((microtime(true) - $runStartedAt) * 1000),
+            ];
+            $failureSummary = $summary;
+
             $completedSync = DB::transaction(function () use ($event, $syncLog, $rows, $summary, $timestamp): EventReportImport {
                 $lockedEvent = Event::query()->lockForUpdate()->findOrFail($event->id);
                 $lockedSyncLog = EventReportImport::query()->lockForUpdate()->findOrFail($syncLog->id);
@@ -196,27 +228,6 @@ class EventReportSyncService
                     ->where('is_active', true)
                     ->update(['is_active' => false]);
 
-                EventReportRow::query()
-                    ->where('event_id', $lockedEvent->id)
-                    ->where('event_report_import_id', '!=', $lockedSyncLog->id)
-                    ->delete();
-
-                foreach (array_chunk($rows, 500) as $chunk) {
-                    EventReportRow::query()->insert(
-                        array_map(
-                            fn (array $row): array => [
-                                ...$row,
-                                'event_id' => $lockedEvent->id,
-                                'event_report_import_id' => $lockedSyncLog->id,
-                                'raw_row' => json_encode($row['raw_row'], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR),
-                                'created_at' => $timestamp,
-                                'updated_at' => $timestamp,
-                            ],
-                            $chunk,
-                        ),
-                    );
-                }
-
                 $lockedSyncLog->update([
                     'summary' => $summary,
                     'imported_rows_count' => count($rows),
@@ -235,11 +246,14 @@ class EventReportSyncService
                 );
             }
 
+            $this->cleanupSupersededRows($event->id, $completedSync->id);
+
             return $completedSync;
         } catch (\Throwable $exception) {
-            $this->markSyncAsFailed(
+            $this->fail(
                 $syncLog,
                 $this->resolveExceptionMessage($exception),
+                $failureSummary,
             );
 
             throw $exception;
@@ -299,6 +313,11 @@ class EventReportSyncService
             'summary' => [
                 'source' => 'zonesoft_api',
                 'machines_count' => 0,
+                'machines_total' => $machines->count(),
+                'machines_processed' => 0,
+                'documents_processed' => 0,
+                'api_requests_count' => 0,
+                'stage' => 'queued',
             ],
             'imported_rows_count' => 0,
             'is_active' => false,
@@ -314,7 +333,8 @@ class EventReportSyncService
      *     failed_machines:list<array{machine_id:int,zs_client_id:string,store_id:int,message:string}>,
      *     machine_warnings:list<array{machine_id:int,zs_client_id:string,store_id:int,message:string}>,
      *     payment_documents:list<array<string, mixed>>,
-     *     reused_rows_count:int
+     *     reused_rows_count:int,
+     *     metrics:array{documents_count:int,api_requests_count:int,machine_duration_ms:int}
      * }
      */
     private function fetchRows(
@@ -336,6 +356,11 @@ class EventReportSyncService
         $successfulMachinesCount = 0;
         $failedMachines = [];
         $machineWarnings = [];
+        $metrics = [
+            'documents_count' => 0,
+            'api_requests_count' => 0,
+            'machine_duration_ms' => 0,
+        ];
         $statusTimestamp = now();
         $machinesById = $machines->keyBy('id');
 
@@ -362,7 +387,12 @@ class EventReportSyncService
                 'warning_message' => null,
                 'rows' => [],
                 'payment_documents' => [],
+                'metrics' => [],
             ];
+            $resultMetrics = is_array($result['metrics'] ?? null) ? $result['metrics'] : [];
+            $metrics['documents_count'] += (int) ($resultMetrics['documents_count'] ?? 0);
+            $metrics['api_requests_count'] += (int) ($resultMetrics['api_requests_count'] ?? 0);
+            $metrics['machine_duration_ms'] += (int) ($resultMetrics['duration_ms'] ?? 0);
 
             if (is_string($result['failure_message'] ?? null) && $result['failure_message'] !== '') {
                 $failedMachines[] = $this->persistMachineFailure(
@@ -429,6 +459,7 @@ class EventReportSyncService
             'machine_warnings' => $machineWarnings,
             'payment_documents' => $paymentDocuments,
             'reused_rows_count' => count($historicalData['rows']),
+            'metrics' => $metrics,
         ];
     }
 
@@ -552,7 +583,8 @@ class EventReportSyncService
      *     warning_message:string|null,
      *     rows:list<array<string, mixed>>,
      *     payment_documents:list<array<string, mixed>>,
-     *     should_retry_serially:bool
+     *     should_retry_serially:bool,
+     *     metrics:array<string, int>
      * }>
      */
     private function fetchMachineResults(
@@ -567,6 +599,10 @@ class EventReportSyncService
         ];
 
         $results = [];
+        $processedMachines = 0;
+        $documentsCount = 0;
+        $apiRequestsCount = 0;
+        $totalMachines = $machines->count();
 
         foreach (array_chunk($machines->modelKeys(), self::MACHINE_SYNC_CONCURRENCY) as $machineIdChunk) {
             $tasks = [];
@@ -580,7 +616,21 @@ class EventReportSyncService
             /** @var array<int, array<string, mixed>> $chunkResults */
             $chunkResults = $this->runConcurrentMachineTasks($tasks);
             $results += $chunkResults;
-            $this->touchSyncHeartbeat($syncLog->id);
+            $processedMachines += count($chunkResults);
+
+            foreach ($chunkResults as $chunkResult) {
+                $chunkMetrics = is_array($chunkResult['metrics'] ?? null) ? $chunkResult['metrics'] : [];
+                $documentsCount += (int) ($chunkMetrics['documents_count'] ?? 0);
+                $apiRequestsCount += (int) ($chunkMetrics['api_requests_count'] ?? 0);
+            }
+
+            $this->updateSyncProgress($syncLog->id, [
+                'stage' => 'fetching',
+                'machines_total' => $totalMachines,
+                'machines_processed' => $processedMachines,
+                'documents_processed' => $documentsCount,
+                'api_requests_count' => $apiRequestsCount,
+            ]);
         }
 
         return $this->retryRateLimitedMachineResults($results, $rangePayload);
@@ -718,11 +768,13 @@ class EventReportSyncService
      *     warning_message:string|null,
      *     rows:list<array<string, mixed>>,
      *     payment_documents:list<array<string, mixed>>,
-     *     should_retry_serially:bool
+     *     should_retry_serially:bool,
+     *     metrics:array<string, int>
      * }
      */
     public function syncMachinePayload(int $machineId, array $rangePayload): array
     {
+        $startedAt = microtime(true);
         $machine = ClientZoneSoftMachine::query()
             ->with('application')
             ->find($machineId);
@@ -734,6 +786,7 @@ class EventReportSyncService
                 'rows' => [],
                 'payment_documents' => [],
                 'should_retry_serially' => false,
+                'metrics' => $this->machineMetrics($startedAt),
             ];
         }
 
@@ -744,6 +797,7 @@ class EventReportSyncService
                 'rows' => [],
                 'payment_documents' => [],
                 'should_retry_serially' => false,
+                'metrics' => $this->machineMetrics($startedAt),
             ];
         }
 
@@ -752,8 +806,13 @@ class EventReportSyncService
             'end' => CarbonImmutable::parse($rangePayload['end']),
         ];
 
+        $usesCompleteDocuments = (bool) config('event-reports.zonesoft.complete_documents', true);
+        $documentRequestCount = 0;
+
         try {
-            $documents = $this->fetchDocuments($machine, $syncRange);
+            $documentFetch = $this->fetchDocuments($machine, $syncRange, $usesCompleteDocuments);
+            $documents = $documentFetch['documents'];
+            $documentRequestCount = $documentFetch['request_count'];
             $documents = array_values(array_filter(
                 $documents,
                 fn (array $document): bool => ! $this->isCancelledDocument($document),
@@ -765,6 +824,7 @@ class EventReportSyncService
                 'rows' => [],
                 'payment_documents' => [],
                 'should_retry_serially' => $exception->isRateLimited(),
+                'metrics' => $this->machineMetrics($startedAt, 0, max(1, $documentRequestCount)),
             ];
         }
 
@@ -774,8 +834,23 @@ class EventReportSyncService
         $shouldRetrySerially = false;
         $salesResults = [];
 
-        foreach (array_chunk($documents, self::DOCUMENT_REQUEST_BATCH_SIZE, true) as $documentBatch) {
-            $salesResults += $this->fetchSalesForDocuments($machine, $documentBatch);
+        if ($usesCompleteDocuments) {
+            foreach ($documents as $documentIndex => $document) {
+                if (! array_key_exists('vendas', $document) || ! is_array($document['vendas'])) {
+                    $salesResults[$documentIndex] = new ZoneSoftApiException(
+                        'A ZoneSoft devolveu um documento completo sem a lista de vendas.',
+                    );
+
+                    continue;
+                }
+
+                $salesResults[$documentIndex] = ['sale' => $document['vendas']];
+            }
+        } else {
+            foreach (array_chunk($documents, self::DOCUMENT_REQUEST_BATCH_SIZE, true) as $documentBatch) {
+                $salesResults += $this->fetchSalesForDocuments($machine, $documentBatch);
+                $documentRequestCount += count($documentBatch);
+            }
         }
 
         foreach ($documents as $documentIndex => $document) {
@@ -826,25 +901,35 @@ class EventReportSyncService
             'rows' => $rows,
             'payment_documents' => $paymentDocuments,
             'should_retry_serially' => $shouldRetrySerially,
+            'metrics' => $this->machineMetrics(
+                $startedAt,
+                count($documents),
+                $documentRequestCount,
+            ),
         ];
     }
 
     /**
      * @param  array{start:CarbonImmutable,end:CarbonImmutable}  $syncRange
-     * @return list<array<string, mixed>>
+     * @return array{documents:list<array<string, mixed>>,request_count:int}
      */
-    private function fetchDocuments(ClientZoneSoftMachine $machine, array $syncRange): array
-    {
+    private function fetchDocuments(
+        ClientZoneSoftMachine $machine,
+        array $syncRange,
+        bool $completeDocuments,
+    ): array {
         $documents = [];
         $offset = 0;
         $limit = 250;
+        $requestCount = 0;
 
         do {
+            $requestCount++;
             $response = $this->apiClient->post(
                 $machine->application,
                 $machine->zs_client_id,
                 'documents',
-                'getDocumentsHeaders',
+                $completeDocuments ? 'getInstances' : 'getDocumentsHeaders',
                 'document',
                 [
                     'condition' => $this->buildDocumentCondition($machine, $syncRange),
@@ -863,7 +948,25 @@ class EventReportSyncService
             $offset += count($batch);
         } while (count($batch) === $limit);
 
-        return $documents;
+        return [
+            'documents' => $documents,
+            'request_count' => $requestCount,
+        ];
+    }
+
+    /**
+     * @return array{documents_count:int,api_requests_count:int,duration_ms:int}
+     */
+    private function machineMetrics(
+        float $startedAt,
+        int $documentsCount = 0,
+        int $apiRequestsCount = 0,
+    ): array {
+        return [
+            'documents_count' => $documentsCount,
+            'api_requests_count' => $apiRequestsCount,
+            'duration_ms' => (int) round((microtime(true) - $startedAt) * 1000),
+        ];
     }
 
     /**
@@ -1004,6 +1107,7 @@ class EventReportSyncService
             'document_number' => isset($document['numero']) ? (string) $document['numero'] : ($referenceRow['document_number'] ?? null),
             'payment_reference' => isset($document['referencia_pagamento']) ? (string) $document['referencia_pagamento'] : null,
             'paid' => isset($document['pago']) ? (int) $document['pago'] === 1 : null,
+            'document_total' => $this->normalizeDecimal($document['total'] ?? null),
         ];
 
         $partialPayments = is_array($document['documentos_pagamento'] ?? null)
@@ -1019,7 +1123,7 @@ class EventReportSyncService
             ]];
         }
 
-        return array_map(function (array $payment, int $index) use ($baseDocument, $document): array {
+        $normalizedPayments = array_map(function (array $payment, int $index) use ($baseDocument, $document): array {
             $paymentCode = isset($payment['tipo']) && (int) $payment['tipo'] !== 0
                 ? (string) $payment['tipo']
                 : (isset($document['pagamento']) ? (string) $document['pagamento'] : null);
@@ -1040,6 +1144,29 @@ class EventReportSyncService
                 'total' => $this->normalizeDecimal($payment['valor'] ?? ($document['total'] ?? null)),
             ];
         }, $partialPayments, array_keys($partialPayments));
+
+        $documentTotal = (float) ($baseDocument['document_total'] ?? 0);
+        $paymentsTotal = array_sum(array_map(
+            fn (array $payment): float => (float) ($payment['total'] ?? 0),
+            $normalizedPayments,
+        ));
+        $unallocatedTotal = round($documentTotal - $paymentsTotal, 4);
+
+        if ($unallocatedTotal > 0.0001) {
+            $normalizedPayments[] = [
+                ...$baseDocument,
+                'payment_key' => 'unallocated',
+                'payment_code' => null,
+                'payment_document_type' => null,
+                'payment_document_series' => null,
+                'payment_document_number' => null,
+                'payment_card_number' => null,
+                'total' => $this->normalizeDecimal($unallocatedTotal),
+                'is_unallocated' => true,
+            ];
+        }
+
+        return $normalizedPayments;
     }
 
     /**
@@ -1056,6 +1183,7 @@ class EventReportSyncService
      * @param  list<array{machine_id:int,zs_client_id:string,store_id:int,message:string}>  $failedMachines
      * @param  list<array{machine_id:int,zs_client_id:string,store_id:int,message:string}>  $machineWarnings
      * @param  list<array<string, mixed>>  $paymentDocuments
+     * @param  array{documents_count:int,api_requests_count:int,machine_duration_ms:int}  $metrics
      * @return array<string, mixed>
      */
     private function buildSummary(
@@ -1065,6 +1193,7 @@ class EventReportSyncService
         array $machineWarnings,
         array $paymentDocuments,
         int $reusedRowsCount,
+        array $metrics,
     ): array {
         $totals = [
             'value' => 0.0,
@@ -1095,6 +1224,14 @@ class EventReportSyncService
             'failed_machines' => $failedMachines,
             'machine_warnings' => $machineWarnings,
             'payment_documents' => $paymentDocuments,
+            'stage' => 'completed',
+            'machines_total' => $successfulMachinesCount + count($failedMachines),
+            'machines_processed' => $successfulMachinesCount + count($failedMachines),
+            'documents_processed' => $metrics['documents_count'],
+            'api_requests_count' => $metrics['api_requests_count'],
+            'performance' => [
+                'machine_duration_ms' => $metrics['machine_duration_ms'],
+            ],
         ];
     }
 
@@ -1220,6 +1357,108 @@ class EventReportSyncService
             ->whereKey($syncImportId)
             ->where('status', 'processing')
             ->update(['updated_at' => now()]);
+    }
+
+    /**
+     * @param  array<string, mixed>  $progress
+     */
+    private function updateSyncProgress(int $syncImportId, array $progress): void
+    {
+        $syncImport = EventReportImport::query()
+            ->whereKey($syncImportId)
+            ->where('status', 'processing')
+            ->first();
+
+        if (! $syncImport) {
+            return;
+        }
+
+        $syncImport->update([
+            'summary' => [
+                ...(is_array($syncImport->summary) ? $syncImport->summary : []),
+                ...$progress,
+            ],
+        ]);
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $rows
+     */
+    private function stageRows(
+        Event $event,
+        EventReportImport $syncLog,
+        array $rows,
+        CarbonInterface $timestamp,
+    ): void {
+        $this->ensureSyncIsProcessing($syncLog);
+        $this->cleanupImportRows($syncLog->id, true);
+        $this->updateSyncProgress($syncLog->id, [
+            'stage' => 'staging',
+            'rows_count' => count($rows),
+        ]);
+
+        foreach (array_chunk($rows, 500) as $chunk) {
+            $this->ensureSyncIsProcessing($syncLog);
+            EventReportRow::query()->insert(
+                array_map(
+                    fn (array $row): array => [
+                        ...$row,
+                        'event_id' => $event->id,
+                        'event_report_import_id' => $syncLog->id,
+                        'raw_row' => json_encode($row['raw_row'], JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR),
+                        'created_at' => $timestamp,
+                        'updated_at' => $timestamp,
+                    ],
+                    $chunk,
+                ),
+            );
+            $this->touchSyncHeartbeat($syncLog->id);
+        }
+    }
+
+    private function cleanupImportRows(int $syncImportId, bool $allowProcessing = false): void
+    {
+        $syncImport = EventReportImport::query()->find($syncImportId);
+
+        if (! $syncImport || ($syncImport->status === 'processing' && ! $allowProcessing)) {
+            return;
+        }
+
+        if ($syncImport->status === 'completed' && $syncImport->is_active) {
+            return;
+        }
+
+        do {
+            $rowIds = EventReportRow::query()
+                ->where('event_report_import_id', $syncImportId)
+                ->limit(1000)
+                ->pluck('id');
+
+            if ($rowIds->isNotEmpty()) {
+                EventReportRow::query()->whereKey($rowIds)->delete();
+            }
+        } while ($rowIds->isNotEmpty());
+    }
+
+    private function cleanupSupersededRows(int $eventId, int $activeImportId): void
+    {
+        try {
+            do {
+                $rowIds = EventReportRow::query()
+                    ->where('event_id', $eventId)
+                    ->where('event_report_import_id', '!=', $activeImportId)
+                    ->whereHas('reportImport', fn ($query) => $query
+                        ->where('status', '!=', 'processing'))
+                    ->limit(1000)
+                    ->pluck('id');
+
+                if ($rowIds->isNotEmpty()) {
+                    EventReportRow::query()->whereKey($rowIds)->delete();
+                }
+            } while ($rowIds->isNotEmpty());
+        } catch (\Throwable $exception) {
+            report($exception);
+        }
     }
 
     /**

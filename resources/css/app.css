@@ -434,6 +434,11 @@
         animation: report-dashboard-pulse 1.4s ease-in-out infinite;
     }
 
+    .app-report-navigation-status > span.is-failed {
+        background: #f59e0b;
+        box-shadow: 0 0 0 4px rgba(245, 158, 11, 0.14);
+    }
+
     .app-report-navigation-status > div {
         @apply min-w-0;
     }
@@ -2274,6 +2279,53 @@
         background: color-mix(in srgb, var(--accent) 10%, var(--table-row-bg) 90%);
     }
 
+    .report-dashboard-sync-status {
+        @apply flex items-start gap-3 rounded-2xl border px-4 py-3;
+        border-color: color-mix(in srgb, var(--accent) 30%, var(--line-color));
+        color: var(--text-soft);
+        background: color-mix(in srgb, var(--accent) 8%, var(--table-row-bg) 92%);
+    }
+
+    .report-dashboard-sync-status.is-failed {
+        border-color: color-mix(in srgb, #f59e0b 42%, var(--line-color));
+        background: color-mix(in srgb, #f59e0b 8%, var(--table-row-bg) 92%);
+    }
+
+    .report-dashboard-sync-status-indicator {
+        @apply mt-1 h-2.5 w-2.5 shrink-0 rounded-full;
+        background: var(--accent);
+        box-shadow: 0 0 0 5px color-mix(in srgb, var(--accent) 14%, transparent);
+    }
+
+    .report-dashboard-sync-status.is-processing .report-dashboard-sync-status-indicator {
+        animation: report-dashboard-pulse 1.4s ease-in-out infinite;
+    }
+
+    .report-dashboard-sync-status.is-failed .report-dashboard-sync-status-indicator {
+        background: #f59e0b;
+        box-shadow: 0 0 0 5px color-mix(in srgb, #f59e0b 14%, transparent);
+    }
+
+    .report-dashboard-sync-status strong,
+    .report-dashboard-sync-status p,
+    .report-dashboard-sync-status small {
+        @apply block;
+    }
+
+    .report-dashboard-sync-status strong {
+        @apply text-sm font-bold;
+        color: var(--text-main);
+    }
+
+    .report-dashboard-sync-status p {
+        @apply mt-1 text-sm;
+    }
+
+    .report-dashboard-sync-status small {
+        @apply mt-1 text-xs tabular-nums;
+        color: var(--text-muted);
+    }
+
     .report-dashboard-grid {
         @apply grid gap-4;
     }
@@ -2546,6 +2598,11 @@
     .report-dashboard-navigation-status > span.is-syncing {
         background: var(--accent);
         animation: report-dashboard-pulse 1.4s ease-in-out infinite;
+    }
+
+    .report-dashboard-navigation-status > span.is-failed {
+        background: #f59e0b;
+        box-shadow: 0 0 0 4px color-mix(in srgb, #f59e0b 14%, transparent);
     }
 
     .report-dashboard-navigation-status > div {

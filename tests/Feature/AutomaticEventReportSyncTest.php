@@ -9,6 +9,7 @@ use App\Models\Event;
 use App\Models\EventReportImport;
 use App\Models\User;
 use App\Models\ZoneSoftApplication;
+use App\Services\EventReportAutoSyncService;
 use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -71,26 +72,26 @@ class AutomaticEventReportSyncTest extends TestCase
         }
     }
 
-    public function test_scheduler_stops_after_the_required_event_end_time(): void
+    public function test_scheduler_runs_a_final_sync_at_the_required_event_end_time(): void
     {
         CarbonImmutable::setTestNow('2026-07-18 22:00:01');
 
         try {
-            $this->makeConfiguredEvent();
+            $event = $this->makeConfiguredEvent();
             Bus::fake();
 
             $this->artisan('events:sync-due-reports')
-                ->expectsOutput('No event report synchronization is due.')
+                ->expectsOutputToContain("started for event #{$event->id}")
                 ->assertSuccessful();
 
-            Bus::assertNothingDispatched();
-            $this->assertDatabaseCount('event_report_imports', 0);
+            Bus::assertDispatched(SyncEventReportJob::class);
+            $this->assertDatabaseCount('event_report_imports', 1);
         } finally {
             CarbonImmutable::setTestNow();
         }
     }
 
-    public function test_scheduler_does_not_plan_a_cycle_that_would_start_after_event_end(): void
+    public function test_scheduler_caps_the_next_cycle_at_event_end(): void
     {
         CarbonImmutable::setTestNow('2026-07-18 21:55:00');
 
@@ -105,6 +106,98 @@ class AutomaticEventReportSyncTest extends TestCase
 
             Bus::assertNothingDispatched();
             $this->assertSame(1, EventReportImport::query()->count());
+
+            $status = app(EventReportAutoSyncService::class)->status($event->fresh());
+
+            $this->assertSame('scheduled', $status['state']);
+            $this->assertSame(
+                '2026-07-18 22:00:00',
+                CarbonImmutable::parse($status['next_sync_at'])->format('Y-m-d H:i:s'),
+            );
+        } finally {
+            CarbonImmutable::setTestNow();
+        }
+    }
+
+    public function test_scheduler_retries_a_failed_final_sync_inside_the_grace_period(): void
+    {
+        CarbonImmutable::setTestNow('2026-07-18 22:10:00');
+
+        try {
+            $event = $this->makeConfiguredEvent();
+            $this->makeFailedImport($event, CarbonImmutable::parse('2026-07-18 22:00:00'));
+            Bus::fake();
+
+            $this->artisan('events:sync-due-reports')
+                ->expectsOutputToContain("started for event #{$event->id}")
+                ->assertSuccessful();
+
+            Bus::assertDispatched(SyncEventReportJob::class);
+            $this->assertDatabaseCount('event_report_imports', 2);
+        } finally {
+            CarbonImmutable::setTestNow();
+        }
+    }
+
+    public function test_scheduler_stops_after_a_successful_final_sync(): void
+    {
+        CarbonImmutable::setTestNow('2026-07-18 22:10:00');
+
+        try {
+            $event = $this->makeConfiguredEvent();
+            $this->makeCompletedImport($event, CarbonImmutable::parse('2026-07-18 22:00:30'));
+            Bus::fake();
+
+            $this->artisan('events:sync-due-reports')
+                ->expectsOutput('No event report synchronization is due.')
+                ->assertSuccessful();
+
+            Bus::assertNothingDispatched();
+            $this->assertSame('finished', app(EventReportAutoSyncService::class)->status($event->fresh())['state']);
+        } finally {
+            CarbonImmutable::setTestNow();
+        }
+    }
+
+    public function test_scheduler_repeats_a_sync_that_started_before_event_end(): void
+    {
+        CarbonImmutable::setTestNow('2026-07-18 22:11:00');
+
+        try {
+            $event = $this->makeConfiguredEvent();
+            $this->makeCompletedImport(
+                $event,
+                CarbonImmutable::parse('2026-07-18 22:01:00'),
+                CarbonImmutable::parse('2026-07-18 21:59:30'),
+            );
+            Bus::fake();
+
+            $this->artisan('events:sync-due-reports')
+                ->expectsOutputToContain("started for event #{$event->id}")
+                ->assertSuccessful();
+
+            Bus::assertDispatched(SyncEventReportJob::class);
+            $this->assertDatabaseCount('event_report_imports', 2);
+        } finally {
+            CarbonImmutable::setTestNow();
+        }
+    }
+
+    public function test_scheduler_stops_failed_final_retries_after_the_grace_period(): void
+    {
+        CarbonImmutable::setTestNow('2026-07-18 23:00:01');
+
+        try {
+            $event = $this->makeConfiguredEvent();
+            $this->makeFailedImport($event, CarbonImmutable::parse('2026-07-18 22:50:00'));
+            Bus::fake();
+
+            $this->artisan('events:sync-due-reports')
+                ->expectsOutput('No event report synchronization is due.')
+                ->assertSuccessful();
+
+            Bus::assertNothingDispatched();
+            $this->assertSame('finished', app(EventReportAutoSyncService::class)->status($event->fresh())['state']);
         } finally {
             CarbonImmutable::setTestNow();
         }
@@ -173,9 +266,12 @@ class AutomaticEventReportSyncTest extends TestCase
         return $event;
     }
 
-    private function makeCompletedImport(Event $event, CarbonInterface $importedAt): EventReportImport
-    {
-        return EventReportImport::create([
+    private function makeCompletedImport(
+        Event $event,
+        CarbonInterface $importedAt,
+        ?CarbonInterface $startedAt = null,
+    ): EventReportImport {
+        $import = EventReportImport::create([
             'event_id' => $event->id,
             'import_strategy' => 'replace',
             'original_filename' => 'zonesoft-api',
@@ -189,5 +285,40 @@ class AutomaticEventReportSyncTest extends TestCase
             'is_active' => true,
             'status' => 'completed',
         ]);
+
+        if ($startedAt) {
+            $import->timestamps = false;
+            $import->forceFill([
+                'created_at' => $startedAt,
+                'updated_at' => $importedAt,
+            ])->saveQuietly();
+        }
+
+        return $import;
+    }
+
+    private function makeFailedImport(Event $event, CarbonInterface $attemptedAt): EventReportImport
+    {
+        $import = EventReportImport::create([
+            'event_id' => $event->id,
+            'import_strategy' => 'replace',
+            'original_filename' => 'zonesoft-api',
+            'stored_path' => 'zonesoft://sync',
+            'mime_type' => 'application/json',
+            'file_hash' => hash('sha256', 'failed-automatic-'.$event->id.'-'.$attemptedAt->timestamp),
+            'headers' => ['source' => 'zonesoft_api'],
+            'summary' => ['source' => 'zonesoft_api', 'error' => 'Temporary failure'],
+            'imported_rows_count' => 0,
+            'is_active' => false,
+            'status' => 'failed',
+        ]);
+
+        $import->timestamps = false;
+        $import->forceFill([
+            'created_at' => $attemptedAt,
+            'updated_at' => $attemptedAt,
+        ])->saveQuietly();
+
+        return $import;
     }
 }
