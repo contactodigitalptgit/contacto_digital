@@ -49,7 +49,7 @@ services:
     container_name: contacto_digital_portal_worker
     depends_on:
       - app
-    command: php artisan queue:work --sleep=3 --tries=1 --timeout=0
+    command: php -d memory_limit=384M artisan queue:work --sleep=3 --tries=1 --timeout=0
     env_file:
       - .env.production
     dns:

@@ -1742,6 +1742,7 @@ class EventReportImportTest extends TestCase
         $job = new SyncEventReportJob(10, 20);
 
         $this->assertSame('database', $job->connection);
+        $this->assertSame(900, config('queue.connections.database.retry_after'));
     }
 
     public function test_superseded_cleanup_preserves_rows_being_staged_by_a_new_sync(): void
