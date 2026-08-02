@@ -1737,6 +1737,13 @@ class EventReportImportTest extends TestCase
         ]);
     }
 
+    public function test_sync_job_uses_the_database_worker_with_outbound_access(): void
+    {
+        $job = new SyncEventReportJob(10, 20);
+
+        $this->assertSame('database', $job->connection);
+    }
+
     public function test_superseded_cleanup_preserves_rows_being_staged_by_a_new_sync(): void
     {
         [$admin, $client] = $this->makeAdminClientContext();

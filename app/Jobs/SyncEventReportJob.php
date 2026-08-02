@@ -23,7 +23,8 @@ class SyncEventReportJob implements ShouldQueue
         public readonly int $importId,
         public readonly int $eventId,
     ) {
-        $this->onConnection('background');
+        // The database worker owns the outbound network used by ZoneSoft.
+        $this->onConnection('database');
     }
 
     public function handle(EventReportSyncService $syncService): void
