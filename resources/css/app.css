@@ -3511,14 +3511,21 @@
     }
 
     .report-dashboard-analytics-line-card {
-        grid-column: span 8;
+        grid-column: 1 / -1;
         background:
             radial-gradient(circle at 20% 0%, color-mix(in srgb, var(--accent) 12%, transparent), transparent 38%),
             var(--card-bg);
     }
 
     .report-dashboard-analytics-donut-card {
-        grid-column: span 4;
+        grid-column: 1 / -1;
+    }
+
+    .report-dashboard-analytics-hourly-card {
+        grid-column: 1 / -1;
+        background:
+            radial-gradient(circle at 82% 0%, color-mix(in srgb, #25b9a7 12%, transparent), transparent 36%),
+            var(--card-bg);
     }
 
     .report-dashboard-analytics-bars-card {
@@ -3658,6 +3665,27 @@
         grid-template-columns: minmax(0, 1fr) minmax(9rem, 0.28fr);
     }
 
+    .report-dashboard-analytics-hourly-layout {
+        @apply grid items-stretch gap-5;
+        grid-template-columns: minmax(0, 1fr) minmax(12rem, 0.3fr);
+    }
+
+    .report-dashboard-analytics-period-select {
+        @apply grid gap-1.5;
+    }
+
+    .report-dashboard-analytics-period-select select {
+        @apply min-w-40 rounded-xl border px-3 py-2 text-xs font-bold outline-none transition;
+        border-color: var(--line-color);
+        color: var(--text-main);
+        background: var(--input-bg);
+    }
+
+    .report-dashboard-analytics-period-select select:focus {
+        border-color: var(--accent);
+        box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 14%, transparent);
+    }
+
     .report-dashboard-analytics-line {
         @apply relative overflow-hidden rounded-2xl border;
         height: 16rem;
@@ -3678,6 +3706,74 @@
         fill: url(#analytics-chart-area);
         stroke: none;
         animation: report-dashboard-fade 700ms 120ms ease-out both;
+    }
+
+    .report-dashboard-analytics-hourly-area {
+        fill: url(#analytics-hourly-area);
+        stroke: none;
+        animation: report-dashboard-fade 700ms 120ms ease-out both;
+    }
+
+    .report-dashboard-analytics-hourly-line {
+        color: #25b9a7;
+        background-size: 100% 25%, 4.35% 100%, auto;
+    }
+
+    .report-dashboard-analytics-hourly-axis {
+        @apply mt-3 grid grid-cols-8 gap-2 text-[9px] font-bold tabular-nums;
+        color: var(--text-muted);
+    }
+
+    .report-dashboard-analytics-hourly-axis span:last-child {
+        @apply text-right;
+    }
+
+    .report-dashboard-analytics-hourly-layout aside {
+        @apply grid content-start gap-2;
+    }
+
+    .report-dashboard-analytics-hourly-layout aside > span,
+    .report-dashboard-analytics-hourly-total {
+        @apply rounded-2xl border p-3;
+        border-color: var(--line-color);
+        background: color-mix(in srgb, var(--table-row-bg) 72%, transparent);
+    }
+
+    .report-dashboard-analytics-hourly-layout aside > span {
+        @apply grid items-center gap-x-3;
+        grid-template-columns: auto minmax(0, 1fr);
+    }
+
+    .report-dashboard-analytics-hourly-layout aside > span > i {
+        @apply row-span-3 inline-flex h-8 w-8 items-center justify-center rounded-full text-[9px] font-black not-italic;
+        color: #25b9a7;
+        background: color-mix(in srgb, #25b9a7 15%, transparent);
+    }
+
+    .report-dashboard-analytics-hourly-layout small,
+    .report-dashboard-analytics-hourly-layout strong,
+    .report-dashboard-analytics-hourly-layout em {
+        @apply block;
+    }
+
+    .report-dashboard-analytics-hourly-layout small {
+        @apply text-[9px] uppercase tracking-[0.08em];
+        color: var(--text-muted);
+    }
+
+    .report-dashboard-analytics-hourly-layout strong {
+        @apply mt-1 text-sm;
+        color: var(--text-main);
+    }
+
+    .report-dashboard-analytics-hourly-layout em {
+        @apply mt-1 text-[9px] not-italic;
+        color: var(--text-soft);
+    }
+
+    .report-dashboard-analytics-hourly-total {
+        border-color: color-mix(in srgb, #25b9a7 38%, var(--line-color));
+        background: color-mix(in srgb, #25b9a7 8%, var(--table-row-bg) 92%);
     }
 
     .report-dashboard-analytics-line-path {
@@ -3754,7 +3850,8 @@
     }
 
     .report-dashboard-analytics-donut-layout {
-        @apply grid justify-items-center gap-5;
+        @apply grid items-center justify-items-center gap-8;
+        grid-template-columns: minmax(12rem, 0.32fr) minmax(0, 1fr);
     }
 
     .report-dashboard-analytics-donut {
@@ -3791,16 +3888,18 @@
     }
 
     .report-dashboard-analytics-legend {
-        @apply grid w-full gap-2;
+        @apply grid w-full gap-3;
+        grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
     }
 
     .report-dashboard-analytics-legend article {
-        @apply grid items-center gap-2 rounded-xl px-2 py-1.5;
+        @apply grid items-center gap-3 rounded-2xl border p-4;
         grid-template-columns: auto minmax(0, 1fr) auto;
-        background: color-mix(in srgb, var(--table-row-bg) 56%, transparent);
+        border-color: var(--line-color);
+        background: color-mix(in srgb, var(--table-row-bg) 68%, transparent);
     }
 
-    .report-dashboard-analytics-legend i {
+    .report-dashboard-analytics-legend article > i {
         @apply h-2.5 w-2.5 rounded-full;
     }
 
@@ -3815,17 +3914,29 @@
     }
 
     .report-dashboard-analytics-legend span strong {
-        @apply text-xs;
+        @apply mt-1 text-lg font-black;
         color: var(--text-main);
     }
 
     .report-dashboard-analytics-legend em {
-        @apply text-[10px] not-italic;
+        @apply text-sm font-bold not-italic;
         color: var(--text-soft);
     }
 
+    .report-dashboard-analytics-legend article > div {
+        @apply col-span-3 h-1.5 overflow-hidden rounded-full;
+        background: color-mix(in srgb, var(--line-color) 76%, transparent);
+    }
+
+    .report-dashboard-analytics-legend article > div i {
+        @apply block h-full rounded-full;
+        min-width: 0.3rem;
+        transform-origin: left;
+        animation: report-dashboard-grow 650ms ease-out both;
+    }
+
     .report-dashboard-analytics-legend > p {
-        @apply mt-1 text-[9px] leading-4;
+        @apply col-span-full mt-1 text-[9px] leading-4;
         color: var(--text-muted);
     }
 
@@ -4575,6 +4686,7 @@
 
         .report-dashboard-analytics-financial-donut-layout,
         .report-dashboard-analytics-line-layout,
+        .report-dashboard-analytics-hourly-layout,
         .report-dashboard-analytics-donut-layout,
         .report-dashboard-analytics-operational-layout {
             grid-template-columns: 1fr;

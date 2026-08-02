@@ -259,6 +259,18 @@ class EventDashboardTest extends TestCase
             ->where('paymentSummary.total_with_zt', 17)
             ->where('dailySales', fn ($days): bool => count($days) === 2
                 && collect($days)->sum('sales_total') === 14.25)
+            ->where('hourlySales', function ($hours): bool {
+                $firstDay = collect($hours)->first(fn (array $hour): bool => $hour['date'] === '2026-03-14'
+                    && $hour['hour'] === 12);
+                $secondDay = collect($hours)->first(fn (array $hour): bool => $hour['date'] === '2026-03-15'
+                    && $hour['hour'] === 12);
+
+                return count($hours) === 2
+                    && (float) ($firstDay['sales_total'] ?? 0) === 13.25
+                    && (int) ($firstDay['tickets_count'] ?? 0) === 4
+                    && (float) ($secondDay['sales_total'] ?? 0) === 2.5
+                    && (int) ($secondDay['tickets_count'] ?? 0) === 2;
+            })
             ->where('dailyBreakdowns', function ($days): bool {
                 $firstDay = collect($days)->firstWhere('date', '2026-03-14');
                 $secondDay = collect($days)->firstWhere('date', '2026-03-15');
@@ -303,6 +315,46 @@ class EventDashboardTest extends TestCase
                     && in_array('Bar 1 Joana C', $group['members'], true),
             ))
             ->where('event.client_name', 'Cliente Dashboard'));
+    }
+
+    public function test_dashboard_keeps_hourly_sales_for_an_eleven_day_event(): void
+    {
+        [$admin, , $event] = $this->makeDashboardContext();
+        $this->seedSyncedRows($event, $admin);
+        $event->update(['report_ends_at' => '2026-03-24 23:59:59']);
+        $activeImport = $event->activeReportImports()->firstOrFail();
+
+        foreach (range(16, 24) as $day) {
+            EventReportRow::create([
+                'event_id' => $event->id,
+                'event_report_import_id' => $activeImport->id,
+                'source_sheet' => 'zonesoft:long-event-test',
+                'source_row_number' => 200 + $day,
+                'store_code' => '1',
+                'store_name' => 'Bar 1 - Joao',
+                'sale_date' => "2026-03-{$day}",
+                'sale_datetime' => "2026-03-{$day} 18:00:00",
+                'doc_type' => 'FS',
+                'document_series' => 'LONG2026',
+                'document_number' => (string) $day,
+                'value' => '10.0000',
+                'total' => '10.0000',
+                'discount' => '0.0000',
+                'quantity' => '1.0000',
+                'product_code' => 'LONG',
+                'description' => 'Venda evento longo',
+                'raw_row' => ['day' => $day],
+            ]);
+        }
+
+        $this->actingAs($admin)
+            ->get(route('admin.events.dashboard', $event))
+            ->assertOk()
+            ->assertInertia(fn (AssertableInertia $page) => $page
+                ->where('hourlySales', fn ($hours): bool => collect($hours)->pluck('date')->unique()->count() === 11
+                    && collect($hours)->contains(fn (array $hour): bool => $hour['date'] === '2026-03-24'
+                        && $hour['hour'] === 18
+                        && (float) $hour['sales_total'] === 10.0)));
     }
 
     public function test_dashboard_hides_zt_product_breakdowns_when_event_disables_zt_card(): void

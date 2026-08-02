@@ -171,6 +171,7 @@ class EventDashboardController extends Controller
             'productBreakdowns' => fn (): array => $this->buildProductBreakdowns($makeFilteredProductRowsQuery()),
             'dailySales' => fn (): array => $resolveDailyBreakdowns(),
             'dailyBreakdowns' => fn (): array => $resolveDailyBreakdowns(),
+            'hourlySales' => fn (): array => $this->buildHourlySales($makeFilteredRowsQuery()),
             'documentTypes' => fn (): array => $resolveDocumentTypes(),
             'paymentSummary' => fn (): array => $this->buildPaymentSummary($latestActiveImportSummary, $filters),
             'reconciliation' => fn (): array => $this->buildPaymentReconciliation(
@@ -567,6 +568,57 @@ class EventDashboardController extends Controller
                 ];
             })
             ->sortKeys()
+            ->values()
+            ->all();
+    }
+
+    /**
+     * @return array<int, array{date: string, label: string, hour: int, hour_label: string, sales_total: float, tickets_count: int}>
+     */
+    private function buildHourlySales(Builder $query): array
+    {
+        $driver = $query->getModel()->getConnection()->getDriverName();
+
+        [$dateExpression, $hourExpression, $ticketExpression] = match ($driver) {
+            'pgsql' => [
+                "TO_CHAR(sale_datetime, 'YYYY-MM-DD')",
+                'CAST(EXTRACT(HOUR FROM sale_datetime) AS INTEGER)',
+                "COALESCE(store_code, '') || '|' || COALESCE(doc_type, '') || '|' || COALESCE(document_series, '') || '|' || COALESCE(document_number, '')",
+            ],
+            'mysql', 'mariadb' => [
+                "DATE_FORMAT(sale_datetime, '%Y-%m-%d')",
+                'HOUR(sale_datetime)',
+                "CONCAT_WS('|', COALESCE(store_code, ''), COALESCE(doc_type, ''), COALESCE(document_series, ''), COALESCE(document_number, ''))",
+            ],
+            default => [
+                "strftime('%Y-%m-%d', sale_datetime)",
+                "CAST(strftime('%H', sale_datetime) AS INTEGER)",
+                "COALESCE(store_code, '') || '|' || COALESCE(doc_type, '') || '|' || COALESCE(document_series, '') || '|' || COALESCE(document_number, '')",
+            ],
+        };
+
+        return $query
+            ->whereNotNull('sale_datetime')
+            ->selectRaw("{$dateExpression} as sale_day")
+            ->selectRaw("{$hourExpression} as sale_hour")
+            ->selectRaw('COALESCE(SUM(total), 0) as sales_total')
+            ->selectRaw("COUNT(DISTINCT {$ticketExpression}) as tickets_count")
+            ->groupByRaw("{$dateExpression}, {$hourExpression}")
+            ->orderByRaw("{$dateExpression}, {$hourExpression}")
+            ->get()
+            ->map(function (EventReportRow $row): array {
+                $date = (string) $row->sale_day;
+                $hour = (int) $row->sale_hour;
+
+                return [
+                    'date' => $date,
+                    'label' => CarbonImmutable::parse($date)->locale('pt_PT')->translatedFormat('d M'),
+                    'hour' => $hour,
+                    'hour_label' => sprintf('%02d:00', $hour),
+                    'sales_total' => round((float) ($row->sales_total ?? 0), 4),
+                    'tickets_count' => (int) ($row->tickets_count ?? 0),
+                ];
+            })
             ->values()
             ->all();
     }

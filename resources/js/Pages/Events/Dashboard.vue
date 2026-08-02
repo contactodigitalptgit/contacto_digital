@@ -122,6 +122,15 @@ interface DailyBreakdown extends DailySale {
     other_movements: number;
 }
 
+interface HourlySale {
+    date: string;
+    label: string;
+    hour: number;
+    hour_label: string;
+    sales_total: number;
+    tickets_count: number;
+}
+
 interface ProductDay {
     date: string;
     label: string;
@@ -250,6 +259,11 @@ interface ChartDailyPoint extends DailySale {
     y: number;
 }
 
+interface ChartHourlyPoint extends HourlySale {
+    x: number;
+    y: number;
+}
+
 interface ChartOperationalItem {
     label: string;
     value: number;
@@ -267,6 +281,7 @@ const props = defineProps<{
     productBreakdowns: ProductBreakdowns;
     dailySales: DailySale[];
     dailyBreakdowns: DailyBreakdown[];
+    hourlySales: HourlySale[];
     paymentSummary: PaymentSummary;
     reconciliation: ReconciliationData;
     comparison: ComparisonData;
@@ -304,6 +319,7 @@ const reconciliationSearch = ref('');
 const highlightScope = ref<HighlightScope>('zones');
 const highlightSearch = ref('');
 const highlightViewMode = ref<ViewMode>('list');
+const selectedHourlyDate = ref('all');
 const detailModal = ref<DetailModal>(null);
 const filtersOpen = ref(false);
 const eventSwitcherOpen = ref(false);
@@ -666,6 +682,66 @@ const summaryChartPoints = computed(() => {
         .map((point) => `${point.x.toFixed(2)},${point.y.toFixed(2)}`)
         .join(' ');
 });
+const hourlyDateOptions = computed(() => Array.from(
+    new Map(props.hourlySales.map((sale) => [sale.date, sale.label])),
+    ([date, label]) => ({ date, label }),
+));
+const selectedHourlySales = computed(() => selectedHourlyDate.value === 'all'
+    ? props.hourlySales
+    : props.hourlySales.filter((sale) => sale.date === selectedHourlyDate.value));
+const hourlySeries = computed<HourlySale[]>(() => {
+    const totalsByHour = new Map<number, { salesTotal: number; ticketsCount: number }>();
+
+    selectedHourlySales.value.forEach((sale) => {
+        const current = totalsByHour.get(sale.hour) ?? { salesTotal: 0, ticketsCount: 0 };
+        current.salesTotal += sale.sales_total;
+        current.ticketsCount += sale.tickets_count;
+        totalsByHour.set(sale.hour, current);
+    });
+
+    return Array.from({ length: 24 }, (_, hour) => {
+        const totals = totalsByHour.get(hour) ?? { salesTotal: 0, ticketsCount: 0 };
+
+        return {
+            date: selectedHourlyDate.value,
+            label: selectedHourlyDate.value === 'all'
+                ? 'Todos os dias'
+                : (hourlyDateOptions.value.find((option) => option.date === selectedHourlyDate.value)?.label ?? ''),
+            hour,
+            hour_label: `${String(hour).padStart(2, '0')}:00`,
+            sales_total: totals.salesTotal,
+            tickets_count: totals.ticketsCount,
+        };
+    });
+});
+const hourlyChartPoints = computed<ChartHourlyPoint[]>(() => {
+    const max = Math.max(...hourlySeries.value.map((sale) => sale.sales_total), 1);
+
+    return hourlySeries.value.map((sale, index) => ({
+        ...sale,
+        x: (index / 23) * 100,
+        y: 88 - ((Math.max(0, sale.sales_total) / max) * 70),
+    }));
+});
+const hourlyChartLinePoints = computed(() => hourlyChartPoints.value
+    .map((point) => `${point.x.toFixed(2)},${point.y.toFixed(2)}`)
+    .join(' '));
+const hourlyChartActivePoints = computed(() => hourlyChartPoints.value.filter((point) => point.sales_total > 0));
+const hourlyChartAreaPoints = computed(() => hourlyChartLinePoints.value
+    ? `0,100 ${hourlyChartLinePoints.value} 100,100`
+    : '');
+const hourlyAxisLabels = computed(() => hourlySeries.value.filter((sale) => sale.hour % 3 === 0));
+const hourlyPeakItems = computed(() => [...selectedHourlySales.value]
+    .filter((sale) => sale.sales_total > 0)
+    .sort((left, right) => right.sales_total - left.sales_total)
+    .slice(0, 3));
+const hourlySelectedTotal = computed(() => selectedHourlySales.value.reduce(
+    (total, sale) => total + sale.sales_total,
+    0,
+));
+const hourlyChartAriaLabel = computed(() => hourlyPeakItems.value
+    .map((sale) => `${sale.label}, ${sale.hour_label}: ${formatMoney(sale.sales_total)}`)
+    .join(', '));
 const chartPaymentItems = computed<ChartPaymentItem[]>(() => {
     const palette = ['var(--accent)', '#25b9a7', '#f0b44d', '#ef6b74'];
     const payments = [
@@ -784,6 +860,17 @@ watch(
     () => props.filters,
     (filters) => {
         localFilters.value = { ...filters };
+    },
+    { deep: true },
+);
+
+watch(
+    () => props.hourlySales,
+    () => {
+        if (selectedHourlyDate.value !== 'all'
+            && !hourlyDateOptions.value.some((option) => option.date === selectedHourlyDate.value)) {
+            selectedHourlyDate.value = 'all';
+        }
     },
     { deep: true },
 );
@@ -1613,6 +1700,72 @@ function getDifferenceClass(value: number | null) {
                                 <p v-else class="report-dashboard-analytics-empty">Sem vendas diárias para apresentar.</p>
                             </section>
 
+                            <section class="dash-card report-dashboard-analytics-card report-dashboard-analytics-hourly-card">
+                                <header>
+                                    <div>
+                                        <span>Gráfico de linha</span>
+                                        <h4>Picos de vendas por hora</h4>
+                                    </div>
+                                    <label v-if="hourlyDateOptions.length > 1" class="report-dashboard-analytics-period-select">
+                                        <span>Período</span>
+                                        <select v-model="selectedHourlyDate">
+                                            <option value="all">Todos os dias</option>
+                                            <option v-for="option in hourlyDateOptions" :key="option.date" :value="option.date">
+                                                {{ option.label }}
+                                            </option>
+                                        </select>
+                                    </label>
+                                </header>
+
+                                <div v-if="props.hourlySales.length" class="report-dashboard-analytics-hourly-layout">
+                                    <div>
+                                        <div
+                                            class="report-dashboard-analytics-line report-dashboard-analytics-hourly-line"
+                                            role="img"
+                                            :aria-label="hourlyChartAriaLabel"
+                                        >
+                                            <svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+                                                <defs>
+                                                    <linearGradient id="analytics-hourly-area" x1="0" y1="0" x2="0" y2="1">
+                                                        <stop offset="0%" stop-color="currentColor" stop-opacity="0.45" />
+                                                        <stop offset="100%" stop-color="currentColor" stop-opacity="0" />
+                                                    </linearGradient>
+                                                </defs>
+                                                <polygon :points="hourlyChartAreaPoints" class="report-dashboard-analytics-hourly-area" />
+                                                <polyline :points="hourlyChartLinePoints" class="report-dashboard-analytics-line-path" />
+                                                <circle
+                                                    v-for="point in hourlyChartActivePoints"
+                                                    :key="`hourly-point-${point.hour}`"
+                                                    :cx="point.x"
+                                                    :cy="point.y"
+                                                    r="1.8"
+                                                    class="report-dashboard-analytics-line-point"
+                                                />
+                                            </svg>
+                                        </div>
+                                        <div class="report-dashboard-analytics-hourly-axis" aria-hidden="true">
+                                            <span v-for="hour in hourlyAxisLabels" :key="`hour-label-${hour.hour}`">
+                                                {{ hour.hour_label }}
+                                            </span>
+                                        </div>
+                                    </div>
+
+                                    <aside>
+                                        <div class="report-dashboard-analytics-hourly-total">
+                                            <small>Total do período</small>
+                                            <strong>{{ formatMoney(hourlySelectedTotal) }}</strong>
+                                        </div>
+                                        <span v-for="(peak, index) in hourlyPeakItems" :key="`${peak.date}-${peak.hour}`">
+                                            <i>{{ String(index + 1).padStart(2, '0') }}</i>
+                                            <small>{{ peak.label }} · {{ peak.hour_label }}</small>
+                                            <strong>{{ formatMoney(peak.sales_total) }}</strong>
+                                            <em>{{ formatNumber(peak.tickets_count) }} tickets</em>
+                                        </span>
+                                    </aside>
+                                </div>
+                                <p v-else class="report-dashboard-analytics-empty">Sem horários de venda para apresentar.</p>
+                            </section>
+
                             <section class="dash-card report-dashboard-analytics-card report-dashboard-analytics-donut-card">
                                 <header>
                                     <div>
@@ -1641,6 +1794,9 @@ function getDifferenceClass(value: number | null) {
                                                 <strong>{{ payment.percentage.toFixed(1).replace('.', ',') }}%</strong>
                                             </span>
                                             <em>{{ formatMoney(payment.value) }}</em>
+                                            <div>
+                                                <i :style="{ width: `${payment.percentage}%`, background: payment.color }" />
+                                            </div>
                                         </article>
                                         <p>Percentuais calculados somente sobre as formas de pagamento apresentadas.</p>
                                     </div>
