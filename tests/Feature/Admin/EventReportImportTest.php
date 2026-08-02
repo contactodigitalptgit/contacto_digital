@@ -1205,6 +1205,7 @@ class EventReportImportTest extends TestCase
             ->has('events', 1)
             ->where('events.0.report_summary.active_syncs_count', 0)
             ->where('events.0.report_summary.active_rows_count', 1)
+            ->where('events.0.report_summary.total', 2.75)
             ->where('events.0.report_summary.machines_count', 1));
     }
 

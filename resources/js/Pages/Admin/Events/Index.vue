@@ -52,6 +52,7 @@ const editingEventId = ref<number | null>(null);
 const selectedReportEvent = ref<EventItem | null>(null);
 const isSyncingReport = ref(false);
 const eventsPollerId = ref<number | null>(null);
+const isRefreshingEvents = ref(false);
 
 const createEventForm = useForm({
     client_id: '' as number | '',
@@ -84,18 +85,22 @@ const startEventsPolling = () => {
     }
 
     eventsPollerId.value = window.setInterval(() => {
-        if (!hasProcessingSync.value) {
+        if (!hasProcessingSync.value || isRefreshingEvents.value) {
             return;
         }
 
+        isRefreshingEvents.value = true;
         router.visit(window.location.href, {
             method: 'get',
             only: ['events'],
             preserveScroll: true,
             preserveState: true,
             replace: true,
+            onFinish: () => {
+                isRefreshingEvents.value = false;
+            },
         });
-    }, 2500);
+    }, 5000);
 };
 
 const stopEventsPolling = () => {

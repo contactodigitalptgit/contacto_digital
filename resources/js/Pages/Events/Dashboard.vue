@@ -911,18 +911,22 @@ const startDashboardPolling = () => {
     }
 
     dashboardPollerId.value = window.setInterval(() => {
-        if (!hasProcessingSync.value) {
+        if (!hasProcessingSync.value || isRefreshingAutoSync.value) {
             return;
         }
 
+        isRefreshingAutoSync.value = true;
         router.visit(getCurrentDashboardUrl(), {
             method: 'get',
             only: ['event', 'summary', 'autoSync', 'syncStatus'],
             preserveState: true,
             preserveScroll: true,
             replace: true,
+            onFinish: () => {
+                isRefreshingAutoSync.value = false;
+            },
         });
-    }, 2500);
+    }, 5000);
 };
 
 const refreshAutoSyncStatus = () => {
