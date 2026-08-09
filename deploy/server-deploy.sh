@@ -13,6 +13,7 @@ database_path="${project_dir}/shared/database/contacto_digital_bd.sqlite"
 database_backup_temp="${project_dir}/shared/database/.pre-deploy-${timestamp}.sqlite"
 requested_sha="${SSH_ORIGINAL_COMMAND:-unknown}"
 migration_services_stopped=0
+worker_stop_timeout_seconds="${WORKER_STOP_TIMEOUT_SECONDS:-900}"
 
 if [[ "${requested_sha}" =~ ^[0-9a-f]{40}$ ]]; then
   release_label="${requested_sha}"
@@ -128,8 +129,10 @@ fi
 cd "${project_dir}"
 
 docker compose --env-file .env.production -f compose.yaml config --quiet
-docker compose --env-file .env.production -f compose.yaml stop worker scheduler
 migration_services_stopped=1
+docker compose --env-file .env.production -f compose.yaml stop scheduler
+docker compose --env-file .env.production -f compose.yaml stop \
+  --timeout "${worker_stop_timeout_seconds}" worker
 
 if [ -f "${database_path}" ]; then
   docker compose --env-file .env.production -f compose.yaml run --rm --no-deps app php -r '
