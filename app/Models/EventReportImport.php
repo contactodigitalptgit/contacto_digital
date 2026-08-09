@@ -58,4 +58,9 @@ class EventReportImport extends Model
     {
         return $this->hasMany(EventReportRow::class);
     }
+
+    public function paymentDocuments(): HasMany
+    {
+        return $this->hasMany(EventReportPaymentDocument::class);
+    }
 }

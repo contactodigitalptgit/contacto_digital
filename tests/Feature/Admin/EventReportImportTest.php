@@ -559,11 +559,14 @@ class EventReportImportTest extends TestCase
         $this->assertSame(2, $import->imported_rows_count);
         $this->assertSame('zonesoft_api', $import->summary['source'] ?? null);
         $this->assertSame(1, $import->summary['machines_count'] ?? null);
-        $this->assertCount(2, $import->summary['payment_documents'] ?? []);
-        $this->assertSame('1', $import->summary['payment_documents'][0]['payment_code'] ?? null);
-        $this->assertSame('2.0000', $import->summary['payment_documents'][0]['total'] ?? null);
-        $this->assertSame('3', $import->summary['payment_documents'][1]['payment_code'] ?? null);
-        $this->assertSame('6.7000', $import->summary['payment_documents'][1]['total'] ?? null);
+        $this->assertSame(2, $import->summary['payment_documents_count'] ?? null);
+        $this->assertArrayNotHasKey('payment_documents', $import->summary);
+        $paymentDocuments = $import->paymentDocuments()->orderBy('id')->get();
+        $this->assertCount(2, $paymentDocuments);
+        $this->assertSame('1', $paymentDocuments[0]->payment_code);
+        $this->assertSame('2.0000', $paymentDocuments[0]->total);
+        $this->assertSame('3', $paymentDocuments[1]->payment_code);
+        $this->assertSame('6.7000', $paymentDocuments[1]->total);
         Http::assertNotSent(fn ($request) => $request->url() === 'https://api.zonesoft.org/v3/salesday/getInstances');
         Http::assertNotSent(fn ($request) => $request->url() === 'https://api.zonesoft.org/v3/sales/getInstancesFromDocument'
             && ($request->data()['sale']['numero'] ?? null) === 502);
@@ -654,11 +657,14 @@ class EventReportImportTest extends TestCase
         $this->assertSame(1, $import->imported_rows_count);
         $this->assertSame(1, $import->summary['api_requests_count'] ?? null);
         $this->assertSame(1, $import->summary['documents_processed'] ?? null);
-        $this->assertCount(3, $import->summary['payment_documents'] ?? []);
-        $this->assertSame('2.0000', $import->summary['payment_documents'][0]['total'] ?? null);
-        $this->assertSame('5.2000', $import->summary['payment_documents'][1]['total'] ?? null);
-        $this->assertSame('1.5000', $import->summary['payment_documents'][2]['total'] ?? null);
-        $this->assertTrue($import->summary['payment_documents'][2]['is_unallocated'] ?? false);
+        $this->assertSame(3, $import->summary['payment_documents_count'] ?? null);
+        $this->assertArrayNotHasKey('payment_documents', $import->summary);
+        $paymentDocuments = $import->paymentDocuments()->orderBy('id')->get();
+        $this->assertCount(3, $paymentDocuments);
+        $this->assertSame('2.0000', $paymentDocuments[0]->total);
+        $this->assertSame('5.2000', $paymentDocuments[1]->total);
+        $this->assertSame('1.5000', $paymentDocuments[2]->total);
+        $this->assertTrue($paymentDocuments[2]->is_unallocated);
         $this->assertDatabaseHas('event_report_rows', [
             'event_report_import_id' => $import->id,
             'document_number' => '601',

@@ -3,6 +3,8 @@
 namespace App\Http\Controllers;
 
 use App\Models\Event;
+use App\Models\EventReportImport;
+use App\Models\EventReportPaymentDocument;
 use App\Models\EventReportRow;
 use App\Services\EventReportAutoSyncService;
 use App\Services\EventReportSyncService;
@@ -106,12 +108,14 @@ class EventDashboardController extends Controller
         $dailyBreakdowns = null;
         $resolveDailyBreakdowns = function () use (
             &$dailyBreakdowns,
+            $event,
             $latestActiveImportSummary,
             $filters,
             $makeFilteredProductRowsQuery,
         ): array {
             if ($dailyBreakdowns === null) {
                 $dailyBreakdowns = $this->buildDailyBreakdowns(
+                    $event->latestActiveReportImport,
                     $latestActiveImportSummary,
                     $filters,
                     $makeFilteredProductRowsQuery(),
@@ -179,8 +183,13 @@ class EventDashboardController extends Controller
             'dailyBreakdowns' => fn (): array => $resolveDailyBreakdowns(),
             'hourlySales' => Inertia::defer(fn (): array => $this->buildHourlySales($makeFilteredRowsQuery()), 'dashboard-details'),
             'documentTypes' => Inertia::optional(fn (): array => $resolveDocumentTypes()),
-            'paymentSummary' => fn (): array => $this->buildPaymentSummary($latestActiveImportSummary, $filters),
+            'paymentSummary' => fn (): array => $this->buildPaymentSummary(
+                $event->latestActiveReportImport,
+                $latestActiveImportSummary,
+                $filters,
+            ),
             'reconciliation' => Inertia::defer(fn (): array => $this->buildPaymentReconciliation(
+                $event->latestActiveReportImport,
                 $latestActiveImportSummary,
                 $makeFilteredRowsQuery(),
                 $filters,
@@ -692,141 +701,114 @@ class EventDashboardController extends Controller
      * @param  array{bar_group: string, store: string, product: string, date_from: string, date_to: string, total_min: string, total_max: string}  $filters
      * @return array<int, array<string, mixed>>
      */
-    private function buildDailyFinancialTotals(
-        array $latestImportSummary,
-        array $filters,
-        Builder $fallbackRowsQuery,
-    ): array {
-        /** @var Collection<int, array<string, mixed>> $documents */
-        $documents = collect($latestImportSummary['payment_documents'] ?? [])
-            ->filter(fn (mixed $document): bool => is_array($document))
-            ->values();
-        $documents = $this->filterPaymentDocuments($documents, $filters)
-            ->filter(fn (array $document): bool => $this->isSalesPaymentDocument($document))
-            ->filter(fn (array $document): bool => $this->resolveDocumentReportingDate($document) !== null)
-            ->values();
-
-        if ($documents->isEmpty()) {
-            return $this->buildDailySales($fallbackRowsQuery);
-        }
-
-        return $documents
-            ->groupBy(fn (array $document): string => $this->resolveDocumentReportingDate($document) ?? '')
-            ->forget('')
-            ->map(function (Collection $dayDocuments, string $date): array {
-                $day = CarbonImmutable::parse($date);
-
-                return [
-                    'date' => $date,
-                    'label' => $day->locale('pt_PT')->translatedFormat('d M'),
-                    'sales_total' => round((float) $dayDocuments->sum(
-                        fn (array $document): float => (float) ($document['total'] ?? 0),
-                    ), 4),
-                    'quantity_total' => 0.0,
-                    'tickets_count' => $dayDocuments
-                        ->map(fn (array $document): string => implode('|', [
-                            $document['machine_client_id'] ?? '',
-                            $document['doc_type'] ?? '',
-                            $document['document_series'] ?? '',
-                            $document['document_number'] ?? '',
-                        ]))
-                        ->unique()
-                        ->count(),
-                ];
-            })
-            ->sortKeys()
-            ->values()
-            ->all();
-    }
-
-    /**
-     * @param  array<string, mixed>  $latestImportSummary
-     * @param  array{bar_group: string, store: string, product: string, date_from: string, date_to: string, total_min: string, total_max: string}  $filters
-     * @return array<int, array<string, mixed>>
-     */
     private function buildDailyBreakdowns(
+        ?EventReportImport $latestImport,
         array $latestImportSummary,
         array $filters,
         Builder $fallbackRowsQuery,
     ): array {
-        $dailySales = collect($this->buildDailyFinancialTotals(
+        $days = [];
+
+        foreach ($this->paymentDocuments(
+            $latestImport,
             $latestImportSummary,
             $filters,
-            $fallbackRowsQuery,
-        ));
+        ) as $document) {
+            $date = $this->resolveDocumentReportingDate($document);
 
-        /** @var Collection<int, array<string, mixed>> $documents */
-        $documents = collect($latestImportSummary['payment_documents'] ?? [])
-            ->filter(fn (mixed $document): bool => is_array($document))
-            ->values();
-        $documents = $this->filterPaymentDocuments($documents, $filters)
-            ->filter(fn (array $document): bool => $this->resolveDocumentReportingDate($document) !== null)
-            ->values();
+            if ($date === null) {
+                continue;
+            }
 
-        $dates = $dailySales
-            ->pluck('date')
-            ->merge($documents->map(fn (array $document): ?string => $this->resolveDocumentReportingDate($document)))
-            ->filter(fn (mixed $date): bool => is_string($date) && $date !== '')
-            ->unique()
-            ->sort()
-            ->values();
+            if (! isset($days[$date])) {
+                $days[$date] = [
+                    'date' => $date,
+                    'label' => CarbonImmutable::parse($date)->locale('pt_PT')->translatedFormat('d M'),
+                    'sales_total' => 0.0,
+                    'quantity_total' => 0.0,
+                    'ticket_keys' => [],
+                    'payments' => [
+                        'multibanco' => 0.0,
+                        'cash' => 0.0,
+                        'zticket' => 0.0,
+                        'other' => 0.0,
+                    ],
+                    'top_up_loaded' => 0.0,
+                    'top_up_document_keys' => [],
+                    'other_movements' => 0.0,
+                ];
+            }
 
-        return $dates
-            ->map(function (string $date) use ($dailySales, $documents): array {
-                $dailySale = $dailySales->firstWhere('date', $date) ?? [];
-                $dayDocuments = $documents
-                    ->filter(fn (array $document): bool => $this->resolveDocumentReportingDate($document) === $date)
-                    ->values();
-                $payments = [
+            $amount = (float) ($document['total'] ?? 0);
+
+            if ($this->isTopUpDocument($document)) {
+                $days[$date]['top_up_loaded'] += $amount;
+                $days[$date]['top_up_document_keys'][$this->buildPaymentDocumentKey($document)] = true;
+
+                continue;
+            }
+
+            if (! $this->isSalesPaymentDocument($document)) {
+                $days[$date]['other_movements'] += $amount;
+
+                continue;
+            }
+
+            $category = $this->resolvePaymentCategory((string) ($document['payment_code'] ?? ''));
+            $days[$date]['payments'][$category] += $amount;
+            $days[$date]['sales_total'] += $amount;
+            $days[$date]['ticket_keys'][$this->buildPaymentDocumentKey($document)] = true;
+        }
+
+        if ($days === []) {
+            return collect($this->buildDailySales($fallbackRowsQuery))
+                ->map(fn (array $day): array => [
+                    ...$day,
+                    'average_ticket' => (int) ($day['tickets_count'] ?? 0) > 0
+                        ? round((float) ($day['sales_total'] ?? 0) / (int) $day['tickets_count'], 4)
+                        : 0.0,
                     'multibanco' => 0.0,
                     'cash' => 0.0,
                     'zticket' => 0.0,
                     'other' => 0.0,
-                ];
-                $topUpLoaded = 0.0;
-                $topUpDocumentKeys = [];
-                $otherMovements = 0.0;
+                    'top_up_documents_count' => 0,
+                    'top_up_loaded' => 0.0,
+                    'top_up_spent' => 0.0,
+                    'top_up_remaining' => 0.0,
+                    'total_with_zt' => round((float) ($day['sales_total'] ?? 0), 4),
+                    'other_movements' => 0.0,
+                ])
+                ->values()
+                ->all();
+        }
 
-                foreach ($dayDocuments as $document) {
-                    $amount = (float) ($document['total'] ?? 0);
+        ksort($days);
 
-                    if ($this->isTopUpDocument($document)) {
-                        $topUpLoaded += $amount;
-                        $topUpDocumentKeys[$this->buildPaymentDocumentKey($document)] = true;
-
-                        continue;
-                    }
-
-                    if (! $this->isSalesPaymentDocument($document)) {
-                        $otherMovements += $amount;
-
-                        continue;
-                    }
-
-                    $payments[$this->resolvePaymentCategory((string) ($document['payment_code'] ?? ''))] += $amount;
-                }
-
-                $salesTotal = (float) ($dailySale['sales_total'] ?? array_sum($payments));
-                $ticketsCount = (int) ($dailySale['tickets_count'] ?? 0);
-                $topUpSpent = $payments['zticket'];
+        return collect($days)
+            ->map(function (array $day): array {
+                $payments = $day['payments'];
+                $salesTotal = (float) $day['sales_total'];
+                $ticketsCount = count($day['ticket_keys']);
+                $topUpLoaded = (float) $day['top_up_loaded'];
+                $topUpSpent = (float) $payments['zticket'];
 
                 return [
-                    'date' => $date,
-                    'label' => (string) ($dailySale['label'] ?? CarbonImmutable::parse($date)->locale('pt_PT')->translatedFormat('d M')),
+                    'date' => $day['date'],
+                    'label' => $day['label'],
                     'sales_total' => round($salesTotal, 4),
-                    'quantity_total' => round((float) ($dailySale['quantity_total'] ?? 0), 4),
+                    'quantity_total' => 0.0,
                     'tickets_count' => $ticketsCount,
                     'average_ticket' => $ticketsCount > 0 ? round($salesTotal / $ticketsCount, 4) : 0.0,
-                    'multibanco' => round($payments['multibanco'], 4),
-                    'cash' => round($payments['cash'], 4),
-                    'zticket' => round($payments['zticket'], 4),
-                    'other' => round($payments['other'], 4),
-                    'top_up_documents_count' => count($topUpDocumentKeys),
+                    'multibanco' => round((float) $payments['multibanco'], 4),
+                    'cash' => round((float) $payments['cash'], 4),
+                    'zticket' => round((float) $payments['zticket'], 4),
+                    'other' => round((float) $payments['other'], 4),
+                    'top_up_documents_count' => count($day['top_up_document_keys']),
                     'top_up_loaded' => round($topUpLoaded, 4),
                     'top_up_spent' => round($topUpSpent, 4),
                     'top_up_remaining' => round(max($topUpLoaded - $topUpSpent, 0), 4),
                     'total_with_zt' => round($salesTotal + $topUpLoaded, 4),
-                    'other_movements' => round($otherMovements, 4),
+                    'other_movements' => round((float) $day['other_movements'], 4),
                 ];
             })
             ->values()
@@ -920,43 +902,14 @@ class EventDashboardController extends Controller
      * @param  array{bar_group: string, store: string, product: string, date_from: string, date_to: string, total_min: string, total_max: string}  $filters
      * @return array<string, mixed>
      */
-    private function buildPaymentSummary(array $latestImportSummary, array $filters): array
-    {
-        /** @var Collection<int, array<string, mixed>> $documents */
-        $documents = collect($latestImportSummary['payment_documents'] ?? [])
-            ->filter(fn (mixed $document): bool => is_array($document))
-            ->values();
-
-        $documents = $this->filterPaymentDocuments($documents, $filters);
+    private function buildPaymentSummary(
+        ?EventReportImport $latestImport,
+        array $latestImportSummary,
+        array $filters,
+    ): array {
         $hasProductSpecificFilters = $filters['product'] !== ''
             || $filters['total_min'] !== ''
             || $filters['total_max'] !== '';
-
-        if ($documents->isEmpty()) {
-            return [
-                'available' => false,
-                'source' => 'unavailable',
-                'documents_count' => 0,
-                'movement_documents_count' => 0,
-                'multibanco' => 0.0,
-                'cash' => 0.0,
-                'zticket' => 0.0,
-                'other' => 0.0,
-                'sales_total' => 0.0,
-                'total_without_zt' => 0.0,
-                'total_with_zt' => 0.0,
-                'movement_total' => 0.0,
-                'other_movements' => 0.0,
-                'top_up_documents_count' => 0,
-                'top_up_loaded' => 0.0,
-                'top_up_spent' => 0.0,
-                'top_up_remaining' => 0.0,
-                'scope_note' => $hasProductSpecificFilters
-                    ? 'Pagamentos indisponiveis nos documentos sincronizados. Este bloco nao usa mais fallback externo.'
-                    : 'Pagamentos indisponiveis porque a ultima sincronizacao nao guardou os documentos de pagamento.',
-            ];
-        }
-
         $totals = [
             'multibanco' => 0.0,
             'cash' => 0.0,
@@ -969,8 +922,14 @@ class EventDashboardController extends Controller
         $movementDocumentKeys = [];
         $salesDocumentKeys = [];
         $topUpDocumentKeys = [];
+        $hasDocuments = false;
 
-        foreach ($documents as $document) {
+        foreach ($this->paymentDocuments(
+            $latestImport,
+            $latestImportSummary,
+            $filters,
+        ) as $document) {
+            $hasDocuments = true;
             $amount = (float) ($document['total'] ?? 0);
             $category = $this->resolvePaymentCategory((string) ($document['payment_code'] ?? ''));
             $isTopUp = $this->isTopUpDocument($document);
@@ -996,6 +955,31 @@ class EventDashboardController extends Controller
             if ($category === 'zticket') {
                 $totals['top_up_spent'] += $amount;
             }
+        }
+
+        if (! $hasDocuments) {
+            return [
+                'available' => false,
+                'source' => 'unavailable',
+                'documents_count' => 0,
+                'movement_documents_count' => 0,
+                'multibanco' => 0.0,
+                'cash' => 0.0,
+                'zticket' => 0.0,
+                'other' => 0.0,
+                'sales_total' => 0.0,
+                'total_without_zt' => 0.0,
+                'total_with_zt' => 0.0,
+                'movement_total' => 0.0,
+                'other_movements' => 0.0,
+                'top_up_documents_count' => 0,
+                'top_up_loaded' => 0.0,
+                'top_up_spent' => 0.0,
+                'top_up_remaining' => 0.0,
+                'scope_note' => $hasProductSpecificFilters
+                    ? 'Pagamentos indisponiveis nos documentos sincronizados. Este bloco nao usa mais fallback externo.'
+                    : 'Pagamentos indisponiveis porque a ultima sincronizacao nao guardou os documentos de pagamento.',
+            ];
         }
 
         $salesTotal = $totals['multibanco']
@@ -1037,24 +1021,18 @@ class EventDashboardController extends Controller
      * @return array<string, mixed>
      */
     private function buildPaymentReconciliation(
+        ?EventReportImport $latestImport,
         array $latestImportSummary,
         Builder $rowsQuery,
         array $filters,
     ): array {
-        /** @var Collection<int, array<string, mixed>> $documents */
-        $documents = collect($latestImportSummary['payment_documents'] ?? [])
-            ->filter(fn (mixed $document): bool => is_array($document))
-            ->values();
-        $documents = $this->filterPaymentDocuments($documents, $filters)
-            ->filter(fn (array $document): bool => $this->isSalesPaymentDocument($document))
-            ->values();
-
         $hasProductSpecificFilters = $filters['product'] !== ''
             || $filters['total_min'] !== ''
             || $filters['total_max'] !== '';
 
         $items = [];
         $documentKeys = [];
+        $allDocumentKeys = [];
 
         foreach ((clone $rowsQuery)
             ->select('store_code', 'store_name')
@@ -1073,7 +1051,15 @@ class EventDashboardController extends Controller
             $items[$key]['sales_total'] += (float) ($row->sales_total ?? 0);
         }
 
-        foreach ($documents as $document) {
+        foreach ($this->paymentDocuments(
+            $latestImport,
+            $latestImportSummary,
+            $filters,
+        ) as $document) {
+            if (! $this->isSalesPaymentDocument($document)) {
+                continue;
+            }
+
             $storeCode = isset($document['store_code']) ? (string) $document['store_code'] : null;
             $storeName = isset($document['store_name']) ? (string) $document['store_name'] : null;
             $key = $this->buildStoreKey($storeCode, $storeName);
@@ -1085,6 +1071,7 @@ class EventDashboardController extends Controller
             $category = $this->resolvePaymentCategory((string) ($document['payment_code'] ?? ''));
             $items[$key][$category] += (float) ($document['total'] ?? 0);
             $paymentDocumentKey = $this->buildPaymentDocumentKey($document);
+            $allDocumentKeys[$paymentDocumentKey] = true;
 
             if (! isset($documentKeys[$key][$paymentDocumentKey])) {
                 $items[$key]['documents_count']++;
@@ -1116,11 +1103,8 @@ class EventDashboardController extends Controller
             ->values();
 
         return [
-            'available' => $documents->isNotEmpty(),
-            'documents_count' => count(array_unique(array_map(
-                fn (array $document): string => $this->buildPaymentDocumentKey($document),
-                $documents->all(),
-            ))),
+            'available' => $allDocumentKeys !== [],
+            'documents_count' => count($allDocumentKeys),
             'comparable' => ! $hasProductSpecificFilters,
             'scope_note' => $hasProductSpecificFilters
                 ? 'Os pagamentos nao podem ser repartidos por produto ou valor de linha. A diferenca fica oculta com estes filtros.'
@@ -1295,7 +1279,11 @@ class EventDashboardController extends Controller
             (int) ($importSummary['machines_count'] ?? 0),
             $documentTypes,
         );
-        $payments = $this->buildPaymentSummary($importSummary, $this->emptyFilters());
+        $payments = $this->buildPaymentSummary(
+            $event->latestActiveReportImport,
+            $importSummary,
+            $this->emptyFilters(),
+        );
         $machinesCount = (int) $summary['machines_count'];
 
         return [
@@ -1342,6 +1330,99 @@ class EventDashboardController extends Controller
         }
 
         return round((($current - $previous) / abs($previous)) * 100, 1);
+    }
+
+    /**
+     * Stream normalized payment documents without hydrating the complete event payload.
+     *
+     * @param  array<string, mixed>  $legacySummary
+     * @param  array{bar_group: string, store: string, product: string, date_from: string, date_to: string, total_min: string, total_max: string}  $filters
+     * @return \Generator<int, array<string, mixed>>
+     */
+    private function paymentDocuments(
+        ?EventReportImport $latestImport,
+        array $legacySummary,
+        array $filters,
+    ): \Generator {
+        if ($latestImport !== null) {
+            $baseQuery = EventReportPaymentDocument::query()
+                ->where('event_report_import_id', $latestImport->id);
+
+            if ($baseQuery->exists()) {
+                $query = $this->applyPaymentDocumentFilters(
+                    EventReportPaymentDocument::query()
+                        ->where('event_report_import_id', $latestImport->id),
+                    $filters,
+                );
+
+                foreach ($query->orderBy('id')->toBase()->cursor() as $document) {
+                    yield [
+                        'machine_id' => $document->machine_id,
+                        'machine_client_id' => $document->machine_client_id,
+                        'store_code' => $document->store_code,
+                        'store_name' => $document->store_name,
+                        'sale_date' => $document->sale_date,
+                        'sale_datetime' => $document->sale_datetime,
+                        'doc_type' => $document->doc_type,
+                        'document_series' => $document->document_series,
+                        'document_number' => $document->document_number,
+                        'payment_reference' => $document->payment_reference,
+                        'paid' => $document->paid === null ? null : (bool) $document->paid,
+                        'document_total' => $document->document_total,
+                        'payment_key' => $document->payment_key,
+                        'payment_code' => $document->payment_code,
+                        'payment_document_type' => $document->payment_document_type,
+                        'payment_document_series' => $document->payment_document_series,
+                        'payment_document_number' => $document->payment_document_number,
+                        'payment_card_number' => $document->payment_card_number,
+                        'total' => $document->total,
+                        'is_unallocated' => (bool) $document->is_unallocated,
+                    ];
+                }
+
+                return;
+            }
+        }
+
+        $legacyDocuments = collect($legacySummary['payment_documents'] ?? [])
+            ->filter(fn (mixed $document): bool => is_array($document))
+            ->values();
+
+        foreach ($this->filterPaymentDocuments($legacyDocuments, $filters) as $document) {
+            yield $document;
+        }
+    }
+
+    /**
+     * @param  array{bar_group: string, store: string, product: string, date_from: string, date_to: string, total_min: string, total_max: string}  $filters
+     */
+    private function applyPaymentDocumentFilters(Builder $query, array $filters): Builder
+    {
+        if ($filters['bar_group'] !== '') {
+            $this->applyBarGroupFilter($query, $filters['bar_group']);
+        }
+
+        if ($filters['store'] !== '') {
+            $query->where('store_name', $filters['store']);
+        }
+
+        foreach (['date_from' => '>=', 'date_to' => '<='] as $filter => $operator) {
+            if ($filters[$filter] === '') {
+                continue;
+            }
+
+            $date = $filters[$filter];
+            $query->where(function (Builder $dateQuery) use ($operator, $date): void {
+                $this->applyReportingDateFilter($dateQuery, $operator, $date)
+                    ->orWhere(function (Builder $missingDateQuery): void {
+                        $missingDateQuery
+                            ->whereNull('sale_datetime')
+                            ->whereNull('sale_date');
+                    });
+            });
+        }
+
+        return $query;
     }
 
     /**

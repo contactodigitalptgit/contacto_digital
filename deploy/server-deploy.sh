@@ -9,7 +9,10 @@ lock_file="/var/lock/contacto-digital-deploy.lock"
 release_dir="$(mktemp -d /tmp/contacto-digital-release.XXXXXX)"
 timestamp="$(date +%Y%m%d-%H%M%S)"
 backup_dir="${backup_root}/${timestamp}"
+database_path="${project_dir}/shared/database/contacto_digital_bd.sqlite"
+database_backup_temp="${project_dir}/shared/database/.pre-deploy-${timestamp}.sqlite"
 requested_sha="${SSH_ORIGINAL_COMMAND:-unknown}"
+migration_services_stopped=0
 
 if [[ "${requested_sha}" =~ ^[0-9a-f]{40}$ ]]; then
   release_label="${requested_sha}"
@@ -19,6 +22,12 @@ fi
 
 cleanup() {
   rm -rf "${release_dir}"
+  rm -f "${database_backup_temp}"
+
+  if [ "${migration_services_stopped}" -eq 1 ] && [ -f "${project_dir}/compose.yaml" ]; then
+    cd "${project_dir}"
+    docker compose --env-file .env.production -f compose.yaml up -d --no-deps worker scheduler >/dev/null 2>&1 || true
+  fi
 }
 trap cleanup EXIT
 
@@ -119,9 +128,24 @@ fi
 cd "${project_dir}"
 
 docker compose --env-file .env.production -f compose.yaml config --quiet
+docker compose --env-file .env.production -f compose.yaml stop worker scheduler
+migration_services_stopped=1
+
+if [ -f "${database_path}" ]; then
+  docker compose --env-file .env.production -f compose.yaml run --rm --no-deps app php -r '
+    $source = getenv("DB_DATABASE");
+    $target = "/var/www/shared/database/'"$(basename "${database_backup_temp}")"'";
+    $pdo = new PDO("sqlite:".$source);
+    $pdo->exec("VACUUM INTO ".$pdo->quote($target));
+  '
+  install -m 0640 "${database_backup_temp}" "${backup_dir}/contacto_digital_bd.sqlite"
+  rm -f "${database_backup_temp}"
+fi
+
 docker compose --env-file .env.production -f compose.yaml build app
 docker compose --env-file .env.production -f compose.yaml run --rm --no-deps app php artisan migrate --force
 docker compose --env-file .env.production -f compose.yaml up -d --no-deps app web worker scheduler
+migration_services_stopped=0
 
 if docker ps --format '{{.Names}}' | grep -qx proxy_nginx; then
   docker exec proxy_nginx nginx -s reload

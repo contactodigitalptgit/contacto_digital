@@ -6,6 +6,7 @@ use App\Models\Client;
 use App\Models\ClientZoneSoftMachine;
 use App\Models\Event;
 use App\Models\EventReportImport;
+use App\Models\EventReportPaymentDocument;
 use App\Models\EventReportRow;
 use App\Models\User;
 use App\Models\ZoneSoftApplication;
@@ -844,6 +845,29 @@ class EventDashboardTest extends TestCase
             'is_active' => true,
             'status' => 'completed',
         ]);
+
+        $summary = $sync->summary;
+        $paymentDocuments = $summary['payment_documents'];
+
+        foreach ($paymentDocuments as $index => $document) {
+            EventReportPaymentDocument::create([
+                ...$document,
+                'event_id' => $event->id,
+                'event_report_import_id' => $sync->id,
+                'dedupe_key' => hash('sha256', implode('|', [
+                    $document['store_code'] ?? '',
+                    $document['doc_type'] ?? '',
+                    $document['document_series'] ?? '',
+                    $document['document_number'] ?? '',
+                    $document['payment_code'] ?? '',
+                    $index,
+                ])),
+            ]);
+        }
+
+        unset($summary['payment_documents']);
+        $summary['payment_documents_count'] = count($paymentDocuments);
+        $sync->update(['summary' => $summary]);
 
         $rows = [
             ['doc_type' => 'FS', 'store_code' => '1', 'store_name' => 'Bar 1 - Joao', 'sale_date' => '2026-03-14', 'sale_datetime' => '2026-03-14 12:00:00', 'product_code' => '730', 'description' => 'Agua', 'quantity' => '1.0000', 'value' => '2.4336', 'discount' => '0.0000', 'total' => '2.7500'],
