@@ -25,8 +25,6 @@ class EventReportSyncService
 {
     private const GLOBAL_SYNC_START_LOCK = 'event-report:global-sync-start';
 
-    private const MACHINE_SYNC_CONCURRENCY = 1;
-
     private const DOCUMENT_SYNC_CONCURRENCY = 2;
 
     private const DOCUMENT_REQUEST_BATCH_SIZE = 50;
@@ -604,7 +602,7 @@ class EventReportSyncService
         $apiRequestsCount = 0;
         $totalMachines = $machines->count();
 
-        foreach (array_chunk($machines->modelKeys(), self::MACHINE_SYNC_CONCURRENCY) as $machineIdChunk) {
+        foreach (array_chunk($machines->modelKeys(), $this->machineSyncConcurrency()) as $machineIdChunk) {
             $tasks = [];
 
             foreach ($machineIdChunk as $machineId) {
@@ -634,6 +632,11 @@ class EventReportSyncService
         }
 
         return $this->retryRateLimitedMachineResults($results, $rangePayload);
+    }
+
+    private function machineSyncConcurrency(): int
+    {
+        return max(1, min(20, (int) config('event-reports.zonesoft.machine_sync_concurrency', 8)));
     }
 
     /**

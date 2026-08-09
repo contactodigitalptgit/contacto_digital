@@ -58,14 +58,20 @@ class EventDashboardController extends Controller
         string $backUrl,
         string $backLabel,
     ): Response {
-        app(EventReportSyncService::class)->markStaleProcessingImportsAsFailed($event);
-
         $event->load(['client', 'latestActiveReportImport', 'latestReportImport'])
             ->loadCount([
-                'activeReportImports',
                 'processingReportImports',
                 'zonesoftMachines as active_zonesoft_machines_count' => fn ($query) => $query->where('is_active', true),
             ]);
+
+        if ((int) $event->processing_report_imports_count > 0) {
+            app(EventReportSyncService::class)->markStaleProcessingImportsAsFailed($event);
+            $event->unsetRelation('latestActiveReportImport');
+            $event->unsetRelation('latestReportImport');
+            $event->load(['latestActiveReportImport', 'latestReportImport'])
+                ->loadCount('processingReportImports');
+        }
+
         $latestActiveImportSummary = is_array($event->latestActiveReportImport?->summary)
             ? $event->latestActiveReportImport->summary
             : [];
@@ -137,7 +143,6 @@ class EventDashboardController extends Controller
                 'event_date' => $event->event_date->toISOString(),
                 'client_name' => $event->client->name,
                 'client_business_name' => $event->client->business_name,
-                'active_imports_count' => (int) $event->active_report_imports_count,
                 'processing_imports_count' => (int) $event->processing_report_imports_count,
                 'last_synced_at' => $event->latestActiveReportImport?->imported_at?->toISOString(),
                 'show_zt_card' => $event->show_zt_card,
@@ -152,11 +157,11 @@ class EventDashboardController extends Controller
             'autoSync' => $this->autoSync->status($event),
             'syncStatus' => $this->buildSyncStatus($event),
             'filters' => $filters,
-            'filterOptions' => fn (): array => [
+            'filterOptions' => Inertia::defer(fn (): array => [
                 'barGroups' => $this->buildBarGroupOptions($makeBaseRowsQuery()),
                 'stores' => $this->buildStoreOptions($makeBaseRowsQuery()),
                 'products' => $this->buildProductOptions($makeBaseRowsQuery()),
-            ],
+            ], 'dashboard-details'),
             'summary' => fn (): array => $this->buildSummary(
                 $makeBaseRowsQuery(),
                 $makeFilteredRowsQuery(),
@@ -165,27 +170,27 @@ class EventDashboardController extends Controller
                 (int) ($event->latestActiveReportImport?->summary['machines_count'] ?? 0),
                 $resolveDocumentTypes(),
             ),
-            'barGroups' => fn (): array => $this->buildBarGroups($makeFilteredRowsQuery()),
-            'zoneDevices' => fn (): array => $this->buildZoneDevices($makeFilteredRowsQuery()),
-            'topStores' => fn (): array => $this->buildTopStores($makeFilteredRowsQuery()),
-            'topProducts' => fn (): array => $this->buildTopProducts($makeFilteredProductRowsQuery()),
-            'productBreakdowns' => fn (): array => $this->buildProductBreakdowns($makeFilteredProductRowsQuery()),
+            'barGroups' => Inertia::defer(fn (): array => $this->buildBarGroups($makeFilteredRowsQuery()), 'dashboard-details'),
+            'zoneDevices' => Inertia::defer(fn (): array => $this->buildZoneDevices($makeFilteredRowsQuery()), 'dashboard-details'),
+            'topStores' => Inertia::defer(fn (): array => $this->buildTopStores($makeFilteredRowsQuery()), 'dashboard-details'),
+            'topProducts' => Inertia::defer(fn (): array => $this->buildTopProducts($makeFilteredProductRowsQuery()), 'dashboard-details'),
+            'productBreakdowns' => Inertia::defer(fn (): array => $this->buildProductBreakdowns($makeFilteredProductRowsQuery()), 'dashboard-details'),
             'dailySales' => fn (): array => $resolveDailyBreakdowns(),
             'dailyBreakdowns' => fn (): array => $resolveDailyBreakdowns(),
-            'hourlySales' => fn (): array => $this->buildHourlySales($makeFilteredRowsQuery()),
-            'documentTypes' => fn (): array => $resolveDocumentTypes(),
+            'hourlySales' => Inertia::defer(fn (): array => $this->buildHourlySales($makeFilteredRowsQuery()), 'dashboard-details'),
+            'documentTypes' => Inertia::optional(fn (): array => $resolveDocumentTypes()),
             'paymentSummary' => fn (): array => $this->buildPaymentSummary($latestActiveImportSummary, $filters),
-            'reconciliation' => fn (): array => $this->buildPaymentReconciliation(
+            'reconciliation' => Inertia::defer(fn (): array => $this->buildPaymentReconciliation(
                 $latestActiveImportSummary,
                 $makeFilteredRowsQuery(),
                 $filters,
-            ),
-            'comparison' => fn (): array => $this->buildComparison(
+            ), 'dashboard-details'),
+            'comparison' => Inertia::defer(fn (): array => $this->buildComparison(
                 $event,
                 $makeBaseRowsQuery(),
                 $latestActiveImportSummary,
-            ),
-            'rows' => fn () => $resolveRows()->getCollection()->map(fn (EventReportRow $row): array => [
+            ), 'dashboard-details'),
+            'rows' => Inertia::optional(fn () => $resolveRows()->getCollection()->map(fn (EventReportRow $row): array => [
                 'id' => $row->id,
                 'store_code' => $row->store_code,
                 'store_name' => $row->store_name,
@@ -200,8 +205,8 @@ class EventDashboardController extends Controller
                 'value' => (float) ($row->value ?? 0),
                 'discount' => (float) ($row->discount ?? 0),
                 'total' => (float) ($row->total ?? 0),
-            ])->values(),
-            'pagination' => fn (): array => [
+            ])->values()),
+            'pagination' => Inertia::optional(fn (): array => [
                 'current_page' => $resolveRows()->currentPage(),
                 'last_page' => $resolveRows()->lastPage(),
                 'per_page' => $resolveRows()->perPage(),
@@ -210,7 +215,7 @@ class EventDashboardController extends Controller
                 'to' => $resolveRows()->lastItem(),
                 'prev_page_url' => $resolveRows()->previousPageUrl(),
                 'next_page_url' => $resolveRows()->nextPageUrl(),
-            ],
+            ]),
             'previewMode' => $previewMode,
             'backUrl' => $backUrl,
             'backLabel' => $backLabel,
@@ -430,8 +435,17 @@ class EventDashboardController extends Controller
         int $machinesCount,
         array $documentTypes,
     ): array {
-        $filteredRowsCount = (clone $filteredRowsQuery)->count();
-        $totalSales = (float) ((clone $filteredRowsQuery)->sum('total') ?? 0);
+        $totals = (clone $filteredRowsQuery)
+            ->selectRaw('COUNT(*) as rows_count')
+            ->selectRaw('COALESCE(SUM(total), 0) as total_sales')
+            ->selectRaw('COALESCE(SUM(value), 0) as total_value')
+            ->selectRaw('COALESCE(SUM(discount), 0) as total_discount')
+            ->selectRaw('COALESCE(SUM(quantity), 0) as total_quantity')
+            ->selectRaw("COUNT(DISTINCT CASE WHEN store_name IS NOT NULL AND store_name != '' THEN store_name END) as stores_count")
+            ->selectRaw("COUNT(DISTINCT CASE WHEN product_code IS NOT NULL AND product_code != '' THEN product_code END) as products_count")
+            ->first();
+        $filteredRowsCount = (int) ($totals?->rows_count ?? 0);
+        $totalSales = (float) ($totals?->total_sales ?? 0);
         $ticketsCount = array_sum(array_map(
             fn (array $documentType): int => (int) ($documentType['tickets_count'] ?? 0),
             $documentTypes,
@@ -443,20 +457,12 @@ class EventDashboardController extends Controller
             'filtered_rows' => $filteredRowsCount,
             'bar_groups_count' => count($this->buildBarGroups(clone $filteredRowsQuery)),
             'total_sales' => $totalSales,
-            'total_value' => (float) ((clone $filteredRowsQuery)->sum('value') ?? 0),
-            'total_discount' => (float) ((clone $filteredRowsQuery)->sum('discount') ?? 0),
-            'total_quantity' => (float) ((clone $filteredRowsQuery)->sum('quantity') ?? 0),
-            'stores_count' => (int) ((clone $filteredRowsQuery)
-                ->whereNotNull('store_name')
-                ->where('store_name', '!=', '')
-                ->distinct()
-                ->count('store_name')),
+            'total_value' => (float) ($totals?->total_value ?? 0),
+            'total_discount' => (float) ($totals?->total_discount ?? 0),
+            'total_quantity' => (float) ($totals?->total_quantity ?? 0),
+            'stores_count' => (int) ($totals?->stores_count ?? 0),
             'tickets_count' => $ticketsCount,
-            'products_count' => (int) ((clone $filteredRowsQuery)
-                ->whereNotNull('product_code')
-                ->where('product_code', '!=', '')
-                ->distinct()
-                ->count('product_code')),
+            'products_count' => (int) ($totals?->products_count ?? 0),
             'document_types_count' => count($documentTypes),
             'average_ticket' => $ticketsCount > 0
                 ? round($totalSales / $ticketsCount, 4)
@@ -471,14 +477,19 @@ class EventDashboardController extends Controller
      */
     private function buildBarGroups(Builder $query): array
     {
-        /** @var \Illuminate\Support\Collection<int, EventReportRow> $rows */
-        $rows = $query
-            ->get(['store_name', 'store_code', 'quantity', 'total']);
+        /** @var Collection<int, EventReportRow> $stores */
+        $stores = $query
+            ->select('store_name', 'store_code')
+            ->selectRaw('COUNT(*) as rows_count')
+            ->selectRaw('COALESCE(SUM(quantity), 0) as quantity_total')
+            ->selectRaw('COALESCE(SUM(total), 0) as sales_total')
+            ->groupBy('store_name', 'store_code')
+            ->get();
 
-        return $rows
+        return $stores
             ->groupBy(fn (EventReportRow $row): string => $this->resolveBarGroupLabel($row->store_name))
-            ->map(function ($groupRows, string $label): array {
-                $members = $groupRows
+            ->map(function (Collection $groupStores, string $label): array {
+                $members = $groupStores
                     ->pluck('store_name')
                     ->filter()
                     ->unique()
@@ -490,9 +501,9 @@ class EventDashboardController extends Controller
                     'label' => $label,
                     'stores_count' => count($members),
                     'members' => $members,
-                    'rows_count' => $groupRows->count(),
-                    'quantity_total' => round((float) $groupRows->sum('quantity'), 4),
-                    'sales_total' => round((float) $groupRows->sum('total'), 4),
+                    'rows_count' => (int) $groupStores->sum('rows_count'),
+                    'quantity_total' => round((float) $groupStores->sum('quantity_total'), 4),
+                    'sales_total' => round((float) $groupStores->sum('sales_total'), 4),
                 ];
             })
             ->sortByDesc('sales_total')
@@ -634,23 +645,21 @@ class EventDashboardController extends Controller
     {
         $driver = $query->getModel()->getConnection()->getDriverName();
 
-        [$dateExpression, $hourExpression, $ticketExpression] = match ($driver) {
+        [$dateExpression, $hourExpression] = match ($driver) {
             'pgsql' => [
                 "TO_CHAR(sale_datetime, 'YYYY-MM-DD')",
                 'CAST(EXTRACT(HOUR FROM sale_datetime) AS INTEGER)',
-                "COALESCE(store_code, '') || '|' || COALESCE(doc_type, '') || '|' || COALESCE(document_series, '') || '|' || COALESCE(document_number, '')",
             ],
             'mysql', 'mariadb' => [
                 "DATE_FORMAT(sale_datetime, '%Y-%m-%d')",
                 'HOUR(sale_datetime)',
-                "CONCAT_WS('|', COALESCE(store_code, ''), COALESCE(doc_type, ''), COALESCE(document_series, ''), COALESCE(document_number, ''))",
             ],
             default => [
                 "strftime('%Y-%m-%d', sale_datetime)",
                 "CAST(strftime('%H', sale_datetime) AS INTEGER)",
-                "COALESCE(store_code, '') || '|' || COALESCE(doc_type, '') || '|' || COALESCE(document_series, '') || '|' || COALESCE(document_number, '')",
             ],
         };
+        $ticketExpression = $this->ticketSqlExpression($query);
 
         return $query
             ->whereNotNull('sale_datetime')
@@ -870,36 +879,40 @@ class EventDashboardController extends Controller
      */
     private function buildDocumentTypes(Builder $query): array
     {
-        /** @var Collection<int, EventReportRow> $rows */
-        $rows = $query
-            ->get([
-                'id',
-                'doc_type',
-                'document_series',
-                'document_number',
-                'store_code',
-                'quantity',
-                'total',
-            ]);
+        $documentTypeExpression = "CASE WHEN doc_type IS NULL OR TRIM(doc_type) = '' THEN 'Sem tipo' ELSE doc_type END";
+        $ticketExpression = $this->ticketSqlExpression($query);
 
-        return $rows
-            ->groupBy(fn (EventReportRow $row): string => filled($row->doc_type) ? (string) $row->doc_type : 'Sem tipo')
-            ->map(function (Collection $groupRows, string $label): array {
+        return $query
+            ->selectRaw("{$documentTypeExpression} as document_type_label")
+            ->selectRaw("COUNT(DISTINCT {$ticketExpression}) as tickets_count")
+            ->selectRaw('COUNT(*) as rows_count')
+            ->selectRaw('COALESCE(SUM(quantity), 0) as quantity_total')
+            ->selectRaw('COALESCE(SUM(total), 0) as sales_total')
+            ->groupByRaw($documentTypeExpression)
+            ->orderByDesc('sales_total')
+            ->get()
+            ->map(function (EventReportRow $row): array {
+                $label = (string) $row->document_type_label;
+
                 return [
                     'label' => $label,
                     'code' => $label === 'Sem tipo' ? null : $label,
-                    'tickets_count' => $groupRows
-                        ->map(fn (EventReportRow $row): string => $this->buildTicketKey($row))
-                        ->unique()
-                        ->count(),
-                    'rows_count' => $groupRows->count(),
-                    'quantity_total' => round((float) $groupRows->sum('quantity'), 4),
-                    'sales_total' => round((float) $groupRows->sum('total'), 4),
+                    'tickets_count' => (int) ($row->tickets_count ?? 0),
+                    'rows_count' => (int) ($row->rows_count ?? 0),
+                    'quantity_total' => round((float) ($row->quantity_total ?? 0), 4),
+                    'sales_total' => round((float) ($row->sales_total ?? 0), 4),
                 ];
             })
-            ->sortByDesc('sales_total')
             ->values()
             ->all();
+    }
+
+    private function ticketSqlExpression(Builder $query): string
+    {
+        return match ($query->getModel()->getConnection()->getDriverName()) {
+            'mysql', 'mariadb' => "CONCAT_WS('|', COALESCE(store_code, ''), COALESCE(doc_type, ''), COALESCE(document_series, ''), COALESCE(document_number, ''))",
+            default => "COALESCE(store_code, '') || '|' || COALESCE(doc_type, '') || '|' || COALESCE(document_series, '') || '|' || COALESCE(document_number, '')",
+        };
     }
 
     /**

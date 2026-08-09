@@ -99,25 +99,27 @@ class EventDashboardTest extends TestCase
             ->where('summary.bar_groups_count', 1)
             ->where('summary.filtered_rows', $expectedCount)
             ->where('summary.tickets_count', $expectedCount)
-            ->where('pagination.total', $expectedCount)
             ->where('paymentSummary.source', 'documents_headers')
             ->where('paymentSummary.cash', 2.75)
             ->where('paymentSummary.zticket', 5.5)
-            ->where('zoneDevices', fn ($zones): bool => collect($zones)->contains(
-                fn (array $zone): bool => $zone['label'] === 'Bar 1'
-                    && count($zone['items']) === 2,
-            ))
-            ->where('barGroups', fn ($groups): bool => collect($groups)->contains(
-                fn (array $group): bool => $group['label'] === 'Bar 1'
-                    && empty(array_diff($expectedMembers, $group['members'])),
-            ))
-            ->where('documentTypes', fn ($documentTypes): bool => collect($documentTypes)->contains(
-                fn (array $documentType): bool => in_array($documentType['label'], ['FS', 'FT'], true),
-            ))
-            ->where('rows', fn ($rows): bool => collect($rows)->every(
-                fn (array $row): bool => $row['product_code'] === '730'
-                    && $this->resolveBarGroupLabel($row['store_name']) === 'Bar 1',
-            )));
+            ->loadDeferredProps('dashboard-details', fn (AssertableInertia $details) => $details
+                ->where('zoneDevices', fn ($zones): bool => collect($zones)->contains(
+                    fn (array $zone): bool => $zone['label'] === 'Bar 1'
+                        && count($zone['items']) === 2,
+                ))
+                ->where('barGroups', fn ($groups): bool => collect($groups)->contains(
+                    fn (array $group): bool => $group['label'] === 'Bar 1'
+                        && empty(array_diff($expectedMembers, $group['members'])),
+                )))
+            ->reload(fn (AssertableInertia $details) => $details
+                ->where('pagination.total', $expectedCount)
+                ->where('documentTypes', fn ($documentTypes): bool => collect($documentTypes)->contains(
+                    fn (array $documentType): bool => in_array($documentType['label'], ['FS', 'FT'], true),
+                ))
+                ->where('rows', fn ($rows): bool => collect($rows)->every(
+                    fn (array $row): bool => $row['product_code'] === '730'
+                        && $this->resolveBarGroupLabel($row['store_name']) === 'Bar 1',
+                )), ['pagination', 'documentTypes', 'rows']));
     }
 
     public function test_event_dashboard_exposes_client_events_for_switcher(): void
@@ -188,16 +190,17 @@ class EventDashboardTest extends TestCase
             ->get(route('admin.events.dashboard', $event))
             ->assertOk()
             ->assertInertia(fn (AssertableInertia $page) => $page
-                ->where('barGroups', fn ($groups): bool => collect($groups)->contains(
-                    fn (array $group): bool => $group['label'] === 'Bar 1'
-                        && in_array('Tpa 6 - Bar 1 Rodolfo - POS 1', $group['members'], true),
-                ) && collect($groups)->contains(
-                    fn (array $group): bool => $group['label'] === 'Bar 2'
-                        && $group['stores_count'] === 2,
-                ) && collect($groups)->contains(
-                    fn (array $group): bool => $group['label'] === 'Bar Vip'
-                        && $group['stores_count'] === 2,
-                )));
+                ->loadDeferredProps('dashboard-details', fn (AssertableInertia $details) => $details
+                    ->where('barGroups', fn ($groups): bool => collect($groups)->contains(
+                        fn (array $group): bool => $group['label'] === 'Bar 1'
+                            && in_array('Tpa 6 - Bar 1 Rodolfo - POS 1', $group['members'], true),
+                    ) && collect($groups)->contains(
+                        fn (array $group): bool => $group['label'] === 'Bar 2'
+                            && $group['stores_count'] === 2,
+                    ) && collect($groups)->contains(
+                        fn (array $group): bool => $group['label'] === 'Bar Vip'
+                            && $group['stores_count'] === 2,
+                    ))));
     }
 
     public function test_client_can_not_view_dashboard_of_other_client_event(): void
@@ -259,18 +262,6 @@ class EventDashboardTest extends TestCase
             ->where('paymentSummary.total_with_zt', 17)
             ->where('dailySales', fn ($days): bool => count($days) === 2
                 && collect($days)->sum('sales_total') === 14.25)
-            ->where('hourlySales', function ($hours): bool {
-                $firstDay = collect($hours)->first(fn (array $hour): bool => $hour['date'] === '2026-03-14'
-                    && $hour['hour'] === 12);
-                $secondDay = collect($hours)->first(fn (array $hour): bool => $hour['date'] === '2026-03-15'
-                    && $hour['hour'] === 12);
-
-                return count($hours) === 2
-                    && (float) ($firstDay['sales_total'] ?? 0) === 13.25
-                    && (int) ($firstDay['tickets_count'] ?? 0) === 4
-                    && (float) ($secondDay['sales_total'] ?? 0) === 2.5
-                    && (int) ($secondDay['tickets_count'] ?? 0) === 2;
-            })
             ->where('dailyBreakdowns', function ($days): bool {
                 $firstDay = collect($days)->firstWhere('date', '2026-03-14');
                 $secondDay = collect($days)->firstWhere('date', '2026-03-15');
@@ -289,32 +280,45 @@ class EventDashboardTest extends TestCase
                     && (int) ($secondDay['tickets_count'] ?? 0) === 1
                     && (float) ($secondDay['average_ticket'] ?? 0) === 1.0;
             })
-            ->where('productBreakdowns.total', fn ($products): bool => collect($products)->contains(
-                fn (array $product): bool => $product['label'] === 'Contactless'
-                    && $product['code'] === 'ZT-CARD'
-                    && (float) $product['quantity_total'] === 1.0
-                    && (float) $product['sales_total'] === 2.75,
-            ))
-            ->where('productBreakdowns.days', fn ($days): bool => count($days) === 2)
-            ->where('reconciliation.comparable', true)
-            ->where('reconciliation.documents_count', 5)
-            ->where('reconciliation.totals.payments_total', 14.25)
-            ->where('reconciliation.totals.sales_total', 15.75)
-            ->where('reconciliation.totals.difference', -1.5)
-            ->where('comparison.available', false)
-            ->where('zoneDevices', fn ($zones): bool => collect($zones)->contains(
-                fn (array $zone): bool => $zone['label'] === 'Bar 1'
-                    && count($zone['items']) === 2,
-            ))
-            ->where('filterOptions.barGroups', fn ($groups): bool => collect($groups)->contains(
-                fn (array $group): bool => $group['value'] === 'Bar 1' && $group['rows_count'] > 0,
-            ))
-            ->where('barGroups', fn ($groups): bool => collect($groups)->contains(
-                fn (array $group): bool => $group['label'] === 'Bar 1'
-                    && in_array('Bar 1 - Joao', $group['members'], true)
-                    && in_array('Bar 1 Joana C', $group['members'], true),
-            ))
-            ->where('event.client_name', 'Cliente Dashboard'));
+            ->where('event.client_name', 'Cliente Dashboard')
+            ->loadDeferredProps('dashboard-details', fn (AssertableInertia $details) => $details
+                ->where('hourlySales', function ($hours): bool {
+                    $firstDay = collect($hours)->first(fn (array $hour): bool => $hour['date'] === '2026-03-14'
+                        && $hour['hour'] === 12);
+                    $secondDay = collect($hours)->first(fn (array $hour): bool => $hour['date'] === '2026-03-15'
+                        && $hour['hour'] === 12);
+
+                    return count($hours) === 2
+                        && (float) ($firstDay['sales_total'] ?? 0) === 13.25
+                        && (int) ($firstDay['tickets_count'] ?? 0) === 4
+                        && (float) ($secondDay['sales_total'] ?? 0) === 2.5
+                        && (int) ($secondDay['tickets_count'] ?? 0) === 2;
+                })
+                ->where('productBreakdowns.total', fn ($products): bool => collect($products)->contains(
+                    fn (array $product): bool => $product['label'] === 'Contactless'
+                        && $product['code'] === 'ZT-CARD'
+                        && (float) $product['quantity_total'] === 1.0
+                        && (float) $product['sales_total'] === 2.75,
+                ))
+                ->where('productBreakdowns.days', fn ($days): bool => count($days) === 2)
+                ->where('reconciliation.comparable', true)
+                ->where('reconciliation.documents_count', 5)
+                ->where('reconciliation.totals.payments_total', 14.25)
+                ->where('reconciliation.totals.sales_total', 15.75)
+                ->where('reconciliation.totals.difference', -1.5)
+                ->where('comparison.available', false)
+                ->where('zoneDevices', fn ($zones): bool => collect($zones)->contains(
+                    fn (array $zone): bool => $zone['label'] === 'Bar 1'
+                        && count($zone['items']) === 2,
+                ))
+                ->where('filterOptions.barGroups', fn ($groups): bool => collect($groups)->contains(
+                    fn (array $group): bool => $group['value'] === 'Bar 1' && $group['rows_count'] > 0,
+                ))
+                ->where('barGroups', fn ($groups): bool => collect($groups)->contains(
+                    fn (array $group): bool => $group['label'] === 'Bar 1'
+                        && in_array('Bar 1 - Joao', $group['members'], true)
+                        && in_array('Bar 1 Joana C', $group['members'], true),
+                ))));
     }
 
     public function test_dashboard_keeps_hourly_sales_for_an_eleven_day_event(): void
@@ -351,10 +355,11 @@ class EventDashboardTest extends TestCase
             ->get(route('admin.events.dashboard', $event))
             ->assertOk()
             ->assertInertia(fn (AssertableInertia $page) => $page
-                ->where('hourlySales', fn ($hours): bool => collect($hours)->pluck('date')->unique()->count() === 11
-                    && collect($hours)->contains(fn (array $hour): bool => $hour['date'] === '2026-03-24'
-                        && $hour['hour'] === 18
-                        && (float) $hour['sales_total'] === 10.0)));
+                ->loadDeferredProps('dashboard-details', fn (AssertableInertia $details) => $details
+                    ->where('hourlySales', fn ($hours): bool => collect($hours)->pluck('date')->unique()->count() === 11
+                        && collect($hours)->contains(fn (array $hour): bool => $hour['date'] === '2026-03-24'
+                            && $hour['hour'] === 18
+                            && (float) $hour['sales_total'] === 10.0))));
     }
 
     public function test_dashboard_hides_zt_product_breakdowns_when_event_disables_zt_card(): void
@@ -373,12 +378,13 @@ class EventDashboardTest extends TestCase
             ->component('Events/Dashboard')
             ->where('event.show_zt_card', false)
             ->where('paymentSummary.top_up_loaded', 2.75)
-            ->where('productBreakdowns.total', fn ($products): bool => collect($products)->doesntContain(
-                fn (array $product): bool => $product['code'] === 'ZT-CARD',
-            ))
-            ->where('topProducts', fn ($products): bool => collect($products)->doesntContain(
-                fn (array $product): bool => $product['code'] === 'ZT-CARD',
-            )));
+            ->loadDeferredProps('dashboard-details', fn (AssertableInertia $details) => $details
+                ->where('productBreakdowns.total', fn ($products): bool => collect($products)->doesntContain(
+                    fn (array $product): bool => $product['code'] === 'ZT-CARD',
+                ))
+                ->where('topProducts', fn ($products): bool => collect($products)->doesntContain(
+                    fn (array $product): bool => $product['code'] === 'ZT-CARD',
+                ))));
     }
 
     public function test_dashboard_compares_with_previous_synced_event(): void
@@ -452,24 +458,25 @@ class EventDashboardTest extends TestCase
 
         $response->assertOk();
         $response->assertInertia(fn (AssertableInertia $page) => $page
-            ->where('comparison.available', true)
-            ->where('comparison.current.title', 'Evento Dashboard')
-            ->where('comparison.current.total_sales', 15.75)
-            ->where('comparison.previous.title', 'Evento Anterior')
-            ->where('comparison.previous.total_sales', 10)
-            ->where('comparison.total_variation', 57.5)
-            ->where('comparison.metrics', fn ($metrics): bool => collect($metrics)->contains(
-                fn (array $metric): bool => $metric['key'] === 'machines_count'
-                    && (float) $metric['current'] === 2.0
-                    && (float) $metric['previous'] === 1.0
-                    && (float) $metric['variation'] === 100.0,
-            ))
-            ->where('comparison.payments', fn ($payments): bool => collect($payments)->contains(
-                fn (array $payment): bool => $payment['key'] === 'multibanco'
-                    && (float) $payment['current'] === 4.2
-                    && (float) $payment['previous'] === 10.0
-                    && (float) $payment['variation'] === -58.0,
-            )));
+            ->loadDeferredProps('dashboard-details', fn (AssertableInertia $details) => $details
+                ->where('comparison.available', true)
+                ->where('comparison.current.title', 'Evento Dashboard')
+                ->where('comparison.current.total_sales', 15.75)
+                ->where('comparison.previous.title', 'Evento Anterior')
+                ->where('comparison.previous.total_sales', 10)
+                ->where('comparison.total_variation', 57.5)
+                ->where('comparison.metrics', fn ($metrics): bool => collect($metrics)->contains(
+                    fn (array $metric): bool => $metric['key'] === 'machines_count'
+                        && (float) $metric['current'] === 2.0
+                        && (float) $metric['previous'] === 1.0
+                        && (float) $metric['variation'] === 100.0,
+                ))
+                ->where('comparison.payments', fn ($payments): bool => collect($payments)->contains(
+                    fn (array $payment): bool => $payment['key'] === 'multibanco'
+                        && (float) $payment['current'] === 4.2
+                        && (float) $payment['previous'] === 10.0
+                        && (float) $payment['variation'] === -58.0,
+                ))));
     }
 
     public function test_admin_preview_ignores_stale_processing_imports(): void

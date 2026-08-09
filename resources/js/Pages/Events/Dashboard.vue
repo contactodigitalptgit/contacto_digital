@@ -283,29 +283,57 @@ interface ChartOperationalItem {
     height: string;
 }
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
     event: EventMeta;
     eventOptions: EventOption[];
     summary: EventSummary;
-    barGroups: BarGroupItem[];
-    topStores: BreakdownItem[];
-    topProducts: BreakdownItem[];
-    productBreakdowns: ProductBreakdowns;
+    barGroups?: BarGroupItem[];
+    topStores?: BreakdownItem[];
+    topProducts?: BreakdownItem[];
+    productBreakdowns?: ProductBreakdowns;
     dailySales: DailySale[];
     dailyBreakdowns: DailyBreakdown[];
-    hourlySales: HourlySale[];
+    hourlySales?: HourlySale[];
     paymentSummary: PaymentSummary;
-    reconciliation: ReconciliationData;
-    comparison: ComparisonData;
-    zoneDevices: ZoneDeviceGroup[];
+    reconciliation?: ReconciliationData;
+    comparison?: ComparisonData;
+    zoneDevices?: ZoneDeviceGroup[];
     filters: DashboardFilters;
-    filterOptions: FilterOptions;
+    filterOptions?: FilterOptions;
     autoSync: AutoSyncMeta;
     syncStatus: SyncStatusMeta;
     previewMode?: boolean;
     backUrl: string;
     backLabel: string;
-}>();
+}>(), {
+    barGroups: () => [],
+    topStores: () => [],
+    topProducts: () => [],
+    productBreakdowns: () => ({ total: [], days: [] }),
+    hourlySales: () => [],
+    reconciliation: () => ({
+        available: false,
+        comparable: false,
+        documents_count: 0,
+        scope_note: 'A carregar dados de conciliação.',
+        totals: {
+            multibanco: 0,
+            cash: 0,
+            zticket: 0,
+            other: 0,
+            payments_total: 0,
+            sales_total: 0,
+            difference: 0,
+        },
+        items: [],
+    }),
+    comparison: () => ({
+        available: false,
+        message: 'A carregar comparação.',
+    }),
+    zoneDevices: () => [],
+    filterOptions: () => ({ barGroups: [], stores: [], products: [] }),
+});
 
 const dashboardSections: Array<{
     key: DashboardSection;
