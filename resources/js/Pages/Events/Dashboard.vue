@@ -1,10 +1,18 @@
 <script setup lang="ts">
+import DashboardPageEditor from '@/Components/DashboardPageEditor.vue';
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout.vue';
 import { showErrorToast, showSuccessToast } from '@/lib/swal';
+import type {
+    DashboardConfiguration,
+    DashboardConfigurationItem,
+    DashboardEditorMeta,
+    DashboardMetricGroup,
+    DashboardSectionKey,
+} from '@/types/dashboard-configuration';
 import { Head, Link, router } from '@inertiajs/vue3';
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 
-type DashboardSection = 'summary' | 'products' | 'zones' | 'reconciliation' | 'comparison' | 'highlights' | 'charts';
+type DashboardSection = DashboardSectionKey;
 type ProductSort = 'quantity' | 'sales';
 type ViewMode = 'list' | 'chart';
 type HighlightScope = 'zones' | 'devices' | 'products';
@@ -231,6 +239,7 @@ interface FilterOptions {
 }
 
 interface MetricCard {
+    key: string;
     label: string;
     value: string;
     helper: string;
@@ -302,6 +311,8 @@ const props = withDefaults(defineProps<{
     filterOptions?: FilterOptions;
     autoSync: AutoSyncMeta;
     syncStatus: SyncStatusMeta;
+    dashboardConfiguration: DashboardConfiguration;
+    dashboardEditor?: DashboardEditorMeta | null;
     previewMode?: boolean;
     backUrl: string;
     backLabel: string;
@@ -333,22 +344,8 @@ const props = withDefaults(defineProps<{
     }),
     zoneDevices: () => [],
     filterOptions: () => ({ barGroups: [], stores: [], products: [] }),
+    dashboardEditor: null,
 });
-
-const dashboardSections: Array<{
-    key: DashboardSection;
-    number: string;
-    label: string;
-    helper: string;
-}> = [
-    { key: 'summary', number: '01', label: 'Resumo', helper: 'Visão geral' },
-    { key: 'products', number: '02', label: 'Produtos', helper: 'Mais vendidos' },
-    { key: 'zones', number: '03', label: 'Zonas', helper: 'Performance' },
-    { key: 'reconciliation', number: '04', label: 'Conciliação', helper: 'Pagamentos' },
-    { key: 'comparison', number: '05', label: 'Comparativo', helper: 'Entre eventos' },
-    { key: 'highlights', number: '06', label: 'Destaques', helper: 'Rankings' },
-    { key: 'charts', number: '07', label: 'Gráficos', helper: 'Análise visual' },
-];
 
 const activeSection = ref<DashboardSection>('summary');
 const selectedProductView = ref('total');
@@ -371,9 +368,88 @@ const autoSyncClockId = ref<number | null>(null);
 const currentTimestamp = ref(Date.now());
 const lastAutoSyncRefreshAt = ref(0);
 const isRefreshingAutoSync = ref(false);
+const pageEditorOpen = ref(false);
+const isSavingDashboardConfiguration = ref(false);
+const previewDashboardConfiguration = ref<DashboardConfiguration | null>(null);
 const localFilters = ref<DashboardFilters>({ ...props.filters });
 const showZtCard = computed(() => props.event.show_zt_card);
 const whatsappSupportUrl = 'https://api.whatsapp.com/send/?phone=351910918377&text=Ol%C3%A1%2C+preciso+de+ajuda+com+o+relat%C3%B3rio+Contacto+Digital.&type=phone_number&app_absent=0';
+
+const activeDashboardConfiguration = computed(
+    () => previewDashboardConfiguration.value ?? props.dashboardConfiguration,
+);
+const dashboardSections = computed(() => activeDashboardConfiguration.value.sections
+    .filter((section) => section.visible && section.available)
+    .map((section, index) => ({
+        key: section.key as DashboardSection,
+        number: String(index + 1).padStart(2, '0'),
+        label: section.label,
+        helper: section.helper,
+    })));
+
+watch(dashboardSections, (sections) => {
+    if (!sections.some((section) => section.key === activeSection.value)) {
+        activeSection.value = sections[0]?.key ?? 'summary';
+    }
+}, { immediate: true });
+
+function configuredBlock(key: string): DashboardConfigurationItem | undefined {
+    return activeDashboardConfiguration.value.blocks.find((block) => block.key === key);
+}
+
+function isBlockVisible(key: string): boolean {
+    const block = configuredBlock(key);
+
+    return Boolean(block?.visible && block.available);
+}
+
+function blockOrder(key: string): number {
+    const block = configuredBlock(key);
+
+    if (!block?.area) {
+        return 0;
+    }
+
+    return activeDashboardConfiguration.value.blocks
+        .filter((item) => item.area === block.area)
+        .findIndex((item) => item.key === key);
+}
+
+function blockLabel(key: string, fallback: string): string {
+    return configuredBlock(key)?.label || fallback;
+}
+
+function blockHelper(key: string, fallback: string): string {
+    return configuredBlock(key)?.helper || fallback;
+}
+
+function configuredMetrics(group: DashboardMetricGroup): DashboardConfigurationItem[] {
+    return activeDashboardConfiguration.value.metrics.filter(
+        (metric) => metric.group === group && metric.visible && metric.available,
+    );
+}
+
+function configuredMetric(key: string): DashboardConfigurationItem | undefined {
+    return activeDashboardConfiguration.value.metrics.find((metric) => metric.key === key);
+}
+
+function metricIsVisible(key: string): boolean {
+    const metric = configuredMetric(key);
+
+    return Boolean(metric?.visible && metric.available);
+}
+
+function metricLabel(key: string, fallback: string): string {
+    return configuredMetric(key)?.label || fallback;
+}
+
+function sectionIsVisible(key: DashboardSection): boolean {
+    return dashboardSections.value.some((section) => section.key === key);
+}
+
+function metricGridClass(count: number): string {
+    return `report-dashboard-grid-${Math.min(5, Math.max(1, count))}`;
+}
 
 const hasImportedData = computed(
     () => props.summary.total_rows > 0 || props.paymentSummary.movement_documents_count > 0,
@@ -449,146 +525,87 @@ const currentEventOption = computed(() => props.eventOptions.find((event) => eve
 const eventSwitcherTitle = computed(() => currentEventOption.value?.title ?? props.event.title);
 const showZtPaymentDetails = computed(() => showZtCard.value);
 
-const paymentCards = computed<MetricCard[]>(() => {
-    const cards: MetricCard[] = [
-        {
-            label: 'Multibanco',
-            value: formatMoney(props.paymentSummary.multibanco),
-            helper: getPaymentShare(props.paymentSummary.multibanco),
-        },
-    ];
+const paymentCards = computed<MetricCard[]>(() => configuredMetrics('payments').map((metric) => {
+    const value = {
+        multibanco: props.paymentSummary.multibanco,
+        zticket: props.paymentSummary.zticket,
+        cash: props.paymentSummary.cash,
+        other_payments: props.paymentSummary.other,
+    }[metric.key] ?? 0;
 
-    if (showZtPaymentDetails.value) {
-        cards.push({
-            label: 'ZT - Card',
-            value: formatMoney(props.paymentSummary.zticket),
-            helper: getPaymentShare(props.paymentSummary.zticket),
-        });
-    }
-
-    cards.push(
-        {
-            label: 'Dinheiro',
-            value: formatMoney(props.paymentSummary.cash),
-            helper: getPaymentShare(props.paymentSummary.cash),
-        },
-        {
-            label: 'Outros pagamentos',
-            value: formatMoney(props.paymentSummary.other),
-            helper: getPaymentShare(props.paymentSummary.other),
-        },
-    );
-
-    return cards;
-});
+    return {
+        key: metric.key,
+        label: metric.label,
+        value: formatMoney(value),
+        helper: getPaymentShare(value),
+    };
+}));
 
 const movementCards = computed<MetricCard[]>(() => {
-    if (!showZtCard.value) {
-        return [
-            {
-                label: 'Total faturado',
-                value: formatMoney(props.paymentSummary.total_without_zt),
-                helper: 'Vendas de consumo',
-            },
-            {
-                label: 'Outros movimentos',
-                value: formatMoney(props.paymentSummary.other_movements),
-                helper: 'Fora das vendas',
-            },
-        ];
-    }
+    const values: Record<string, string> = {
+        total_without_zt: formatMoney(props.paymentSummary.total_without_zt),
+        top_up_count: formatNumber(props.paymentSummary.top_up_documents_count),
+        top_up_value: formatMoney(props.paymentSummary.top_up_loaded),
+        total_with_zt: formatMoney(props.paymentSummary.total_with_zt),
+        other_movements: formatMoney(props.paymentSummary.other_movements),
+    };
 
-    return [
-        {
-            label: 'Total sem ZT',
-            value: formatMoney(props.paymentSummary.total_without_zt),
-            helper: 'Vendas de consumo',
-        },
-        {
-            label: 'Carregamentos ZT',
-            value: formatNumber(props.paymentSummary.top_up_documents_count),
-            helper: 'Cartões carregados',
-        },
-        {
-            label: 'Valor ZT',
-            value: formatMoney(props.paymentSummary.top_up_loaded),
-            helper: 'Total carregado',
-        },
-        {
-            label: 'Total com ZT',
-            value: formatMoney(props.paymentSummary.total_with_zt),
-            helper: 'Vendas + carregamentos',
-        },
-        {
-            label: 'Outros movimentos',
-            value: formatMoney(props.paymentSummary.other_movements),
-            helper: 'Fora de vendas e ZT',
-        },
-    ];
+    return configuredMetrics('movement').map((metric) => ({
+        key: metric.key,
+        label: metric.label,
+        value: values[metric.key] ?? formatMoney(0),
+        helper: metric.helper,
+    }));
 });
 
-const topUpCards = computed<MetricCard[]>(() => [
-    {
-        label: 'Valor carregado',
-        value: formatMoney(props.paymentSummary.top_up_loaded),
-        helper: `${formatNumber(props.paymentSummary.top_up_documents_count)} carregamentos ZT`,
-    },
-    {
-        label: 'Valor gasto',
-        value: formatMoney(props.paymentSummary.top_up_spent),
-        helper: 'Consumo ZT - Card',
-    },
-    {
-        label: 'Remanescente',
-        value: formatMoney(props.paymentSummary.top_up_remaining),
-        helper: 'Saldo não utilizado',
-    },
-]);
+const topUpCards = computed<MetricCard[]>(() => configuredMetrics('top_up').map((metric) => {
+    const values: Record<string, string> = {
+        loaded: formatMoney(props.paymentSummary.top_up_loaded),
+        spent: formatMoney(props.paymentSummary.top_up_spent),
+        remaining: formatMoney(props.paymentSummary.top_up_remaining),
+    };
+    const helper = metric.key === 'loaded'
+        ? `${formatNumber(props.paymentSummary.top_up_documents_count)} ${metric.helper}`
+        : metric.helper;
 
-const movementGridClass = computed(() => showZtCard.value
-    ? 'report-dashboard-grid-5'
-    : 'report-dashboard-grid-2');
-const paymentGridClass = computed(() => showZtPaymentDetails.value
-    ? 'report-dashboard-grid-4'
-    : 'report-dashboard-grid-3');
-const reconciliationGridClass = computed(() => showZtPaymentDetails.value
+    return {
+        key: metric.key,
+        label: metric.label,
+        value: values[metric.key] ?? formatMoney(0),
+        helper,
+    };
+}));
+
+const movementGridClass = computed(() => metricGridClass(movementCards.value.length));
+const paymentGridClass = computed(() => metricGridClass(paymentCards.value.length));
+const reconciliationGridClass = computed(() => showZtPaymentDetails.value && metricIsVisible('zticket')
     ? 'report-dashboard-grid-4'
     : 'report-dashboard-grid-3');
 const visibleComparisonPayments = computed(() => (props.comparison.payments ?? [])
-    .filter((payment) => showZtCard.value || payment.key !== 'zticket'));
+    .filter((payment) => metricIsVisible(payment.key === 'other' ? 'other_payments' : payment.key))
+    .map((payment) => ({
+        ...payment,
+        label: metricLabel(payment.key === 'other' ? 'other_payments' : payment.key, payment.label),
+    })));
 
 const summaryCards = computed<MetricCard[]>(() => {
     const averagePerDevice = props.summary.machines_count > 0
         ? props.summary.total_sales / props.summary.machines_count
         : 0;
+    const values: Record<string, string> = {
+        devices: formatNumber(props.summary.machines_count),
+        zones: formatNumber(props.summary.bar_groups_count),
+        average_ticket: formatMoney(props.summary.average_ticket),
+        products: formatNumber(props.summary.products_count),
+        average_device: formatMoney(averagePerDevice),
+    };
 
-    return [
-        {
-            label: 'Total devices',
-            value: formatNumber(props.summary.machines_count),
-            helper: 'Máquinas sincronizadas',
-        },
-        {
-            label: 'Zonas',
-            value: formatNumber(props.summary.bar_groups_count),
-            helper: 'Grupos operacionais',
-        },
-        {
-            label: 'Ticket médio',
-            value: formatMoney(props.summary.average_ticket),
-            helper: 'Por documento',
-        },
-        {
-            label: 'Produtos',
-            value: formatNumber(props.summary.products_count),
-            helper: 'Referências vendidas',
-        },
-        {
-            label: 'Média por device',
-            value: formatMoney(averagePerDevice),
-            helper: 'Faturação por máquina',
-        },
-    ];
+    return configuredMetrics('operations').map((metric) => ({
+        key: metric.key,
+        label: metric.label,
+        value: values[metric.key] ?? '0',
+        helper: metric.helper,
+    }));
 });
 
 const productTabs = computed(() => [
@@ -802,14 +819,19 @@ const hourlyChartAriaLabel = computed(() => hourlyPeakItems.value
     .join(', '));
 const chartPaymentItems = computed<ChartPaymentItem[]>(() => {
     const palette = ['var(--accent)', '#25b9a7', '#f0b44d', '#ef6b74'];
-    const payments = [
-        { key: 'multibanco', label: 'Multibanco', value: props.paymentSummary.multibanco },
-        ...(showZtPaymentDetails.value
-            ? [{ key: 'zticket', label: 'ZT - Card', value: props.paymentSummary.zticket }]
-            : []),
-        { key: 'cash', label: 'Dinheiro', value: props.paymentSummary.cash },
-        { key: 'other', label: 'Outros', value: props.paymentSummary.other },
-    ].filter((payment) => payment.value > 0);
+    const values: Record<string, number> = {
+        multibanco: props.paymentSummary.multibanco,
+        zticket: props.paymentSummary.zticket,
+        cash: props.paymentSummary.cash,
+        other_payments: props.paymentSummary.other,
+    };
+    const payments = configuredMetrics('payments')
+        .map((metric) => ({
+            key: metric.key,
+            label: metric.label,
+            value: values[metric.key] ?? 0,
+        }))
+        .filter((payment) => payment.value > 0);
     const total = payments.reduce((sum, payment) => sum + payment.value, 0);
 
     return payments.map((payment, index) => ({
@@ -879,11 +901,18 @@ const chartTopUpRemainingPercentage = computed(() => chartTopUpTotal.value > 0
     ? Math.min(100 - chartTopUpSpentPercentage.value, Math.max(0, (props.paymentSummary.top_up_remaining / chartTopUpTotal.value) * 100))
     : 0);
 const chartOperationalItems = computed<ChartOperationalItem[]>(() => {
-    const items = [
-        { label: 'Total devices', value: props.summary.machines_count, helper: 'Máquinas sincronizadas' },
-        { label: 'Zonas', value: props.summary.bar_groups_count, helper: 'Grupos operacionais' },
-        { label: 'Produtos', value: props.summary.products_count, helper: 'Referências vendidas' },
-    ];
+    const values: Record<string, number> = {
+        devices: props.summary.machines_count,
+        zones: props.summary.bar_groups_count,
+        products: props.summary.products_count,
+    };
+    const items = configuredMetrics('operations')
+        .filter((metric) => ['devices', 'zones', 'products'].includes(metric.key))
+        .map((metric) => ({
+            label: metric.label,
+            value: values[metric.key] ?? 0,
+            helper: metric.helper,
+        }));
     const max = items.reduce((highest, item) => Math.max(highest, item.value), 0);
 
     return items.map((item) => ({
@@ -894,6 +923,8 @@ const chartOperationalItems = computed<ChartOperationalItem[]>(() => {
 const chartAveragePerDevice = computed(() => props.summary.machines_count > 0
     ? props.summary.total_sales / props.summary.machines_count
     : 0);
+const chartOperationalMoneyMetrics = computed(() => configuredMetrics('operations')
+    .filter((metric) => ['average_ticket', 'average_device'].includes(metric.key)));
 const detailModalTitle = computed(() => {
     if (detailModal.value === 'ticket') {
         return `${props.event.title} — Ticket médio por dia`;
@@ -1012,6 +1043,61 @@ const openDetailModal = (modal: Exclude<DetailModal, null>) => {
 
 const closeDetailModal = () => {
     detailModal.value = null;
+};
+
+const openPageEditor = () => {
+    if (!props.dashboardEditor?.enabled) {
+        return;
+    }
+
+    previewDashboardConfiguration.value = null;
+    pageEditorOpen.value = true;
+};
+
+const previewPageConfiguration = (configuration: DashboardConfiguration) => {
+    previewDashboardConfiguration.value = configuration;
+};
+
+const closePageEditor = () => {
+    if (isSavingDashboardConfiguration.value) {
+        return;
+    }
+
+    pageEditorOpen.value = false;
+    previewDashboardConfiguration.value = null;
+};
+
+const savePageConfiguration = (configuration: DashboardConfiguration) => {
+    if (!props.dashboardEditor?.enabled || isSavingDashboardConfiguration.value) {
+        return;
+    }
+
+    isSavingDashboardConfiguration.value = true;
+    const payload = {
+        configuration: JSON.parse(JSON.stringify(configuration)),
+    };
+
+    router.patch(
+        props.dashboardEditor.update_url,
+        payload,
+        {
+            preserveScroll: true,
+            onSuccess: () => {
+                pageEditorOpen.value = false;
+                previewDashboardConfiguration.value = null;
+                void showSuccessToast('Apresentação publicada para este evento.');
+            },
+            onError: (errors) => {
+                void showErrorToast(
+                    (errors.configuration as string | undefined)
+                    ?? 'Não foi possível publicar a apresentação.',
+                );
+            },
+            onFinish: () => {
+                isSavingDashboardConfiguration.value = false;
+            },
+        },
+    );
 };
 
 const handleEscapeKey = (event: KeyboardEvent) => {
@@ -1303,6 +1389,20 @@ function getDifferenceClass(value: number | null) {
 
                 <div class="report-dashboard-toolbar-actions">
                     <button
+                        v-if="props.dashboardEditor?.enabled"
+                        type="button"
+                        class="report-dashboard-header-action report-dashboard-edit-action"
+                        :class="{ 'is-active': pageEditorOpen }"
+                        @click="openPageEditor"
+                    >
+                        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                            <path d="m4 16-.8 4.8L8 20l10.4-10.4a2.1 2.1 0 0 0-3-3L5 17Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" />
+                            <path d="m13.8 8.2 3 3" stroke="currentColor" stroke-width="1.8" />
+                        </svg>
+                        {{ pageEditorOpen ? 'A editar página' : 'Editar página' }}
+                    </button>
+
+                    <button
                         v-if="props.previewMode"
                         type="button"
                         class="dash-action-button dash-action-button-inline justify-center"
@@ -1532,8 +1632,13 @@ function getDifferenceClass(value: number | null) {
                         {{ syncIntegrationError }}
                     </p>
 
+                    <div v-if="pageEditorOpen" class="report-dashboard-editor-notice" role="status">
+                        <strong>Pré-visualização ativa</strong>
+                        <span>O cliente ainda não vê estas alterações. Use “Publicar alterações” no editor para guardar.</span>
+                    </div>
+
                     <div
-                        v-if="activeSection === 'summary' || activeSection === 'charts'"
+                        v-if="(activeSection === 'summary' || activeSection === 'charts') && sectionIsVisible('summary') && sectionIsVisible('charts')"
                         class="report-dashboard-summary-view-switcher"
                         aria-label="Modo de visualização do resumo"
                     >
@@ -1557,10 +1662,16 @@ function getDifferenceClass(value: number | null) {
                         </div>
                     </div>
 
-                    <div v-if="activeSection === 'summary'" class="report-dashboard-view">
-                        <button type="button" class="report-dashboard-overview-hero" @click="openDetailModal('payments')">
+                    <div v-if="activeSection === 'summary'" class="report-dashboard-view report-dashboard-summary-stack">
+                        <button
+                            v-if="isBlockVisible('overview')"
+                            type="button"
+                            class="report-dashboard-overview-hero"
+                            :style="{ order: blockOrder('overview') }"
+                            @click="openDetailModal('payments')"
+                        >
                             <div class="report-dashboard-overview-copy">
-                                <span>{{ showZtCard ? 'Total sem ZT' : 'Total faturado' }}</span>
+                                <span>{{ blockLabel('overview', showZtCard ? 'Total sem ZT' : 'Total faturado') }}</span>
                                 <strong>{{ formatMoney(props.paymentSummary.total_without_zt) }}</strong>
                                 <div class="report-dashboard-day-list">
                                     <span v-for="day in props.dailySales" :key="day.date">
@@ -1590,19 +1701,19 @@ function getDifferenceClass(value: number | null) {
                             </div>
                         </button>
 
-                        <section>
+                        <section v-if="isBlockVisible('movement')" :style="{ order: blockOrder('movement') }">
                             <div class="report-dashboard-section-heading">
-                                <span>Leitura financeira</span>
-                                <h3>{{ showZtCard ? 'Vendas e carregamentos ZT' : 'Vendas do evento' }}</h3>
+                                <span>{{ blockHelper('movement', 'Leitura financeira') }}</span>
+                                <h3>{{ blockLabel('movement', showZtCard ? 'Vendas e carregamentos ZT' : 'Vendas do evento') }}</h3>
                             </div>
                             <div class="report-dashboard-grid" :class="movementGridClass">
                                 <button
                                     v-for="card in movementCards"
-                                    :key="card.label"
+                                    :key="card.key"
                                     type="button"
                                     class="report-dashboard-movement-card"
-                                    :class="{ 'is-total': card.label === 'Total com ZT' }"
-                                    @click="openDetailModal(card.label === 'Carregamentos ZT' || card.label === 'Valor ZT' ? 'topup' : 'payments')"
+                                    :class="{ 'is-total': card.key === 'total_with_zt' }"
+                                    @click="openDetailModal(card.key === 'top_up_count' || card.key === 'top_up_value' ? 'topup' : 'payments')"
                                 >
                                     <span>{{ card.label }}</span>
                                     <strong>{{ card.value }}</strong>
@@ -1611,15 +1722,15 @@ function getDifferenceClass(value: number | null) {
                             </div>
                         </section>
 
-                        <section>
+                        <section v-if="isBlockVisible('payments')" :style="{ order: blockOrder('payments') }">
                             <div class="report-dashboard-section-heading">
-                                <span>Formas de pagamento</span>
-                                <h3>Pagamentos das vendas</h3>
+                                <span>{{ blockHelper('payments', 'Formas de pagamento') }}</span>
+                                <h3>{{ blockLabel('payments', 'Pagamentos das vendas') }}</h3>
                             </div>
                             <div class="report-dashboard-grid" :class="paymentGridClass">
                                 <button
                                     v-for="(card, index) in paymentCards"
-                                    :key="card.label"
+                                    :key="card.key"
                                     type="button"
                                     class="report-dashboard-metric-card"
                                     :class="{ 'is-featured': index === 0 }"
@@ -1632,13 +1743,17 @@ function getDifferenceClass(value: number | null) {
                             </div>
                         </section>
 
-                        <section v-if="showZtCard" class="report-dashboard-topup">
+                        <section
+                            v-if="showZtCard && isBlockVisible('top_up')"
+                            class="report-dashboard-topup"
+                            :style="{ order: blockOrder('top_up') }"
+                        >
                             <div class="report-dashboard-section-heading">
-                                <span>Fluxo de cartões</span>
-                                <h3>Top-Up ZT - Card</h3>
+                                <span>{{ blockHelper('top_up', 'Fluxo de cartões') }}</span>
+                                <h3>{{ blockLabel('top_up', 'Top-Up ZT - Card') }}</h3>
                             </div>
                             <div class="report-dashboard-topup-flow">
-                                <button v-for="(card, index) in topUpCards" :key="card.label" type="button" @click="openDetailModal('topup')">
+                                <button v-for="(card, index) in topUpCards" :key="card.key" type="button" @click="openDetailModal('topup')">
                                     <span>{{ String(index + 1).padStart(2, '0') }}</span>
                                     <div>
                                         <small>{{ card.label }}</small>
@@ -1649,19 +1764,19 @@ function getDifferenceClass(value: number | null) {
                             </div>
                         </section>
 
-                        <section>
+                        <section v-if="isBlockVisible('operations')" :style="{ order: blockOrder('operations') }">
                             <div class="report-dashboard-section-heading">
-                                <span>Operação</span>
-                                <h3>Indicadores operacionais</h3>
+                                <span>{{ blockHelper('operations', 'Operação') }}</span>
+                                <h3>{{ blockLabel('operations', 'Indicadores operacionais') }}</h3>
                             </div>
-                            <div class="report-dashboard-grid report-dashboard-grid-5">
+                            <div class="report-dashboard-grid" :class="metricGridClass(summaryCards.length)">
                                 <button
                                     v-for="card in summaryCards"
-                                    :key="card.label"
+                                    :key="card.key"
                                     type="button"
                                     class="report-dashboard-summary-card"
-                                    :class="{ 'is-clickable': card.label === 'Ticket médio' }"
-                                    :disabled="card.label !== 'Ticket médio'"
+                                    :class="{ 'is-clickable': card.key === 'average_ticket' }"
+                                    :disabled="card.key !== 'average_ticket'"
                                     @click="openDetailModal('ticket')"
                                 >
                                     <span>{{ card.label }}</span>
@@ -1674,11 +1789,15 @@ function getDifferenceClass(value: number | null) {
 
                     <div v-else-if="activeSection === 'charts'" class="report-dashboard-view report-dashboard-analytics-view">
                         <div class="report-dashboard-analytics-grid">
-                            <section v-if="showZtCard" class="dash-card report-dashboard-analytics-card report-dashboard-analytics-financial-card">
+                            <section
+                                v-if="showZtCard && isBlockVisible('chart_financial')"
+                                class="dash-card report-dashboard-analytics-card report-dashboard-analytics-financial-card"
+                                :style="{ order: blockOrder('chart_financial') }"
+                            >
                                 <header>
                                     <div>
-                                        <span>Leitura financeira</span>
-                                        <h4>Vendas e carregamentos ZT</h4>
+                                        <span>{{ blockHelper('chart_financial', 'Leitura financeira') }}</span>
+                                        <h4>{{ blockLabel('chart_financial', 'Vendas e carregamentos ZT') }}</h4>
                                     </div>
                                 </header>
 
@@ -1690,24 +1809,24 @@ function getDifferenceClass(value: number | null) {
                                         :aria-label="`Vendas de consumo: ${formatMoney(props.paymentSummary.total_without_zt)}, carregamentos ZT: ${formatMoney(props.paymentSummary.top_up_loaded)}`"
                                     >
                                         <div>
-                                            <small>Total com ZT</small>
+                                            <small>{{ metricLabel('total_with_zt', 'Total com ZT') }}</small>
                                             <strong>{{ formatMoney(props.paymentSummary.total_with_zt) }}</strong>
                                         </div>
                                     </div>
                                     <div class="report-dashboard-analytics-financial-legend">
-                                        <article>
+                                        <article v-if="metricIsVisible('total_without_zt')">
                                             <i class="is-sales" />
-                                            <span><small>Total sem ZT</small><strong>{{ formatMoney(props.paymentSummary.total_without_zt) }}</strong></span>
+                                            <span><small>{{ metricLabel('total_without_zt', 'Total sem ZT') }}</small><strong>{{ formatMoney(props.paymentSummary.total_without_zt) }}</strong></span>
                                             <em>{{ chartFinancialSalesPercentage.toFixed(1).replace('.', ',') }}%</em>
                                         </article>
-                                        <article>
+                                        <article v-if="metricIsVisible('top_up_value')">
                                             <i class="is-zt" />
-                                            <span><small>Valor ZT</small><strong>{{ formatMoney(props.paymentSummary.top_up_loaded) }}</strong></span>
+                                            <span><small>{{ metricLabel('top_up_value', 'Valor ZT') }}</small><strong>{{ formatMoney(props.paymentSummary.top_up_loaded) }}</strong></span>
                                             <em>{{ chartFinancialZtPercentage.toFixed(1).replace('.', ',') }}%</em>
                                         </article>
-                                        <article class="is-outside-total">
+                                        <article v-if="metricIsVisible('other_movements')" class="is-outside-total">
                                             <i class="is-other" />
-                                            <span><small>Outros movimentos</small><strong>{{ formatMoney(props.paymentSummary.other_movements) }}</strong></span>
+                                            <span><small>{{ metricLabel('other_movements', 'Outros movimentos') }}</small><strong>{{ formatMoney(props.paymentSummary.other_movements) }}</strong></span>
                                             <em>Fora do total</em>
                                         </article>
                                         <div class="report-dashboard-analytics-financial-zt-flow">
@@ -1720,19 +1839,23 @@ function getDifferenceClass(value: number | null) {
                                                 <i class="is-remaining" :style="{ width: `${chartTopUpRemainingPercentage}%` }" />
                                             </div>
                                             <footer>
-                                                <span><i class="is-spent" /> Gasto <strong>{{ formatMoney(props.paymentSummary.top_up_spent) }}</strong></span>
-                                                <span><i class="is-remaining" /> Remanescente <strong>{{ formatMoney(props.paymentSummary.top_up_remaining) }}</strong></span>
+                                                <span v-if="metricIsVisible('spent')"><i class="is-spent" /> {{ metricLabel('spent', 'Valor gasto') }} <strong>{{ formatMoney(props.paymentSummary.top_up_spent) }}</strong></span>
+                                                <span v-if="metricIsVisible('remaining')"><i class="is-remaining" /> {{ metricLabel('remaining', 'Remanescente') }} <strong>{{ formatMoney(props.paymentSummary.top_up_remaining) }}</strong></span>
                                             </footer>
                                         </div>
                                     </div>
                                 </div>
                             </section>
 
-                            <section class="dash-card report-dashboard-analytics-card report-dashboard-analytics-line-card">
+                            <section
+                                v-if="isBlockVisible('chart_daily')"
+                                class="dash-card report-dashboard-analytics-card report-dashboard-analytics-line-card"
+                                :style="{ order: blockOrder('chart_daily') }"
+                            >
                                 <header>
                                     <div>
-                                        <span>Gráfico de linha</span>
-                                        <h4>Evolução diária da faturação</h4>
+                                        <span>{{ blockHelper('chart_daily', 'Gráfico de linha') }}</span>
+                                        <h4>{{ blockLabel('chart_daily', 'Evolução diária da faturação') }}</h4>
                                     </div>
                                 </header>
 
@@ -1776,11 +1899,15 @@ function getDifferenceClass(value: number | null) {
                                 <p v-else class="report-dashboard-analytics-empty">Sem vendas diárias para apresentar.</p>
                             </section>
 
-                            <section class="dash-card report-dashboard-analytics-card report-dashboard-analytics-hourly-card">
+                            <section
+                                v-if="isBlockVisible('chart_hourly')"
+                                class="dash-card report-dashboard-analytics-card report-dashboard-analytics-hourly-card"
+                                :style="{ order: blockOrder('chart_hourly') }"
+                            >
                                 <header>
                                     <div>
-                                        <span>Gráfico de linha</span>
-                                        <h4>Picos de vendas por hora</h4>
+                                        <span>{{ blockHelper('chart_hourly', 'Gráfico de linha') }}</span>
+                                        <h4>{{ blockLabel('chart_hourly', 'Picos de vendas por hora') }}</h4>
                                     </div>
                                     <label v-if="hourlyDateOptions.length > 1" class="report-dashboard-analytics-period-select">
                                         <span>Período</span>
@@ -1842,11 +1969,15 @@ function getDifferenceClass(value: number | null) {
                                 <p v-else class="report-dashboard-analytics-empty">Sem horários de venda para apresentar.</p>
                             </section>
 
-                            <section class="dash-card report-dashboard-analytics-card report-dashboard-analytics-donut-card">
+                            <section
+                                v-if="isBlockVisible('chart_payments')"
+                                class="dash-card report-dashboard-analytics-card report-dashboard-analytics-donut-card"
+                                :style="{ order: blockOrder('chart_payments') }"
+                            >
                                 <header>
                                     <div>
-                                        <span>Gráfico de pizza</span>
-                                        <h4>Formas de pagamento</h4>
+                                        <span>{{ blockHelper('chart_payments', 'Gráfico de pizza') }}</span>
+                                        <h4>{{ blockLabel('chart_payments', 'Formas de pagamento') }}</h4>
                                     </div>
                                 </header>
 
@@ -1880,11 +2011,15 @@ function getDifferenceClass(value: number | null) {
                                 <p v-else class="report-dashboard-analytics-empty">Sem pagamentos para apresentar.</p>
                             </section>
 
-                            <section class="dash-card report-dashboard-analytics-card report-dashboard-analytics-bars-card">
+                            <section
+                                v-if="isBlockVisible('chart_zones')"
+                                class="dash-card report-dashboard-analytics-card report-dashboard-analytics-bars-card"
+                                :style="{ order: blockOrder('chart_zones') }"
+                            >
                                 <header>
                                     <div>
-                                        <span>Gráfico de barras</span>
-                                        <h4>Faturação por zona</h4>
+                                        <span>{{ blockHelper('chart_zones', 'Gráfico de barras') }}</span>
+                                        <h4>{{ blockLabel('chart_zones', 'Faturação por zona') }}</h4>
                                     </div>
                                     <small>Top {{ formatNumber(chartZoneItems.length) }} zonas</small>
                                 </header>
@@ -1907,11 +2042,15 @@ function getDifferenceClass(value: number | null) {
                                 <p v-else class="report-dashboard-analytics-empty">Sem zonas para apresentar.</p>
                             </section>
 
-                            <section class="dash-card report-dashboard-analytics-card report-dashboard-analytics-operational-card">
+                            <section
+                                v-if="isBlockVisible('chart_operations')"
+                                class="dash-card report-dashboard-analytics-card report-dashboard-analytics-operational-card"
+                                :style="{ order: blockOrder('chart_operations') }"
+                            >
                                 <header>
                                     <div>
-                                        <span>Operação</span>
-                                        <h4>Indicadores operacionais</h4>
+                                        <span>{{ blockHelper('chart_operations', 'Operação') }}</span>
+                                        <h4>{{ blockLabel('chart_operations', 'Indicadores operacionais') }}</h4>
                                     </div>
                                 </header>
 
@@ -1926,16 +2065,11 @@ function getDifferenceClass(value: number | null) {
                                             <small>{{ item.helper }}</small>
                                         </article>
                                     </div>
-                                    <div class="report-dashboard-analytics-operational-money">
-                                        <article>
-                                            <span>Ticket médio</span>
-                                            <strong>{{ formatMoney(props.summary.average_ticket) }}</strong>
-                                            <small>Por documento</small>
-                                        </article>
-                                        <article>
-                                            <span>Média por device</span>
-                                            <strong>{{ formatMoney(chartAveragePerDevice) }}</strong>
-                                            <small>Faturação por máquina</small>
+                                    <div v-if="chartOperationalMoneyMetrics.length" class="report-dashboard-analytics-operational-money">
+                                        <article v-for="metric in chartOperationalMoneyMetrics" :key="metric.key">
+                                            <span>{{ metric.label }}</span>
+                                            <strong>{{ formatMoney(metric.key === 'average_ticket' ? props.summary.average_ticket : chartAveragePerDevice) }}</strong>
+                                            <small>{{ metric.helper }}</small>
                                         </article>
                                     </div>
                                 </div>
@@ -2119,8 +2253,8 @@ function getDifferenceClass(value: number | null) {
                                 <strong>{{ formatMoney(props.reconciliation.totals.sales_total) }}</strong>
                                 <small>Linhas sincronizadas</small>
                             </article>
-                            <article v-if="showZtPaymentDetails" class="report-dashboard-summary-card">
-                                <span>ZT - Card</span>
+                            <article v-if="showZtPaymentDetails && metricIsVisible('zticket')" class="report-dashboard-summary-card">
+                                <span>{{ metricLabel('zticket', 'ZT - Card') }}</span>
                                 <strong>{{ formatMoney(props.reconciliation.totals.zticket) }}</strong>
                                 <small>Pagamento tipo cartão</small>
                             </article>
@@ -2138,10 +2272,10 @@ function getDifferenceClass(value: number | null) {
                                 <thead>
                                     <tr>
                                         <th>Device</th>
-                                        <th class="text-right">Multibanco</th>
-                                        <th v-if="showZtPaymentDetails" class="text-right">ZT - Card</th>
-                                        <th class="text-right">Dinheiro</th>
-                                        <th class="text-right">Outros</th>
+                                        <th v-if="metricIsVisible('multibanco')" class="text-right">{{ metricLabel('multibanco', 'Multibanco') }}</th>
+                                        <th v-if="showZtPaymentDetails && metricIsVisible('zticket')" class="text-right">{{ metricLabel('zticket', 'ZT - Card') }}</th>
+                                        <th v-if="metricIsVisible('cash')" class="text-right">{{ metricLabel('cash', 'Dinheiro') }}</th>
+                                        <th v-if="metricIsVisible('other_payments')" class="text-right">{{ metricLabel('other_payments', 'Outros') }}</th>
                                         <th class="text-right">Pagamentos</th>
                                         <th class="text-right">Vendas</th>
                                         <th class="text-right">Diferença</th>
@@ -2153,10 +2287,10 @@ function getDifferenceClass(value: number | null) {
                                             <strong>{{ item.store_code || '—' }}</strong>
                                             <small>{{ item.store_name }}</small>
                                         </td>
-                                        <td class="text-right">{{ formatMoney(item.multibanco) }}</td>
-                                        <td v-if="showZtPaymentDetails" class="text-right">{{ formatMoney(item.zticket) }}</td>
-                                        <td class="text-right">{{ formatMoney(item.cash) }}</td>
-                                        <td class="text-right">{{ formatMoney(item.other) }}</td>
+                                        <td v-if="metricIsVisible('multibanco')" class="text-right">{{ formatMoney(item.multibanco) }}</td>
+                                        <td v-if="showZtPaymentDetails && metricIsVisible('zticket')" class="text-right">{{ formatMoney(item.zticket) }}</td>
+                                        <td v-if="metricIsVisible('cash')" class="text-right">{{ formatMoney(item.cash) }}</td>
+                                        <td v-if="metricIsVisible('other_payments')" class="text-right">{{ formatMoney(item.other) }}</td>
                                         <td class="text-right font-semibold">{{ formatMoney(item.payments_total) }}</td>
                                         <td class="text-right">{{ formatMoney(item.sales_total) }}</td>
                                         <td class="text-right">
@@ -2350,10 +2484,10 @@ function getDifferenceClass(value: number | null) {
                         <article v-for="day in props.dailyBreakdowns" :key="`payments-${day.date}`" class="report-dashboard-detail-day">
                             <h4>{{ day.label }}</h4>
                             <div class="report-dashboard-detail-grid">
-                                <span>Multibanco</span><strong>{{ formatMoney(day.multibanco) }}</strong>
-                                <span v-if="showZtPaymentDetails">ZT - Card</span><strong v-if="showZtPaymentDetails">{{ formatMoney(day.zticket) }}</strong>
-                                <span>Dinheiro</span><strong>{{ formatMoney(day.cash) }}</strong>
-                                <span v-if="day.other !== 0">Outros pagamentos</span><strong v-if="day.other !== 0">{{ formatMoney(day.other) }}</strong>
+                                <span v-if="metricIsVisible('multibanco')">{{ metricLabel('multibanco', 'Multibanco') }}</span><strong v-if="metricIsVisible('multibanco')">{{ formatMoney(day.multibanco) }}</strong>
+                                <span v-if="showZtPaymentDetails && metricIsVisible('zticket')">{{ metricLabel('zticket', 'ZT - Card') }}</span><strong v-if="showZtPaymentDetails && metricIsVisible('zticket')">{{ formatMoney(day.zticket) }}</strong>
+                                <span v-if="metricIsVisible('cash')">{{ metricLabel('cash', 'Dinheiro') }}</span><strong v-if="metricIsVisible('cash')">{{ formatMoney(day.cash) }}</strong>
+                                <span v-if="day.other !== 0 && metricIsVisible('other_payments')">{{ metricLabel('other_payments', 'Outros pagamentos') }}</span><strong v-if="day.other !== 0 && metricIsVisible('other_payments')">{{ formatMoney(day.other) }}</strong>
                             </div>
                             <footer><span>Total</span><strong>{{ formatMoney(day.sales_total) }}</strong></footer>
                         </article>
@@ -2368,10 +2502,10 @@ function getDifferenceClass(value: number | null) {
                         <article v-for="day in props.dailyBreakdowns" :key="`topup-${day.date}`" class="report-dashboard-detail-day">
                             <h4>{{ day.label }}</h4>
                             <div class="report-dashboard-detail-grid">
-                                <span>Valor carregado</span><strong>{{ formatMoney(day.top_up_loaded) }}</strong>
-                                <span>Valor gasto</span><strong>{{ formatMoney(day.top_up_spent) }}</strong>
-                                <span>Remanescente</span><strong>{{ formatMoney(day.top_up_remaining) }}</strong>
-                                <span>Carregamentos ZT</span><strong>{{ formatNumber(day.top_up_documents_count) }}</strong>
+                                <span v-if="metricIsVisible('loaded')">{{ metricLabel('loaded', 'Valor carregado') }}</span><strong v-if="metricIsVisible('loaded')">{{ formatMoney(day.top_up_loaded) }}</strong>
+                                <span v-if="metricIsVisible('spent')">{{ metricLabel('spent', 'Valor gasto') }}</span><strong v-if="metricIsVisible('spent')">{{ formatMoney(day.top_up_spent) }}</strong>
+                                <span v-if="metricIsVisible('remaining')">{{ metricLabel('remaining', 'Remanescente') }}</span><strong v-if="metricIsVisible('remaining')">{{ formatMoney(day.top_up_remaining) }}</strong>
+                                <span v-if="metricIsVisible('top_up_count')">{{ metricLabel('top_up_count', 'Carregamentos ZT') }}</span><strong v-if="metricIsVisible('top_up_count')">{{ formatNumber(day.top_up_documents_count) }}</strong>
                             </div>
                         </article>
 
@@ -2391,7 +2525,7 @@ function getDifferenceClass(value: number | null) {
                         </article>
 
                         <div class="report-dashboard-detail-total">
-                            <span>Ticket médio geral</span>
+                            <span>{{ metricLabel('average_ticket', 'Ticket médio') }} geral</span>
                             <strong>{{ formatMoney(props.summary.average_ticket) }}</strong>
                         </div>
                     </template>
@@ -2400,5 +2534,16 @@ function getDifferenceClass(value: number | null) {
                 <p v-else class="report-dashboard-detail-empty">Não existem dados diários sincronizados para este evento.</p>
             </section>
         </div>
+
+        <DashboardPageEditor
+            v-if="pageEditorOpen && props.dashboardEditor"
+            :configuration="props.dashboardConfiguration"
+            :default-configuration="props.dashboardEditor.default_configuration"
+            :presets="props.dashboardEditor.presets"
+            :saving="isSavingDashboardConfiguration"
+            @preview="previewPageConfiguration"
+            @save="savePageConfiguration"
+            @close="closePageEditor"
+        />
     </AuthenticatedLayout>
 </template>

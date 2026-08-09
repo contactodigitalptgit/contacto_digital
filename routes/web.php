@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Admin\ClientController;
 use App\Http\Controllers\Admin\EventController;
+use App\Http\Controllers\Admin\EventDashboardConfigurationController;
 use App\Http\Controllers\Admin\EventZoneSoftIntegrationController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\EventDashboardController;
@@ -67,6 +68,8 @@ Route::middleware(['auth', 'active.client', 'admin'])
             ->name('events.toggle-status');
         Route::get('events/{event}/dashboard', [EventDashboardController::class, 'preview'])
             ->name('events.dashboard');
+        Route::patch('events/{event}/dashboard-configuration', EventDashboardConfigurationController::class)
+            ->name('events.dashboard-configuration.update');
         Route::post('events/{event}/reports', [EventController::class, 'storeReport'])
             ->name('events.reports.store');
         Route::get('events/{event}/integrations', [EventZoneSoftIntegrationController::class, 'show'])

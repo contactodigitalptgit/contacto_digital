@@ -24,6 +24,7 @@ class Event extends Model
         'report_starts_at',
         'report_ends_at',
         'show_zt_card',
+        'dashboard_configuration',
         'is_active',
     ];
 
@@ -37,6 +38,7 @@ class Event extends Model
             'report_starts_at' => 'datetime',
             'report_ends_at' => 'datetime',
             'show_zt_card' => 'boolean',
+            'dashboard_configuration' => 'array',
             'is_active' => 'boolean',
         ];
     }

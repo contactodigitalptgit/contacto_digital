@@ -6,6 +6,7 @@ use App\Models\Event;
 use App\Models\EventReportImport;
 use App\Models\EventReportPaymentDocument;
 use App\Models\EventReportRow;
+use App\Services\DashboardConfigurationService;
 use App\Services\EventReportAutoSyncService;
 use App\Services\EventReportSyncService;
 use Carbon\CarbonImmutable;
@@ -22,6 +23,7 @@ class EventDashboardController extends Controller
 
     public function __construct(
         private readonly EventReportAutoSyncService $autoSync,
+        private readonly DashboardConfigurationService $dashboardConfiguration,
     ) {}
 
     public function show(Request $request, Event $event): Response
@@ -78,6 +80,7 @@ class EventDashboardController extends Controller
             ? $event->latestActiveReportImport->summary
             : [];
         $eventOptions = $this->buildEventOptions($event, $previewMode);
+        $dashboardConfiguration = $this->dashboardConfiguration->resolve($event);
 
         $filters = $this->normalizeFilters($request);
         $makeBaseRowsQuery = fn (): Builder => $this->applySalesDocumentScope(
@@ -152,6 +155,13 @@ class EventDashboardController extends Controller
                 'show_zt_card' => $event->show_zt_card,
             ],
             'eventOptions' => $eventOptions,
+            'dashboardConfiguration' => $dashboardConfiguration,
+            'dashboardEditor' => $previewMode ? [
+                'enabled' => true,
+                'update_url' => route('admin.events.dashboard-configuration.update', $event),
+                'default_configuration' => $this->dashboardConfiguration->defaults($event),
+                'presets' => $this->dashboardConfiguration->presets($event),
+            ] : null,
             'integration' => [
                 'source' => 'ZoneSoft API',
                 'configured_client_ids_count' => (int) ($event->active_zonesoft_machines_count ?? 0),

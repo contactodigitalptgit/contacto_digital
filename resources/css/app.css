@@ -2330,6 +2330,10 @@
         @apply grid gap-4;
     }
 
+    .report-dashboard-grid-1 {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
     .report-dashboard-grid-3 {
         grid-template-columns: repeat(3, minmax(0, 1fr));
     }
@@ -2849,6 +2853,33 @@
     .report-dashboard-view {
         @apply space-y-6;
         animation: report-dashboard-reveal 260ms ease-out both;
+    }
+
+    .report-dashboard-summary-stack {
+        display: flex;
+        flex-direction: column;
+        gap: 1.5rem;
+    }
+
+    .report-dashboard-summary-stack > :not([hidden]) ~ :not([hidden]) {
+        margin-top: 0;
+    }
+
+    .report-dashboard-editor-notice {
+        @apply flex items-center gap-3 rounded-2xl border px-4 py-3 text-sm;
+        border-color: color-mix(in srgb, var(--accent) 44%, var(--line-color));
+        color: var(--text-main);
+        background: color-mix(in srgb, var(--accent) 10%, var(--card-bg) 90%);
+        box-shadow: 0 18px 40px -34px color-mix(in srgb, var(--accent-strong) 80%, transparent);
+    }
+
+    .report-dashboard-editor-notice strong {
+        @apply shrink-0 text-xs font-extrabold uppercase tracking-[0.08em];
+        color: var(--accent-strong);
+    }
+
+    .report-dashboard-editor-notice span {
+        color: var(--text-muted);
     }
 
     .report-dashboard-view-header {

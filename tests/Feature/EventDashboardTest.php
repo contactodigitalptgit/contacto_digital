@@ -10,6 +10,7 @@ use App\Models\EventReportPaymentDocument;
 use App\Models\EventReportRow;
 use App\Models\User;
 use App\Models\ZoneSoftApplication;
+use App\Services\DashboardConfigurationService;
 use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Inertia\Testing\AssertableInertia;
@@ -242,6 +243,10 @@ class EventDashboardTest extends TestCase
         $response->assertInertia(fn (AssertableInertia $page) => $page
             ->component('Events/Dashboard')
             ->where('previewMode', true)
+            ->where('dashboardEditor.enabled', true)
+            ->has('dashboardEditor.presets', 4)
+            ->where('dashboardConfiguration.preset', 'complete')
+            ->where('dashboardConfiguration.sections.0.key', 'summary')
             ->where('backUrl', route('admin.events.index'))
             ->where('integration.source', 'ZoneSoft API')
             ->where('integration.configured_client_ids_count', 2)
@@ -320,6 +325,119 @@ class EventDashboardTest extends TestCase
                         && in_array('Bar 1 - Joao', $group['members'], true)
                         && in_array('Bar 1 Joana C', $group['members'], true),
                 ))));
+    }
+
+    public function test_admin_can_publish_an_event_specific_dashboard_configuration_without_changing_values(): void
+    {
+        [$admin, $clientUser, $event] = $this->makeDashboardContext();
+        $this->seedSyncedRows($event, $admin);
+
+        $otherEvent = Event::create([
+            'client_id' => $event->client_id,
+            'title' => 'Evento sem personalização',
+            'event_date' => now()->addDays(10),
+            'report_starts_at' => now()->addDays(10),
+            'report_ends_at' => now()->addDays(11),
+            'show_zt_card' => true,
+            'is_active' => true,
+        ]);
+
+        $configuration = app(DashboardConfigurationService::class)->defaults($event);
+        $configuration['preset'] = 'custom';
+        [$configuration['sections'][0], $configuration['sections'][1]] = [
+            $configuration['sections'][1],
+            $configuration['sections'][0],
+        ];
+        $configuration['sections'][1]['label'] = 'Visão executiva';
+        $configuration['blocks'][3]['visible'] = false;
+        $configuration['metrics'][5]['label'] = 'Cartão bancário';
+
+        $this
+            ->actingAs($admin)
+            ->from(route('admin.events.dashboard', $event))
+            ->patch(route('admin.events.dashboard-configuration.update', $event), [
+                'configuration' => $configuration,
+            ])
+            ->assertRedirect(route('admin.events.dashboard', $event))
+            ->assertSessionHasNoErrors();
+
+        $event->refresh();
+        $otherEvent->refresh();
+
+        $this->assertSame('custom', $event->dashboard_configuration['preset']);
+        $this->assertSame('products', $event->dashboard_configuration['sections'][0]['key']);
+        $this->assertSame('Visão executiva', $event->dashboard_configuration['sections'][1]['label']);
+        $this->assertFalse($event->dashboard_configuration['blocks'][3]['visible']);
+        $this->assertSame('Cartão bancário', $event->dashboard_configuration['metrics'][5]['label']);
+        $this->assertNull($otherEvent->dashboard_configuration);
+
+        $this->actingAs($clientUser)
+            ->get(route('events.dashboard', $event))
+            ->assertOk()
+            ->assertInertia(fn (AssertableInertia $page) => $page
+                ->where('dashboardEditor', null)
+                ->where('dashboardConfiguration.sections.0.key', 'products')
+                ->where('dashboardConfiguration.sections.1.label', 'Visão executiva')
+                ->where('dashboardConfiguration.blocks.3.visible', false)
+                ->where('dashboardConfiguration.metrics.5.label', 'Cartão bancário')
+                ->where('summary.total_sales', 15.75)
+                ->where('paymentSummary.total_without_zt', 14.25)
+                ->where('paymentSummary.total_with_zt', 17));
+    }
+
+    public function test_client_can_not_publish_dashboard_configuration(): void
+    {
+        [, $clientUser, $event] = $this->makeDashboardContext();
+        $configuration = app(DashboardConfigurationService::class)->defaults($event);
+
+        $this->actingAs($clientUser)
+            ->patch(route('admin.events.dashboard-configuration.update', $event), [
+                'configuration' => $configuration,
+            ])
+            ->assertForbidden();
+
+        $this->assertNull($event->fresh()->dashboard_configuration);
+    }
+
+    public function test_invalid_dashboard_configuration_is_rejected_and_can_be_restored(): void
+    {
+        [$admin, , $event] = $this->makeDashboardContext();
+        $configuration = app(DashboardConfigurationService::class)->defaults($event);
+        $configuration['preset'] = 'custom';
+        $configuration['sections'] = array_map(
+            fn (array $section): array => [...$section, 'visible' => false],
+            $configuration['sections'],
+        );
+
+        $this->actingAs($admin)
+            ->from(route('admin.events.dashboard', $event))
+            ->patch(route('admin.events.dashboard-configuration.update', $event), [
+                'configuration' => $configuration,
+            ])
+            ->assertRedirect(route('admin.events.dashboard', $event))
+            ->assertSessionHasErrors('configuration');
+
+        $this->assertNull($event->fresh()->dashboard_configuration);
+
+        $validConfiguration = app(DashboardConfigurationService::class)->defaults($event);
+
+        $this->actingAs($admin)
+            ->from(route('admin.events.dashboard', $event))
+            ->patch(route('admin.events.dashboard-configuration.update', $event), [
+                'configuration' => $validConfiguration,
+            ])
+            ->assertSessionHasNoErrors();
+
+        $this->assertNotNull($event->fresh()->dashboard_configuration);
+
+        $this->actingAs($admin)
+            ->from(route('admin.events.dashboard', $event))
+            ->patch(route('admin.events.dashboard-configuration.update', $event), [
+                'configuration' => null,
+            ])
+            ->assertSessionHasNoErrors();
+
+        $this->assertNull($event->fresh()->dashboard_configuration);
     }
 
     public function test_dashboard_keeps_hourly_sales_for_an_eleven_day_event(): void
