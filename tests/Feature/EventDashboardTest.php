@@ -244,8 +244,9 @@ class EventDashboardTest extends TestCase
             ->component('Events/Dashboard')
             ->where('previewMode', true)
             ->where('dashboardEditor.enabled', true)
-            ->has('dashboardEditor.presets', 4)
+            ->where('dashboardEditor.edit_url', route('admin.events.dashboard-configuration.edit', $event))
             ->where('dashboardConfiguration.preset', 'complete')
+            ->where('dashboardConfiguration.customized', false)
             ->where('dashboardConfiguration.sections.0.key', 'summary')
             ->where('backUrl', route('admin.events.index'))
             ->where('integration.source', 'ZoneSoft API')
@@ -327,6 +328,26 @@ class EventDashboardTest extends TestCase
                 ))));
     }
 
+    public function test_admin_has_a_dedicated_dashboard_configuration_page(): void
+    {
+        [$admin, $clientUser, $event] = $this->makeDashboardContext();
+
+        $this->actingAs($admin)
+            ->get(route('admin.events.dashboard-configuration.edit', $event))
+            ->assertOk()
+            ->assertInertia(fn (AssertableInertia $page) => $page
+                ->component('Admin/Events/DashboardConfigurationEdit')
+                ->where('event.id', $event->id)
+                ->where('configuration.customized', false)
+                ->has('presets', 4)
+                ->where('updateUrl', route('admin.events.dashboard-configuration.update', $event))
+                ->where('dashboardUrl', route('admin.events.dashboard', $event)));
+
+        $this->actingAs($clientUser)
+            ->get(route('admin.events.dashboard-configuration.edit', $event))
+            ->assertForbidden();
+    }
+
     public function test_admin_can_publish_an_event_specific_dashboard_configuration_without_changing_values(): void
     {
         [$admin, $clientUser, $event] = $this->makeDashboardContext();
@@ -365,6 +386,7 @@ class EventDashboardTest extends TestCase
         $otherEvent->refresh();
 
         $this->assertSame('custom', $event->dashboard_configuration['preset']);
+        $this->assertTrue($event->dashboard_configuration['customized']);
         $this->assertSame('products', $event->dashboard_configuration['sections'][0]['key']);
         $this->assertSame('Visão executiva', $event->dashboard_configuration['sections'][1]['label']);
         $this->assertFalse($event->dashboard_configuration['blocks'][3]['visible']);
@@ -376,6 +398,7 @@ class EventDashboardTest extends TestCase
             ->assertOk()
             ->assertInertia(fn (AssertableInertia $page) => $page
                 ->where('dashboardEditor', null)
+                ->where('dashboardConfiguration.customized', true)
                 ->where('dashboardConfiguration.sections.0.key', 'products')
                 ->where('dashboardConfiguration.sections.1.label', 'Visão executiva')
                 ->where('dashboardConfiguration.blocks.3.visible', false)

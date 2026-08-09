@@ -82,6 +82,7 @@ class DashboardConfigurationService
         return [
             'version' => self::VERSION,
             'preset' => 'complete',
+            'customized' => false,
             'sections' => $this->defaultItems(self::SECTION_DEFINITIONS, $showZt),
             'blocks' => $this->defaultItems(self::BLOCK_DEFINITIONS, $showZt, [
                 'overview' => ['label' => $showZt ? 'Total sem ZT' : 'Total faturado'],
@@ -197,6 +198,7 @@ class DashboardConfigurationService
         return [
             'version' => self::VERSION,
             'preset' => $preset,
+            'customized' => true,
             'sections' => $sections,
             'blocks' => $blocks,
             'metrics' => $metrics,

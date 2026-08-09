@@ -158,9 +158,7 @@ class EventDashboardController extends Controller
             'dashboardConfiguration' => $dashboardConfiguration,
             'dashboardEditor' => $previewMode ? [
                 'enabled' => true,
-                'update_url' => route('admin.events.dashboard-configuration.update', $event),
-                'default_configuration' => $this->dashboardConfiguration->defaults($event),
-                'presets' => $this->dashboardConfiguration->presets($event),
+                'edit_url' => route('admin.events.dashboard-configuration.edit', $event),
             ] : null,
             'integration' => [
                 'source' => 'ZoneSoft API',

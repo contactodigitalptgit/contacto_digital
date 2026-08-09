@@ -7,16 +7,19 @@ import type {
 } from '@/types/dashboard-configuration';
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
     configuration: DashboardConfiguration;
-    defaultConfiguration: DashboardConfiguration;
     presets: DashboardPreset[];
     saving: boolean;
-}>();
+    embedded?: boolean;
+}>(), {
+    embedded: false,
+});
 
 const emit = defineEmits<{
     preview: [configuration: DashboardConfiguration];
     save: [configuration: DashboardConfiguration];
+    reset: [];
     close: [];
 }>();
 
@@ -60,11 +63,6 @@ function applyPreset(): void {
     if (preset) {
         applyConfiguration(preset.configuration);
     }
-}
-
-function restoreDefault(): void {
-    selectedPreset.value = 'complete';
-    applyConfiguration(props.defaultConfiguration);
 }
 
 function itemsForGroup(group: DashboardMetricGroup): DashboardConfigurationItem[] {
@@ -112,7 +110,7 @@ function isLast(
 }
 
 function handleKeydown(event: KeyboardEvent): void {
-    if (event.key === 'Escape' && !props.saving) {
+    if (event.key === 'Escape' && !props.saving && !props.embedded) {
         emit('close');
     }
 }
@@ -122,14 +120,18 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleKeydown));
 </script>
 
 <template>
-    <aside class="dashboard-page-editor" aria-label="Editor da apresentação do dashboard">
+    <aside
+        class="dashboard-page-editor"
+        :class="{ 'is-embedded': props.embedded }"
+        aria-label="Editor da apresentação do dashboard"
+    >
         <header class="dashboard-page-editor__header">
             <div>
                 <span>Modo administrativo</span>
                 <h2>Editar página</h2>
-                <p>As alterações abaixo aparecem em tempo real e só são publicadas ao guardar.</p>
+                <p>Personalize a apresentação deste evento e publique apenas quando estiver pronta.</p>
             </div>
-            <button type="button" aria-label="Fechar editor" :disabled="props.saving" @click="emit('close')">×</button>
+            <button v-if="!props.embedded" type="button" aria-label="Fechar editor" :disabled="props.saving" @click="emit('close')">×</button>
         </header>
 
         <section class="dashboard-page-editor__preset">
@@ -265,7 +267,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleKeydown));
         </div>
 
         <footer class="dashboard-page-editor__footer">
-            <button type="button" class="is-secondary" :disabled="props.saving" @click="restoreDefault">Restaurar padrão</button>
+            <button type="button" class="is-secondary" :disabled="props.saving" @click="emit('reset')">Restaurar padrão</button>
             <button type="button" class="is-secondary" :disabled="props.saving" @click="emit('close')">Cancelar</button>
             <button type="button" class="is-primary" :disabled="props.saving" @click="emit('save', cloneConfiguration(draft))">
                 {{ props.saving ? 'A publicar...' : 'Publicar alterações' }}
@@ -290,6 +292,15 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleKeydown));
     color: var(--text-main);
     background: color-mix(in srgb, var(--card-bg) 97%, var(--accent) 3%);
     box-shadow: 0 32px 80px -28px rgba(1, 13, 30, 0.7);
+}
+
+.dashboard-page-editor.is-embedded {
+    position: relative;
+    inset: auto;
+    width: 100%;
+    min-height: 38rem;
+    overflow: visible;
+    box-shadow: 0 24px 60px -42px color-mix(in srgb, var(--accent-strong) 72%, transparent);
 }
 
 .dashboard-page-editor__header {
@@ -419,6 +430,11 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleKeydown));
     padding: 1rem 1.25rem 6rem;
 }
 
+.dashboard-page-editor.is-embedded .dashboard-page-editor__body {
+    overflow: visible;
+    padding-bottom: 1.25rem;
+}
+
 .dashboard-page-editor__list {
     display: grid;
     gap: 0.75rem;
@@ -520,6 +536,17 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleKeydown));
     border: 1px solid var(--card-border);
     color: var(--text-main);
     background: var(--card-bg);
+}
+
+@media (min-width: 1024px) {
+    .dashboard-page-editor.is-embedded .dashboard-page-editor__list {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .dashboard-page-editor.is-embedded .dashboard-page-editor__intro,
+    .dashboard-page-editor.is-embedded .dashboard-page-editor__list > h3 {
+        grid-column: 1 / -1;
+    }
 }
 
 @media (max-width: 640px) {

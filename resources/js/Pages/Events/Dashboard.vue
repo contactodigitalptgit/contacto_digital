@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import DashboardPageEditor from '@/Components/DashboardPageEditor.vue';
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout.vue';
 import { showErrorToast, showSuccessToast } from '@/lib/swal';
 import type {
@@ -368,16 +367,12 @@ const autoSyncClockId = ref<number | null>(null);
 const currentTimestamp = ref(Date.now());
 const lastAutoSyncRefreshAt = ref(0);
 const isRefreshingAutoSync = ref(false);
-const pageEditorOpen = ref(false);
-const isSavingDashboardConfiguration = ref(false);
-const previewDashboardConfiguration = ref<DashboardConfiguration | null>(null);
 const localFilters = ref<DashboardFilters>({ ...props.filters });
 const showZtCard = computed(() => props.event.show_zt_card);
 const whatsappSupportUrl = 'https://api.whatsapp.com/send/?phone=351910918377&text=Ol%C3%A1%2C+preciso+de+ajuda+com+o+relat%C3%B3rio+Contacto+Digital.&type=phone_number&app_absent=0';
 
-const activeDashboardConfiguration = computed(
-    () => previewDashboardConfiguration.value ?? props.dashboardConfiguration,
-);
+const activeDashboardConfiguration = computed(() => props.dashboardConfiguration);
+const dashboardUsesCustomLayout = computed(() => activeDashboardConfiguration.value.customized);
 const dashboardSections = computed(() => activeDashboardConfiguration.value.sections
     .filter((section) => section.visible && section.available)
     .map((section, index) => ({
@@ -447,8 +442,22 @@ function sectionIsVisible(key: DashboardSection): boolean {
     return dashboardSections.value.some((section) => section.key === key);
 }
 
+const metricGridClasses: Record<number, string> = {
+    1: 'report-dashboard-grid-1',
+    2: 'report-dashboard-grid-2',
+    3: 'report-dashboard-grid-3',
+    4: 'report-dashboard-grid-4',
+    5: 'report-dashboard-grid-5',
+};
+
 function metricGridClass(count: number): string {
-    return `report-dashboard-grid-${Math.min(5, Math.max(1, count))}`;
+    return metricGridClasses[Math.min(5, Math.max(1, count))];
+}
+
+function blockStyle(key: string): { order: number } | undefined {
+    return dashboardUsesCustomLayout.value
+        ? { order: blockOrder(key) }
+        : undefined;
 }
 
 const hasImportedData = computed(
@@ -1045,61 +1054,6 @@ const closeDetailModal = () => {
     detailModal.value = null;
 };
 
-const openPageEditor = () => {
-    if (!props.dashboardEditor?.enabled) {
-        return;
-    }
-
-    previewDashboardConfiguration.value = null;
-    pageEditorOpen.value = true;
-};
-
-const previewPageConfiguration = (configuration: DashboardConfiguration) => {
-    previewDashboardConfiguration.value = configuration;
-};
-
-const closePageEditor = () => {
-    if (isSavingDashboardConfiguration.value) {
-        return;
-    }
-
-    pageEditorOpen.value = false;
-    previewDashboardConfiguration.value = null;
-};
-
-const savePageConfiguration = (configuration: DashboardConfiguration) => {
-    if (!props.dashboardEditor?.enabled || isSavingDashboardConfiguration.value) {
-        return;
-    }
-
-    isSavingDashboardConfiguration.value = true;
-    const payload = {
-        configuration: JSON.parse(JSON.stringify(configuration)),
-    };
-
-    router.patch(
-        props.dashboardEditor.update_url,
-        payload,
-        {
-            preserveScroll: true,
-            onSuccess: () => {
-                pageEditorOpen.value = false;
-                previewDashboardConfiguration.value = null;
-                void showSuccessToast('Apresentação publicada para este evento.');
-            },
-            onError: (errors) => {
-                void showErrorToast(
-                    (errors.configuration as string | undefined)
-                    ?? 'Não foi possível publicar a apresentação.',
-                );
-            },
-            onFinish: () => {
-                isSavingDashboardConfiguration.value = false;
-            },
-        },
-    );
-};
-
 const handleEscapeKey = (event: KeyboardEvent) => {
     if (event.key === 'Escape') {
         closeDetailModal();
@@ -1343,6 +1297,23 @@ function getDifferenceClass(value: number | null) {
                 </header>
 
                 <div class="app-report-navigation-list">
+                    <Link
+                        v-if="props.dashboardEditor?.enabled"
+                        :href="props.dashboardEditor.edit_url"
+                        class="app-report-navigation-item app-report-navigation-edit"
+                    >
+                        <span class="app-report-navigation-number">
+                            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                                <path d="m4 16-.8 4.8L8 20l10.4-10.4a2.1 2.1 0 0 0-3-3L5 17Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" />
+                                <path d="m13.8 8.2 3 3" stroke="currentColor" stroke-width="1.8" />
+                            </svg>
+                        </span>
+                        <span>
+                            <strong>Editar página</strong>
+                            <small>Personalizar relatório</small>
+                        </span>
+                    </Link>
+
                     <button
                         v-for="section in dashboardSections"
                         :key="section.key"
@@ -1388,20 +1359,6 @@ function getDifferenceClass(value: number | null) {
                 <p class="report-dashboard-toolbar-tagline">Relatórios inteligentes para decisões com impacto.</p>
 
                 <div class="report-dashboard-toolbar-actions">
-                    <button
-                        v-if="props.dashboardEditor?.enabled"
-                        type="button"
-                        class="report-dashboard-header-action report-dashboard-edit-action"
-                        :class="{ 'is-active': pageEditorOpen }"
-                        @click="openPageEditor"
-                    >
-                        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                            <path d="m4 16-.8 4.8L8 20l10.4-10.4a2.1 2.1 0 0 0-3-3L5 17Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" />
-                            <path d="m13.8 8.2 3 3" stroke="currentColor" stroke-width="1.8" />
-                        </svg>
-                        {{ pageEditorOpen ? 'A editar página' : 'Editar página' }}
-                    </button>
-
                     <button
                         v-if="props.previewMode"
                         type="button"
@@ -1632,11 +1589,6 @@ function getDifferenceClass(value: number | null) {
                         {{ syncIntegrationError }}
                     </p>
 
-                    <div v-if="pageEditorOpen" class="report-dashboard-editor-notice" role="status">
-                        <strong>Pré-visualização ativa</strong>
-                        <span>O cliente ainda não vê estas alterações. Use “Publicar alterações” no editor para guardar.</span>
-                    </div>
-
                     <div
                         v-if="(activeSection === 'summary' || activeSection === 'charts') && sectionIsVisible('summary') && sectionIsVisible('charts')"
                         class="report-dashboard-summary-view-switcher"
@@ -1662,12 +1614,16 @@ function getDifferenceClass(value: number | null) {
                         </div>
                     </div>
 
-                    <div v-if="activeSection === 'summary'" class="report-dashboard-view report-dashboard-summary-stack">
+                    <div
+                        v-if="activeSection === 'summary'"
+                        class="report-dashboard-view"
+                        :class="{ 'report-dashboard-summary-stack': dashboardUsesCustomLayout }"
+                    >
                         <button
                             v-if="isBlockVisible('overview')"
                             type="button"
                             class="report-dashboard-overview-hero"
-                            :style="{ order: blockOrder('overview') }"
+                            :style="blockStyle('overview')"
                             @click="openDetailModal('payments')"
                         >
                             <div class="report-dashboard-overview-copy">
@@ -1701,7 +1657,7 @@ function getDifferenceClass(value: number | null) {
                             </div>
                         </button>
 
-                        <section v-if="isBlockVisible('movement')" :style="{ order: blockOrder('movement') }">
+                        <section v-if="isBlockVisible('movement')" :style="blockStyle('movement')">
                             <div class="report-dashboard-section-heading">
                                 <span>{{ blockHelper('movement', 'Leitura financeira') }}</span>
                                 <h3>{{ blockLabel('movement', showZtCard ? 'Vendas e carregamentos ZT' : 'Vendas do evento') }}</h3>
@@ -1722,7 +1678,7 @@ function getDifferenceClass(value: number | null) {
                             </div>
                         </section>
 
-                        <section v-if="isBlockVisible('payments')" :style="{ order: blockOrder('payments') }">
+                        <section v-if="isBlockVisible('payments')" :style="blockStyle('payments')">
                             <div class="report-dashboard-section-heading">
                                 <span>{{ blockHelper('payments', 'Formas de pagamento') }}</span>
                                 <h3>{{ blockLabel('payments', 'Pagamentos das vendas') }}</h3>
@@ -1746,7 +1702,7 @@ function getDifferenceClass(value: number | null) {
                         <section
                             v-if="showZtCard && isBlockVisible('top_up')"
                             class="report-dashboard-topup"
-                            :style="{ order: blockOrder('top_up') }"
+                            :style="blockStyle('top_up')"
                         >
                             <div class="report-dashboard-section-heading">
                                 <span>{{ blockHelper('top_up', 'Fluxo de cartões') }}</span>
@@ -1764,7 +1720,7 @@ function getDifferenceClass(value: number | null) {
                             </div>
                         </section>
 
-                        <section v-if="isBlockVisible('operations')" :style="{ order: blockOrder('operations') }">
+                        <section v-if="isBlockVisible('operations')" :style="blockStyle('operations')">
                             <div class="report-dashboard-section-heading">
                                 <span>{{ blockHelper('operations', 'Operação') }}</span>
                                 <h3>{{ blockLabel('operations', 'Indicadores operacionais') }}</h3>
@@ -1792,7 +1748,7 @@ function getDifferenceClass(value: number | null) {
                             <section
                                 v-if="showZtCard && isBlockVisible('chart_financial')"
                                 class="dash-card report-dashboard-analytics-card report-dashboard-analytics-financial-card"
-                                :style="{ order: blockOrder('chart_financial') }"
+                                :style="blockStyle('chart_financial')"
                             >
                                 <header>
                                     <div>
@@ -1850,7 +1806,7 @@ function getDifferenceClass(value: number | null) {
                             <section
                                 v-if="isBlockVisible('chart_daily')"
                                 class="dash-card report-dashboard-analytics-card report-dashboard-analytics-line-card"
-                                :style="{ order: blockOrder('chart_daily') }"
+                                :style="blockStyle('chart_daily')"
                             >
                                 <header>
                                     <div>
@@ -1902,7 +1858,7 @@ function getDifferenceClass(value: number | null) {
                             <section
                                 v-if="isBlockVisible('chart_hourly')"
                                 class="dash-card report-dashboard-analytics-card report-dashboard-analytics-hourly-card"
-                                :style="{ order: blockOrder('chart_hourly') }"
+                                :style="blockStyle('chart_hourly')"
                             >
                                 <header>
                                     <div>
@@ -1972,7 +1928,7 @@ function getDifferenceClass(value: number | null) {
                             <section
                                 v-if="isBlockVisible('chart_payments')"
                                 class="dash-card report-dashboard-analytics-card report-dashboard-analytics-donut-card"
-                                :style="{ order: blockOrder('chart_payments') }"
+                                :style="blockStyle('chart_payments')"
                             >
                                 <header>
                                     <div>
@@ -2014,7 +1970,7 @@ function getDifferenceClass(value: number | null) {
                             <section
                                 v-if="isBlockVisible('chart_zones')"
                                 class="dash-card report-dashboard-analytics-card report-dashboard-analytics-bars-card"
-                                :style="{ order: blockOrder('chart_zones') }"
+                                :style="blockStyle('chart_zones')"
                             >
                                 <header>
                                     <div>
@@ -2045,7 +2001,7 @@ function getDifferenceClass(value: number | null) {
                             <section
                                 v-if="isBlockVisible('chart_operations')"
                                 class="dash-card report-dashboard-analytics-card report-dashboard-analytics-operational-card"
-                                :style="{ order: blockOrder('chart_operations') }"
+                                :style="blockStyle('chart_operations')"
                             >
                                 <header>
                                     <div>
@@ -2535,15 +2491,5 @@ function getDifferenceClass(value: number | null) {
             </section>
         </div>
 
-        <DashboardPageEditor
-            v-if="pageEditorOpen && props.dashboardEditor"
-            :configuration="props.dashboardConfiguration"
-            :default-configuration="props.dashboardEditor.default_configuration"
-            :presets="props.dashboardEditor.presets"
-            :saving="isSavingDashboardConfiguration"
-            @preview="previewPageConfiguration"
-            @save="savePageConfiguration"
-            @close="closePageEditor"
-        />
     </AuthenticatedLayout>
 </template>

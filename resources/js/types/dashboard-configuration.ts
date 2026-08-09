@@ -24,6 +24,7 @@ export interface DashboardConfigurationItem {
 export interface DashboardConfiguration {
     version: number;
     preset: string;
+    customized: boolean;
     sections: DashboardConfigurationItem[];
     blocks: DashboardConfigurationItem[];
     metrics: DashboardConfigurationItem[];
@@ -38,7 +39,5 @@ export interface DashboardPreset {
 
 export interface DashboardEditorMeta {
     enabled: boolean;
-    update_url: string;
-    default_configuration: DashboardConfiguration;
-    presets: DashboardPreset[];
+    edit_url: string;
 }

@@ -68,7 +68,9 @@ Route::middleware(['auth', 'active.client', 'admin'])
             ->name('events.toggle-status');
         Route::get('events/{event}/dashboard', [EventDashboardController::class, 'preview'])
             ->name('events.dashboard');
-        Route::patch('events/{event}/dashboard-configuration', EventDashboardConfigurationController::class)
+        Route::get('events/{event}/dashboard-configuration/edit', [EventDashboardConfigurationController::class, 'edit'])
+            ->name('events.dashboard-configuration.edit');
+        Route::patch('events/{event}/dashboard-configuration', [EventDashboardConfigurationController::class, 'update'])
             ->name('events.dashboard-configuration.update');
         Route::post('events/{event}/reports', [EventController::class, 'storeReport'])
             ->name('events.reports.store');
