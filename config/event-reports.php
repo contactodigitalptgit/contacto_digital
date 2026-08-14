@@ -11,6 +11,6 @@ return [
 
     'zonesoft' => [
         'complete_documents' => (bool) env('EVENT_REPORT_COMPLETE_DOCUMENTS', true),
-        'machine_sync_concurrency' => (int) env('EVENT_REPORT_MACHINE_SYNC_CONCURRENCY', 8),
+        'machine_sync_concurrency' => (int) env('EVENT_REPORT_MACHINE_SYNC_CONCURRENCY', 10),
     ],
 ];

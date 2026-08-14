@@ -613,6 +613,7 @@ class EventReportSyncService
      */
     private function fetchMachineResultDescriptors(array $machineIds, array $rangePayload): array
     {
+        $this->ensureMachinePayloadDirectory((int) ($rangePayload['sync_import_id'] ?? 0));
         $tasks = [];
 
         foreach ($machineIds as $machineId) {
@@ -629,7 +630,7 @@ class EventReportSyncService
 
     private function machineSyncConcurrency(): int
     {
-        return max(1, min(20, (int) config('event-reports.zonesoft.machine_sync_concurrency', 8)));
+        return max(1, min(20, (int) config('event-reports.zonesoft.machine_sync_concurrency', 10)));
     }
 
     /**
@@ -749,11 +750,7 @@ class EventReportSyncService
     public function syncMachinePayloadToFile(int $machineId, array $rangePayload): array
     {
         $result = $this->syncMachinePayload($machineId, $rangePayload);
-        $directory = $this->machinePayloadDirectory((int) ($rangePayload['sync_import_id'] ?? 0));
-
-        if (! is_dir($directory) && ! mkdir($directory, 0700, true) && ! is_dir($directory)) {
-            throw new \RuntimeException('Nao foi possivel preparar o armazenamento temporario da sincronizacao.');
-        }
+        $directory = $this->ensureMachinePayloadDirectory((int) ($rangePayload['sync_import_id'] ?? 0));
 
         $path = tempnam($directory, sprintf('machine-%d-', $machineId));
 
@@ -819,6 +816,17 @@ class EventReportSyncService
     private function machinePayloadDirectory(int $syncImportId): string
     {
         return storage_path('framework/cache/event-report-sync/'.max(0, $syncImportId));
+    }
+
+    private function ensureMachinePayloadDirectory(int $syncImportId): string
+    {
+        $directory = $this->machinePayloadDirectory($syncImportId);
+
+        if (! is_dir($directory) && ! @mkdir($directory, 0700, true) && ! is_dir($directory)) {
+            throw new \RuntimeException('Nao foi possivel preparar o armazenamento temporario da sincronizacao.');
+        }
+
+        return $directory;
     }
 
     private function cleanupMachinePayloadDirectory(int $syncImportId): void
@@ -1156,7 +1164,7 @@ class EventReportSyncService
                 'machine_id' => $machine->id,
                 'machine_client_id' => $machine->zs_client_id,
                 'machine_store_id' => $machine->store_id,
-                ...$sale,
+                'id' => $sale['id'] ?? null,
                 '_document_line_number' => $documentLineNumber,
             ],
         ];
@@ -1200,10 +1208,16 @@ class EventReportSyncService
             ]];
         }
 
-        $normalizedPayments = array_map(function (array $payment, int $index) use ($baseDocument, $document): array {
+        $documentTotal = (float) ($baseDocument['document_total'] ?? 0);
+        $normalizedPayments = array_map(function (array $payment, int $index) use ($baseDocument, $document, $documentTotal): array {
             $paymentCode = isset($payment['tipo']) && (int) $payment['tipo'] !== 0
                 ? (string) $payment['tipo']
                 : (isset($document['pagamento']) ? (string) $document['pagamento'] : null);
+            $paymentTotal = $this->normalizeDecimal($payment['valor'] ?? ($document['total'] ?? null));
+
+            if ($documentTotal < 0 && $paymentTotal !== null && (float) $paymentTotal > 0) {
+                $paymentTotal = $this->normalizeDecimal(-((float) $paymentTotal));
+            }
 
             return [
                 ...$baseDocument,
@@ -1218,11 +1232,10 @@ class EventReportSyncService
                 'payment_document_series' => isset($payment['serie']) ? (string) $payment['serie'] : null,
                 'payment_document_number' => isset($payment['numero']) ? (string) $payment['numero'] : null,
                 'payment_card_number' => isset($payment['cartao']) ? (string) $payment['cartao'] : null,
-                'total' => $this->normalizeDecimal($payment['valor'] ?? ($document['total'] ?? null)),
+                'total' => $paymentTotal,
             ];
         }, $partialPayments, array_keys($partialPayments));
 
-        $documentTotal = (float) ($baseDocument['document_total'] ?? 0);
         $paymentsTotal = array_sum(array_map(
             fn (array $payment): float => (float) ($payment['total'] ?? 0),
             $normalizedPayments,
@@ -1836,12 +1849,12 @@ class EventReportSyncService
             ];
         }
 
-        if ($start !== null && $end === null) {
-            $end = $start->endOfDay();
+        if ($start === null) {
+            $start = CarbonImmutable::instance($event->event_date);
         }
 
-        if ($start === null && $end !== null) {
-            $start = $end->startOfDay();
+        if ($end === null) {
+            $end = $start->endOfDay();
         }
 
         return [

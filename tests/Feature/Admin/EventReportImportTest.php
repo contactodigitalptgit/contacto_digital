@@ -637,6 +637,7 @@ class EventReportImportTest extends TestCase
                                         'desconto2' => 0,
                                         'total' => 8.70,
                                         'posto' => 1,
+                                        'pvp' => 99.99,
                                     ],
                                 ],
                             ],
@@ -671,9 +672,137 @@ class EventReportImportTest extends TestCase
             'description' => 'Agua',
             'total' => 8.7,
         ]);
+        $storedRow = $import->rows()->firstOrFail();
+        $this->assertSame([
+            'machine_id' => $storedRow->raw_row['machine_id'],
+            'machine_client_id' => 'COMPLETE-DOCUMENTS-CLIENT',
+            'machine_store_id' => 1,
+            'id' => null,
+            '_document_line_number' => 1,
+        ], $storedRow->raw_row);
         Http::assertSentCount(1);
         Http::assertNotSent(fn ($request) => str_contains($request->url(), '/sales/getInstancesFromDocument'));
         Http::assertNotSent(fn ($request) => str_contains($request->url(), '/documents/getDocumentsHeaders'));
+    }
+
+    public function test_sync_uses_event_date_as_start_when_only_report_end_is_configured(): void
+    {
+        [$admin, $client] = $this->makeAdminClientContext();
+        $application = $this->makeApplication();
+        $event = Event::create([
+            'client_id' => $client->id,
+            'title' => 'Evento de varios dias',
+            'event_date' => '2026-08-10 12:31:00',
+            'report_starts_at' => null,
+            'report_ends_at' => '2026-08-15 03:00:00',
+            'is_active' => true,
+        ]);
+
+        ClientZoneSoftMachine::create([
+            'client_id' => $client->id,
+            'event_id' => $event->id,
+            'zonesoft_application_id' => $application->id,
+            'zs_client_id' => 'MULTI-DAY-CLIENT',
+            'license' => 'Z11JSMZIYP',
+            'store_id' => 1,
+            'store_label' => 'Loja 1',
+            'permissions' => 'API + All document interfaces',
+            'is_active' => true,
+            'last_validated_at' => now(),
+        ]);
+
+        Http::fake([
+            'https://api.zonesoft.org/v3/documents/getDocumentsHeaders' => function ($request) {
+                $this->assertSame(
+                    "loja = 1 and data >= '2026-08-10' and data <= '2026-08-15'",
+                    $request->data()['document']['condition'] ?? null,
+                );
+
+                return Http::response([
+                    'Response' => [
+                        'StatusCode' => 200,
+                        'StatusMessage' => 'OK',
+                        'Content' => ['document' => []],
+                    ],
+                ]);
+            },
+        ]);
+
+        $import = app(EventReportSyncService::class)->sync($event, $admin);
+
+        $this->assertSame('completed', $import->status);
+        $this->assertSame(1, $import->summary['api_requests_count'] ?? null);
+    }
+
+    public function test_negative_documents_apply_negative_sign_to_partial_payments(): void
+    {
+        config(['event-reports.zonesoft.complete_documents' => true]);
+
+        [$admin, $client] = $this->makeAdminClientContext();
+        $application = $this->makeApplication();
+        $event = $this->makeEvent($client);
+        $machine = ClientZoneSoftMachine::create([
+            'client_id' => $client->id,
+            'event_id' => $event->id,
+            'zonesoft_application_id' => $application->id,
+            'zs_client_id' => 'CREDIT-NOTE-CLIENT',
+            'license' => 'Z11JSMZIYP',
+            'store_id' => 1,
+            'store_label' => 'Loja 1',
+            'permissions' => 'API + All document interfaces',
+            'is_active' => true,
+            'last_validated_at' => now(),
+        ]);
+
+        Http::fake([
+            'https://api.zonesoft.org/v3/documents/getInstances' => Http::response([
+                'Response' => [
+                    'StatusCode' => 200,
+                    'StatusMessage' => 'OK',
+                    'Content' => [
+                        'document' => [[
+                            'numero' => 1,
+                            'doc' => 'NC',
+                            'serie' => 'A2026',
+                            'data' => '2026-06-20',
+                            'datahora' => '2026-06-20 12:05:00',
+                            'pagamento' => 3,
+                            'total' => -1.20,
+                            'pago' => 1,
+                            'documentos_pagamento' => [[
+                                'doc' => 'PG',
+                                'serie' => 'A2026',
+                                'numero' => 10,
+                                'tipo' => 3,
+                                'valor' => 1.20,
+                            ]],
+                            'vendas' => [[
+                                'id' => 100,
+                                'loja' => 1,
+                                'numero' => 1,
+                                'doc' => 'NC',
+                                'serie' => 'A2026',
+                                'data' => '2026-06-20',
+                                'datahora' => '2026-06-20 12:05:00',
+                                'codigo' => 7,
+                                'descricao' => 'Agua s/Gas',
+                                'qtd' => -1,
+                                'valor' => -1.20,
+                                'total' => -1.20,
+                            ]],
+                        ]],
+                    ],
+                ],
+            ]),
+        ]);
+
+        $import = app(EventReportSyncService::class)->sync($event, $admin);
+        $payment = $import->paymentDocuments()->firstOrFail();
+
+        $this->assertSame('-1.2000', $import->summary['sales_total'] ?? null);
+        $this->assertSame(-1.2, (float) $payment->getRawOriginal('total'));
+        $this->assertFalse($payment->is_unallocated);
+        $this->assertSame($machine->id, $payment->machine_id);
     }
 
     public function test_sync_retries_rate_limited_machines_in_serial_pass(): void
