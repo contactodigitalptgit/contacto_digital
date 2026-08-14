@@ -176,6 +176,9 @@ class EventReportSyncService
                 ...($summary['performance'] ?? []),
                 'fetch_duration_ms' => $fetchDurationMs,
             ];
+            $summary['historical_data_complete'] = true;
+            $summary['sync_range'] = $machineSync['sync_range'];
+            $summary['fetch_range'] = $machineSync['fetch_range'];
             $failureSummary = $summary;
 
             if ($failedMachines !== [] || $machineWarnings !== []) {
@@ -331,6 +334,8 @@ class EventReportSyncService
      *     failed_machines:list<array{machine_id:int,zs_client_id:string,store_id:int,message:string}>,
      *     machine_warnings:list<array{machine_id:int,zs_client_id:string,store_id:int,message:string}>,
      *     reused_rows_count:int,
+     *     sync_range:array{start:string,end:string},
+     *     fetch_range:array{start:string,end:string},
      *     metrics:array{documents_count:int,api_requests_count:int,machine_duration_ms:int}
      * }
      */
@@ -481,6 +486,14 @@ class EventReportSyncService
             'failed_machines' => $failedMachines,
             'machine_warnings' => $machineWarnings,
             'reused_rows_count' => $historicalData['reused_rows_count'],
+            'sync_range' => [
+                'start' => $syncRange['start']->toIso8601String(),
+                'end' => $syncRange['end']->toIso8601String(),
+            ],
+            'fetch_range' => [
+                'start' => $historicalData['fetch_range']['start']->toIso8601String(),
+                'end' => $historicalData['fetch_range']['end']->toIso8601String(),
+            ],
             'metrics' => $metrics,
         ];
     }
@@ -526,6 +539,10 @@ class EventReportSyncService
         $summary = is_array($activeImport->summary) ? $activeImport->summary : [];
 
         if (($summary['failed_machines'] ?? []) !== [] || ($summary['machine_warnings'] ?? []) !== []) {
+            return $emptyResult;
+        }
+
+        if (($summary['historical_data_complete'] ?? false) !== true) {
             return $emptyResult;
         }
 

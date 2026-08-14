@@ -687,51 +687,83 @@ class EventReportImportTest extends TestCase
 
     public function test_sync_uses_event_date_as_start_when_only_report_end_is_configured(): void
     {
-        [$admin, $client] = $this->makeAdminClientContext();
-        $application = $this->makeApplication();
-        $event = Event::create([
-            'client_id' => $client->id,
-            'title' => 'Evento de varios dias',
-            'event_date' => '2026-08-10 12:31:00',
-            'report_starts_at' => null,
-            'report_ends_at' => '2026-08-15 03:00:00',
-            'is_active' => true,
-        ]);
+        CarbonImmutable::setTestNow('2026-08-14 12:00:00');
 
-        ClientZoneSoftMachine::create([
-            'client_id' => $client->id,
-            'event_id' => $event->id,
-            'zonesoft_application_id' => $application->id,
-            'zs_client_id' => 'MULTI-DAY-CLIENT',
-            'license' => 'Z11JSMZIYP',
-            'store_id' => 1,
-            'store_label' => 'Loja 1',
-            'permissions' => 'API + All document interfaces',
-            'is_active' => true,
-            'last_validated_at' => now(),
-        ]);
+        try {
+            [$admin, $client] = $this->makeAdminClientContext();
+            $application = $this->makeApplication();
+            $event = Event::create([
+                'client_id' => $client->id,
+                'title' => 'Evento de varios dias',
+                'event_date' => '2026-08-10 12:31:00',
+                'report_starts_at' => null,
+                'report_ends_at' => '2026-08-15 03:00:00',
+                'is_active' => true,
+            ]);
 
-        Http::fake([
-            'https://api.zonesoft.org/v3/documents/getDocumentsHeaders' => function ($request) {
-                $this->assertSame(
-                    "loja = 1 and data >= '2026-08-10' and data <= '2026-08-15'",
-                    $request->data()['document']['condition'] ?? null,
-                );
+            $machine = ClientZoneSoftMachine::create([
+                'client_id' => $client->id,
+                'event_id' => $event->id,
+                'zonesoft_application_id' => $application->id,
+                'zs_client_id' => 'MULTI-DAY-CLIENT',
+                'license' => 'Z11JSMZIYP',
+                'store_id' => 1,
+                'store_label' => 'Loja 1',
+                'permissions' => 'API + All document interfaces',
+                'is_active' => true,
+                'last_validated_at' => now(),
+            ]);
 
-                return Http::response([
-                    'Response' => [
-                        'StatusCode' => 200,
-                        'StatusMessage' => 'OK',
-                        'Content' => ['document' => []],
-                    ],
-                ]);
-            },
-        ]);
+            EventReportImport::create([
+                'event_id' => $event->id,
+                'uploaded_by_user_id' => $admin->id,
+                'import_strategy' => 'replace',
+                'original_filename' => 'zonesoft-api',
+                'stored_path' => 'zonesoft://sync',
+                'mime_type' => 'application/json',
+                'file_hash' => hash('sha256', 'unverified-empty-snapshot'),
+                'headers' => [
+                    'source' => 'zonesoft_api',
+                    'machines' => [['id' => $machine->id]],
+                ],
+                'summary' => [
+                    'source' => 'zonesoft_api',
+                    'machines_count' => 1,
+                    'failed_machines' => [],
+                    'machine_warnings' => [],
+                ],
+                'imported_rows_count' => 0,
+                'imported_at' => now()->subHour(),
+                'is_active' => true,
+                'status' => 'completed',
+            ]);
 
-        $import = app(EventReportSyncService::class)->sync($event, $admin);
+            Http::fake([
+                'https://api.zonesoft.org/v3/documents/getDocumentsHeaders' => function ($request) {
+                    $this->assertSame(
+                        "loja = 1 and data >= '2026-08-10' and data <= '2026-08-15'",
+                        $request->data()['document']['condition'] ?? null,
+                    );
 
-        $this->assertSame('completed', $import->status);
-        $this->assertSame(1, $import->summary['api_requests_count'] ?? null);
+                    return Http::response([
+                        'Response' => [
+                            'StatusCode' => 200,
+                            'StatusMessage' => 'OK',
+                            'Content' => ['document' => []],
+                        ],
+                    ]);
+                },
+            ]);
+
+            $import = app(EventReportSyncService::class)->sync($event, $admin);
+
+            $this->assertSame('completed', $import->status);
+            $this->assertSame(1, $import->summary['api_requests_count'] ?? null);
+            $this->assertTrue($import->summary['historical_data_complete'] ?? false);
+            $this->assertSame('2026-08-10T12:31:00+00:00', $import->summary['fetch_range']['start'] ?? null);
+        } finally {
+            CarbonImmutable::setTestNow();
+        }
     }
 
     public function test_negative_documents_apply_negative_sign_to_partial_payments(): void
