@@ -1479,30 +1479,30 @@ class EventDashboardController extends Controller
     {
         return $query->where(function (Builder $dateQuery) use ($operator, $date): void {
             $dateQuery
-                ->whereDate('sale_datetime', $operator, $date)
+                ->whereDate('sale_date', $operator, $date)
                 ->orWhere(function (Builder $fallbackQuery) use ($operator, $date): void {
                     $fallbackQuery
-                        ->whereNull('sale_datetime')
-                        ->whereDate('sale_date', $operator, $date);
+                        ->whereNull('sale_date')
+                        ->whereDate('sale_datetime', $operator, $date);
                 });
         });
     }
 
     private function resolveRowReportingDate(EventReportRow $row): ?string
     {
-        return $row->sale_datetime?->toDateString()
-            ?? $row->sale_date?->toDateString();
+        return $row->sale_date?->toDateString()
+            ?? $row->sale_datetime?->toDateString();
     }
 
     /**
-     * ZoneSoft can keep the business date on day one after midnight.
-     * The transaction timestamp is therefore the source for calendar-day reports.
+     * Match the ZoneSoft dashboard by grouping on its operational document date.
+     * Hourly charts still use the transaction timestamp directly.
      *
      * @param  array<string, mixed>  $document
      */
     private function resolveDocumentReportingDate(array $document): ?string
     {
-        foreach (['sale_datetime', 'sale_date'] as $key) {
+        foreach (['sale_date', 'sale_datetime'] as $key) {
             $value = $document[$key] ?? null;
 
             if (! is_string($value) || trim($value) === '') {

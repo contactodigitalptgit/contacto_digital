@@ -267,25 +267,20 @@ class EventDashboardTest extends TestCase
             ->where('paymentSummary.top_up_documents_count', 1)
             ->where('paymentSummary.top_up_loaded', 2.75)
             ->where('paymentSummary.total_with_zt', 17)
-            ->where('dailySales', fn ($days): bool => count($days) === 2
+            ->where('dailySales', fn ($days): bool => count($days) === 1
                 && collect($days)->sum('sales_total') === 14.25)
             ->where('dailyBreakdowns', function ($days): bool {
                 $firstDay = collect($days)->firstWhere('date', '2026-03-14');
-                $secondDay = collect($days)->firstWhere('date', '2026-03-15');
 
-                return count($days) === 2
-                    && (float) ($firstDay['sales_total'] ?? 0) === 13.25
-                    && (float) ($firstDay['multibanco'] ?? 0) === 3.2
+                return count($days) === 1
+                    && (float) ($firstDay['sales_total'] ?? 0) === 14.25
+                    && (float) ($firstDay['multibanco'] ?? 0) === 4.2
                     && (float) ($firstDay['cash'] ?? 0) === 4.55
                     && (float) ($firstDay['zticket'] ?? 0) === 5.5
-                    && (int) ($firstDay['tickets_count'] ?? 0) === 4
-                    && (float) ($firstDay['average_ticket'] ?? 0) === 3.3125
-                    && (float) ($secondDay['sales_total'] ?? 0) === 1.0
-                    && (float) ($secondDay['multibanco'] ?? 0) === 1.0
-                    && (float) ($secondDay['top_up_loaded'] ?? 0) === 2.75
-                    && (float) ($secondDay['total_with_zt'] ?? 0) === 3.75
-                    && (int) ($secondDay['tickets_count'] ?? 0) === 1
-                    && (float) ($secondDay['average_ticket'] ?? 0) === 1.0;
+                    && (int) ($firstDay['tickets_count'] ?? 0) === 5
+                    && (float) ($firstDay['average_ticket'] ?? 0) === 2.85
+                    && (float) ($firstDay['top_up_loaded'] ?? 0) === 2.75
+                    && (float) ($firstDay['total_with_zt'] ?? 0) === 17.0;
             })
             ->where('event.client_name', 'Cliente Dashboard')
             ->loadDeferredProps('dashboard-details', fn (AssertableInertia $details) => $details
