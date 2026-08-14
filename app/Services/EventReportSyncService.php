@@ -32,8 +32,6 @@ class EventReportSyncService
 
     private const REPORT_TIMEZONE = 'Europe/Lisbon';
 
-    private const BUSINESS_DAY_REFRESH_LOOKBACK_DAYS = 1;
-
     private const STALE_PROCESSING_TIMEOUT_MINUTES = 30;
 
     private const RATE_LIMIT_SERIAL_RETRY_ROUNDS = 2;
@@ -179,6 +177,10 @@ class EventReportSyncService
             $summary['historical_data_complete'] = true;
             $summary['sync_range'] = $machineSync['sync_range'];
             $summary['fetch_range'] = $machineSync['fetch_range'];
+            $summary['document_cursor_version'] = 1;
+            $summary['document_fetch_mode'] = $machineSync['document_fetch_mode'];
+            $summary['machine_document_cursors'] = $machineSync['machine_document_cursors'];
+            $summary['last_full_document_sync_at'] = $machineSync['last_full_document_sync_at'];
             $failureSummary = $summary;
 
             if ($failedMachines !== [] || $machineWarnings !== []) {
@@ -336,6 +338,9 @@ class EventReportSyncService
      *     reused_rows_count:int,
      *     sync_range:array{start:string,end:string},
      *     fetch_range:array{start:string,end:string},
+     *     document_fetch_mode:string,
+     *     machine_document_cursors:array<string, array<string, mixed>>,
+     *     last_full_document_sync_at:string,
      *     metrics:array{documents_count:int,api_requests_count:int,machine_duration_ms:int}
      * }
      */
@@ -346,6 +351,7 @@ class EventReportSyncService
     ): array {
         $syncRange = $this->resolveSyncRange($event);
         $timestamp = now();
+        $documentSyncStartedAt = CarbonImmutable::now(self::REPORT_TIMEZONE);
         $this->prepareStaging($syncLog);
         $historicalData = $this->resolveReusableHistoricalData(
             $event,
@@ -357,6 +363,7 @@ class EventReportSyncService
         $successfulMachinesCount = 0;
         $failedMachines = [];
         $machineWarnings = [];
+        $machineDocumentCursors = [];
         $metrics = [
             'documents_count' => 0,
             'api_requests_count' => 0,
@@ -373,6 +380,7 @@ class EventReportSyncService
             'start' => $historicalData['fetch_range']['start']->toIso8601String(),
             'end' => $historicalData['fetch_range']['end']->toIso8601String(),
             'sync_import_id' => $syncLog->id,
+            'machine_document_cursors' => $historicalData['machine_document_cursors'],
         ];
 
         foreach (array_chunk($machines->modelKeys(), $this->machineSyncConcurrency()) as $machineIdChunk) {
@@ -411,6 +419,26 @@ class EventReportSyncService
                     unset($result);
 
                     continue;
+                }
+
+                $documentKeys = is_array($result['document_keys'] ?? null)
+                    ? array_values(array_filter($result['document_keys'], 'is_array'))
+                    : [];
+
+                if ($historicalData['document_fetch_mode'] === 'incremental' && $documentKeys !== []) {
+                    $removed = $this->removeStagedDocuments(
+                        $syncLog,
+                        $machine,
+                        $documentKeys,
+                    );
+                    $historicalData['reused_rows_count'] = max(
+                        0,
+                        $historicalData['reused_rows_count'] - $removed['rows_count'],
+                    );
+                    $historicalData['reused_payment_documents_count'] = max(
+                        0,
+                        $historicalData['reused_payment_documents_count'] - $removed['payment_documents_count'],
+                    );
                 }
 
                 $rowDedupe = [];
@@ -454,6 +482,13 @@ class EventReportSyncService
                 unset($paymentDocuments, $paymentDocumentDedupe);
 
                 $successfulMachinesCount++;
+                $documentCursor = is_array($result['document_cursor'] ?? null)
+                    ? $result['document_cursor']
+                    : null;
+
+                if ($documentCursor !== null) {
+                    $machineDocumentCursors[(string) $machine->id] = $documentCursor;
+                }
                 $warningMessage = $result['warning_message'] ?? null;
                 $this->persistMachineStatus($machine, $warningMessage, $statusTimestamp);
 
@@ -494,6 +529,11 @@ class EventReportSyncService
                 'start' => $historicalData['fetch_range']['start']->toIso8601String(),
                 'end' => $historicalData['fetch_range']['end']->toIso8601String(),
             ],
+            'document_fetch_mode' => $historicalData['document_fetch_mode'],
+            'machine_document_cursors' => $machineDocumentCursors,
+            'last_full_document_sync_at' => $historicalData['document_fetch_mode'] === 'full'
+                ? $documentSyncStartedAt->toIso8601String()
+                : $historicalData['last_full_document_sync_at'],
             'metrics' => $metrics,
         ];
     }
@@ -504,7 +544,10 @@ class EventReportSyncService
      * @return array{
      *     fetch_range:array{start:CarbonImmutable,end:CarbonImmutable},
      *     reused_rows_count:int,
-     *     reused_payment_documents_count:int
+     *     reused_payment_documents_count:int,
+     *     document_fetch_mode:string,
+     *     machine_document_cursors:array<string, array<string, mixed>>,
+     *     last_full_document_sync_at:string|null
      * }
      */
     private function resolveReusableHistoricalData(
@@ -518,11 +561,12 @@ class EventReportSyncService
             'fetch_range' => $syncRange,
             'reused_rows_count' => 0,
             'reused_payment_documents_count' => 0,
+            'document_fetch_mode' => 'full',
+            'machine_document_cursors' => [],
+            'last_full_document_sync_at' => null,
         ];
-        $today = CarbonImmutable::now(self::REPORT_TIMEZONE)->startOfDay();
-        $refreshFrom = $today->subDays(self::BUSINESS_DAY_REFRESH_LOOKBACK_DAYS);
 
-        if ($syncRange['start']->gte($today) || $syncRange['end']->lt($today)) {
+        if (! (bool) config('event-reports.zonesoft.complete_documents', true)) {
             return $emptyResult;
         }
 
@@ -546,6 +590,29 @@ class EventReportSyncService
             return $emptyResult;
         }
 
+        if ((int) ($summary['document_cursor_version'] ?? 0) !== 1) {
+            return $emptyResult;
+        }
+
+        $lastFullSyncValue = $summary['last_full_document_sync_at'] ?? null;
+
+        try {
+            $lastFullSync = is_string($lastFullSyncValue) && trim($lastFullSyncValue) !== ''
+                ? CarbonImmutable::parse($lastFullSyncValue)
+                : null;
+        } catch (\Throwable) {
+            $lastFullSync = null;
+        }
+
+        $fullRefreshHours = max(
+            1,
+            min(168, (int) config('event-reports.zonesoft.incremental_full_refresh_hours', 24)),
+        );
+
+        if ($lastFullSync === null || $lastFullSync->addHours($fullRefreshHours)->lte(now())) {
+            return $emptyResult;
+        }
+
         $currentMachineIds = $machines->modelKeys();
         sort($currentMachineIds);
         $snapshotMachineIds = collect($activeImport->headers['machines'] ?? [])
@@ -560,12 +627,18 @@ class EventReportSyncService
             return $emptyResult;
         }
 
+        $machineDocumentCursors = $this->resolveMachineDocumentCursors($summary, $machines);
+
+        if ($machineDocumentCursors === null) {
+            return $emptyResult;
+        }
+
         $reusedRowsCount = 0;
         $sourceRowNumber = 0;
 
         $activeImport->rows()
             ->whereDate('sale_date', '>=', $syncRange['start']->toDateString())
-            ->whereDate('sale_date', '<', $refreshFrom->toDateString())
+            ->whereDate('sale_date', '<=', $syncRange['end']->toDateString())
             ->orderBy('id')
             ->chunkById(self::STAGING_INSERT_BATCH_SIZE, function (Collection $rows) use (
                 $event,
@@ -604,28 +677,71 @@ class EventReportSyncService
             $activeImport,
             $syncLog,
             $syncRange,
-            $refreshFrom,
             $timestamp,
             $summary,
         );
 
-        $fetchStart = $syncRange['start']->gt($refreshFrom)
-            ? $syncRange['start']
-            : $refreshFrom;
-
         return [
-            'fetch_range' => [
-                'start' => $fetchStart,
-                'end' => $syncRange['end'],
-            ],
+            'fetch_range' => $syncRange,
             'reused_rows_count' => $reusedRowsCount,
             'reused_payment_documents_count' => $reusedPaymentDocumentsCount,
+            'document_fetch_mode' => 'incremental',
+            'machine_document_cursors' => $machineDocumentCursors,
+            'last_full_document_sync_at' => $lastFullSync->toIso8601String(),
         ];
     }
 
     /**
+     * @param  array<string, mixed>  $summary
+     * @param  Collection<int, ClientZoneSoftMachine>  $machines
+     * @return array<string, array<string, mixed>>|null
+     */
+    private function resolveMachineDocumentCursors(array $summary, Collection $machines): ?array
+    {
+        $storedCursors = $summary['machine_document_cursors'] ?? null;
+
+        if (! is_array($storedCursors)) {
+            return null;
+        }
+
+        $resolved = [];
+
+        foreach ($machines as $machine) {
+            $cursor = $storedCursors[(string) $machine->id] ?? null;
+            $cursorValue = is_array($cursor) ? ($cursor['cursor'] ?? null) : null;
+
+            if (! is_string($cursorValue) || trim($cursorValue) === '') {
+                return null;
+            }
+
+            try {
+                $parsedCursor = CarbonImmutable::parse($cursorValue);
+            } catch (\Throwable) {
+                return null;
+            }
+
+            if (isset($cursor['zs_client_id']) && $cursor['zs_client_id'] !== $machine->zs_client_id) {
+                return null;
+            }
+
+            if (isset($cursor['store_id']) && (int) $cursor['store_id'] !== (int) $machine->store_id) {
+                return null;
+            }
+
+            $resolved[(string) $machine->id] = [
+                'machine_id' => $machine->id,
+                'zs_client_id' => $machine->zs_client_id,
+                'store_id' => $machine->store_id,
+                'cursor' => $parsedCursor->toIso8601String(),
+            ];
+        }
+
+        return $resolved;
+    }
+
+    /**
      * @param  list<int>  $machineIds
-     * @param  array{start:string,end:string,sync_import_id:int}  $rangePayload
+     * @param  array{start:string,end:string,sync_import_id:int,machine_document_cursors:array<string, array<string, mixed>>}  $rangePayload
      * @return array<int, array{path:string}>
      */
     private function fetchMachineResultDescriptors(array $machineIds, array $rangePayload): array
@@ -730,7 +846,7 @@ class EventReportSyncService
 
     /**
      * @param  array<string, mixed>  $result
-     * @param  array{start:string,end:string,sync_import_id?:int}  $rangePayload
+     * @param  array{start:string,end:string,sync_import_id?:int,machine_document_cursors?:array<string, array<string, mixed>>}  $rangePayload
      * @return array<string, mixed>
      */
     private function retryRateLimitedMachineResult(
@@ -761,7 +877,7 @@ class EventReportSyncService
     }
 
     /**
-     * @param  array{start:string,end:string,sync_import_id?:int}  $rangePayload
+     * @param  array{start:string,end:string,sync_import_id?:int,machine_document_cursors?:array<string, array<string, mixed>>}  $rangePayload
      * @return array{path:string}
      */
     public function syncMachinePayloadToFile(int $machineId, array $rangePayload): array
@@ -825,6 +941,8 @@ class EventReportSyncService
             'warning_message' => null,
             'rows' => [],
             'payment_documents' => [],
+            'document_keys' => [],
+            'document_cursor' => null,
             'should_retry_serially' => false,
             'metrics' => [],
         ];
@@ -870,6 +988,8 @@ class EventReportSyncService
      *     warning_message:string|null,
      *     rows:list<array<string, mixed>>,
      *     payment_documents:list<array<string, mixed>>,
+     *     document_keys:list<array<string, string>>,
+     *     document_cursor:array<string, mixed>|null,
      *     should_retry_serially:bool,
      *     metrics:array<string, int>
      * }
@@ -887,6 +1007,8 @@ class EventReportSyncService
                 'warning_message' => null,
                 'rows' => [],
                 'payment_documents' => [],
+                'document_keys' => [],
+                'document_cursor' => null,
                 'should_retry_serially' => false,
                 'metrics' => $this->machineMetrics($startedAt),
             ];
@@ -898,6 +1020,8 @@ class EventReportSyncService
                 'warning_message' => null,
                 'rows' => [],
                 'payment_documents' => [],
+                'document_keys' => [],
+                'document_cursor' => null,
                 'should_retry_serially' => false,
                 'metrics' => $this->machineMetrics($startedAt),
             ];
@@ -907,14 +1031,22 @@ class EventReportSyncService
             'start' => CarbonImmutable::parse($rangePayload['start']),
             'end' => CarbonImmutable::parse($rangePayload['end']),
         ];
+        $requestCursor = CarbonImmutable::now(self::REPORT_TIMEZONE);
+        $lastUpdatedAfter = $this->resolveMachineLastUpdatedAfter($machineId, $rangePayload);
 
         $usesCompleteDocuments = (bool) config('event-reports.zonesoft.complete_documents', true);
         $documentRequestCount = 0;
 
         try {
-            $documentFetch = $this->fetchDocuments($machine, $syncRange, $usesCompleteDocuments);
+            $documentFetch = $this->fetchDocuments(
+                $machine,
+                $syncRange,
+                $usesCompleteDocuments,
+                $lastUpdatedAfter,
+            );
             $documents = $documentFetch['documents'];
             $documentRequestCount = $documentFetch['request_count'];
+            $documentKeys = $this->buildDocumentIdentities($machine, $documents);
             $documents = array_values(array_filter(
                 $documents,
                 fn (array $document): bool => ! $this->isCancelledDocument($document),
@@ -925,6 +1057,8 @@ class EventReportSyncService
                 'warning_message' => null,
                 'rows' => [],
                 'payment_documents' => [],
+                'document_keys' => [],
+                'document_cursor' => null,
                 'should_retry_serially' => $exception->isRateLimited(),
                 'metrics' => $this->machineMetrics($startedAt, 0, max(1, $documentRequestCount)),
             ];
@@ -1002,6 +1136,14 @@ class EventReportSyncService
             'warning_message' => $this->summarizeMachineWarnings($documentWarnings),
             'rows' => $rows,
             'payment_documents' => $paymentDocuments,
+            'document_keys' => $documentKeys,
+            'document_cursor' => [
+                'machine_id' => $machine->id,
+                'zs_client_id' => $machine->zs_client_id,
+                'store_id' => $machine->store_id,
+                'cursor' => $requestCursor->toIso8601String(),
+                'requested_after' => $lastUpdatedAfter?->toIso8601String(),
+            ],
             'should_retry_serially' => $shouldRetrySerially,
             'metrics' => $this->machineMetrics(
                 $startedAt,
@@ -1012,6 +1154,37 @@ class EventReportSyncService
     }
 
     /**
+     * @param  array<string, mixed>  $rangePayload
+     */
+    private function resolveMachineLastUpdatedAfter(
+        int $machineId,
+        array $rangePayload,
+    ): ?CarbonImmutable {
+        $machineCursors = $rangePayload['machine_document_cursors'] ?? null;
+        $machineCursor = is_array($machineCursors)
+            ? ($machineCursors[(string) $machineId] ?? null)
+            : null;
+        $cursorValue = is_array($machineCursor) ? ($machineCursor['cursor'] ?? null) : null;
+
+        if (! is_string($cursorValue) || trim($cursorValue) === '') {
+            return null;
+        }
+
+        try {
+            $cursor = CarbonImmutable::parse($cursorValue)->setTimezone(self::REPORT_TIMEZONE);
+        } catch (\Throwable) {
+            return null;
+        }
+
+        $overlapMinutes = max(
+            1,
+            min(120, (int) config('event-reports.zonesoft.incremental_overlap_minutes', 15)),
+        );
+
+        return $cursor->subMinutes($overlapMinutes);
+    }
+
+    /**
      * @param  array{start:CarbonImmutable,end:CarbonImmutable}  $syncRange
      * @return array{documents:list<array<string, mixed>>,request_count:int}
      */
@@ -1019,6 +1192,7 @@ class EventReportSyncService
         ClientZoneSoftMachine $machine,
         array $syncRange,
         bool $completeDocuments,
+        ?CarbonImmutable $lastUpdatedAfter = null,
     ): array {
         $documents = [];
         $offset = 0;
@@ -1034,7 +1208,11 @@ class EventReportSyncService
                 $completeDocuments ? 'getInstances' : 'getDocumentsHeaders',
                 'document',
                 [
-                    'condition' => $this->buildDocumentCondition($machine, $syncRange),
+                    'condition' => $this->buildDocumentCondition(
+                        $machine,
+                        $syncRange,
+                        $lastUpdatedAfter,
+                    ),
                     'order' => 'data ASC, numero ASC',
                     'limit' => $limit,
                     'offset' => $offset,
@@ -1054,6 +1232,35 @@ class EventReportSyncService
             'documents' => $documents,
             'request_count' => $requestCount,
         ];
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $documents
+     * @return list<array{store_code:string,doc_type:string,document_series:string,document_number:string}>
+     */
+    private function buildDocumentIdentities(
+        ClientZoneSoftMachine $machine,
+        array $documents,
+    ): array {
+        $identities = [];
+
+        foreach ($documents as $document) {
+            $identity = [
+                'store_code' => (string) ($document['loja'] ?? $machine->store_id),
+                'doc_type' => trim((string) ($document['doc'] ?? '')),
+                'document_series' => trim((string) ($document['serie'] ?? '')),
+                'document_number' => trim((string) ($document['numero'] ?? '')),
+            ];
+
+            if ($identity['doc_type'] === '' || $identity['document_number'] === '') {
+                continue;
+            }
+
+            $key = implode('|', $identity);
+            $identities[$key] = $identity;
+        }
+
+        return array_values($identities);
     }
 
     /**
@@ -1100,13 +1307,25 @@ class EventReportSyncService
     /**
      * @param  array{start:CarbonImmutable,end:CarbonImmutable}  $syncRange
      */
-    private function buildDocumentCondition(ClientZoneSoftMachine $machine, array $syncRange): string
-    {
-        return implode(' and ', [
+    private function buildDocumentCondition(
+        ClientZoneSoftMachine $machine,
+        array $syncRange,
+        ?CarbonImmutable $lastUpdatedAfter = null,
+    ): string {
+        $conditions = [
             sprintf('loja = %d', $machine->store_id),
             sprintf("data >= '%s'", $syncRange['start']->toDateString()),
             sprintf("data <= '%s'", $syncRange['end']->toDateString()),
-        ]);
+        ];
+
+        if ($lastUpdatedAfter !== null) {
+            $conditions[] = sprintf(
+                "lastupdate >= '%s'",
+                $lastUpdatedAfter->setTimezone(self::REPORT_TIMEZONE)->format('Y-m-d H:i:s'),
+            );
+        }
+
+        return implode(' and ', $conditions);
     }
 
     /**
@@ -1499,6 +1718,64 @@ class EventReportSyncService
     }
 
     /**
+     * @param  list<array<string, string>>  $documentKeys
+     * @return array{rows_count:int,payment_documents_count:int}
+     */
+    private function removeStagedDocuments(
+        EventReportImport $syncLog,
+        ClientZoneSoftMachine $machine,
+        array $documentKeys,
+    ): array {
+        $rowsCount = 0;
+        $paymentDocumentsCount = 0;
+
+        foreach (array_chunk($documentKeys, 75) as $keyChunk) {
+            $rowsCount += EventReportRow::query()
+                ->where('event_report_import_id', $syncLog->id)
+                ->where('source_sheet', 'zonesoft:'.$machine->zs_client_id)
+                ->where(function ($query) use ($keyChunk): void {
+                    foreach ($keyChunk as $documentKey) {
+                        $query->orWhere(function ($documentQuery) use ($documentKey): void {
+                            $documentQuery
+                                ->where('store_code', $documentKey['store_code'])
+                                ->where('doc_type', $documentKey['doc_type'])
+                                ->whereRaw(
+                                    "COALESCE(document_series, '') = ?",
+                                    [$documentKey['document_series']],
+                                )
+                                ->where('document_number', $documentKey['document_number']);
+                        });
+                    }
+                })
+                ->delete();
+
+            $paymentDocumentsCount += EventReportPaymentDocument::query()
+                ->where('event_report_import_id', $syncLog->id)
+                ->where('machine_id', $machine->id)
+                ->where(function ($query) use ($keyChunk): void {
+                    foreach ($keyChunk as $documentKey) {
+                        $query->orWhere(function ($documentQuery) use ($documentKey): void {
+                            $documentQuery
+                                ->where('store_code', $documentKey['store_code'])
+                                ->where('doc_type', $documentKey['doc_type'])
+                                ->whereRaw(
+                                    "COALESCE(document_series, '') = ?",
+                                    [$documentKey['document_series']],
+                                )
+                                ->where('document_number', $documentKey['document_number']);
+                        });
+                    }
+                })
+                ->delete();
+        }
+
+        return [
+            'rows_count' => $rowsCount,
+            'payment_documents_count' => $paymentDocumentsCount,
+        ];
+    }
+
+    /**
      * @param  list<array<string, mixed>>  $rows
      */
     private function stageRowsChunk(
@@ -1627,7 +1904,6 @@ class EventReportSyncService
         EventReportImport $activeImport,
         EventReportImport $syncLog,
         array $syncRange,
-        CarbonImmutable $refreshFrom,
         CarbonInterface $timestamp,
         array $legacySummary,
     ): int {
@@ -1635,7 +1911,7 @@ class EventReportSyncService
 
         $activeImport->paymentDocuments()
             ->whereDate('sale_date', '>=', $syncRange['start']->toDateString())
-            ->whereDate('sale_date', '<', $refreshFrom->toDateString())
+            ->whereDate('sale_date', '<=', $syncRange['end']->toDateString())
             ->orderBy('id')
             ->chunkById(self::STAGING_INSERT_BATCH_SIZE, function (Collection $documents) use (
                 $event,
@@ -1684,7 +1960,7 @@ class EventReportSyncService
             is_array($legacySummary['payment_documents'] ?? null)
                 ? $legacySummary['payment_documents']
                 : [],
-            function (mixed $document) use ($syncRange, $refreshFrom): bool {
+            function (mixed $document) use ($syncRange): bool {
                 if (! is_array($document)) {
                     return false;
                 }
@@ -1693,7 +1969,7 @@ class EventReportSyncService
 
                 return $saleDate !== null
                     && $saleDate->gte($syncRange['start']->startOfDay())
-                    && $saleDate->lt($refreshFrom);
+                    && $saleDate->lte($syncRange['end']->endOfDay());
             },
         ));
 

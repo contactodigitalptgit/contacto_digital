@@ -7,6 +7,7 @@ use App\Models\Client;
 use App\Models\ClientZoneSoftMachine;
 use App\Models\Event;
 use App\Models\EventReportImport;
+use App\Models\EventReportPaymentDocument;
 use App\Models\EventReportRow;
 use App\Models\User;
 use App\Models\ZoneSoftApplication;
@@ -683,6 +684,232 @@ class EventReportImportTest extends TestCase
         Http::assertSentCount(1);
         Http::assertNotSent(fn ($request) => str_contains($request->url(), '/sales/getInstancesFromDocument'));
         Http::assertNotSent(fn ($request) => str_contains($request->url(), '/documents/getDocumentsHeaders'));
+    }
+
+    public function test_incremental_complete_document_sync_replaces_changed_and_cancelled_documents(): void
+    {
+        config([
+            'event-reports.zonesoft.complete_documents' => true,
+            'event-reports.zonesoft.incremental_overlap_minutes' => 15,
+        ]);
+        CarbonImmutable::setTestNow(
+            CarbonImmutable::parse('2026-08-14 12:00:00', 'Europe/Lisbon'),
+        );
+
+        try {
+            [$admin, $client] = $this->makeAdminClientContext();
+            $application = $this->makeApplication();
+            $event = Event::create([
+                'client_id' => $client->id,
+                'title' => 'Evento incremental',
+                'event_date' => '2026-08-10 12:00:00',
+                'report_starts_at' => '2026-08-10 00:00:00',
+                'report_ends_at' => '2026-08-15 23:59:59',
+                'is_active' => true,
+            ]);
+            $machine = ClientZoneSoftMachine::create([
+                'client_id' => $client->id,
+                'event_id' => $event->id,
+                'zonesoft_application_id' => $application->id,
+                'zs_client_id' => 'INCREMENTAL-COMPLETE-CLIENT',
+                'license' => 'Z11JSMZIYP',
+                'store_id' => 1,
+                'store_label' => 'Loja incremental',
+                'permissions' => 'API + All document interfaces',
+                'is_active' => true,
+                'last_validated_at' => now(),
+            ]);
+            $previousImport = EventReportImport::create([
+                'event_id' => $event->id,
+                'uploaded_by_user_id' => $admin->id,
+                'import_strategy' => 'replace',
+                'original_filename' => 'zonesoft-api',
+                'stored_path' => 'zonesoft://sync',
+                'mime_type' => 'application/json',
+                'file_hash' => hash('sha256', 'verified-incremental-snapshot'),
+                'headers' => [
+                    'source' => 'zonesoft_api',
+                    'machines' => [['id' => $machine->id]],
+                ],
+                'summary' => [
+                    'source' => 'zonesoft_api',
+                    'machines_count' => 1,
+                    'failed_machines' => [],
+                    'machine_warnings' => [],
+                    'historical_data_complete' => true,
+                    'document_cursor_version' => 1,
+                    'last_full_document_sync_at' => '2026-08-14T11:00:00+01:00',
+                    'machine_document_cursors' => [
+                        (string) $machine->id => [
+                            'machine_id' => $machine->id,
+                            'zs_client_id' => $machine->zs_client_id,
+                            'store_id' => 1,
+                            'cursor' => '2026-08-14T11:45:00+01:00',
+                        ],
+                    ],
+                ],
+                'imported_rows_count' => 3,
+                'imported_at' => now()->subHour(),
+                'is_active' => true,
+                'status' => 'completed',
+            ]);
+
+            foreach ([
+                ['100', '5.0000', '700', 'Documento alterado'],
+                ['101', '3.0000', '701', 'Documento inalterado'],
+                ['103', '2.0000', '703', 'Documento cancelado'],
+            ] as $index => [$documentNumber, $total, $productCode, $description]) {
+                EventReportRow::create([
+                    'event_id' => $event->id,
+                    'event_report_import_id' => $previousImport->id,
+                    'source_sheet' => 'zonesoft:'.$machine->zs_client_id,
+                    'source_row_number' => $index + 1,
+                    'store_code' => '1',
+                    'store_name' => 'Loja incremental',
+                    'sale_date' => '2026-08-13',
+                    'sale_datetime' => '2026-08-13 20:00:00',
+                    'doc_type' => 'FS',
+                    'document_series' => 'A2026',
+                    'document_number' => $documentNumber,
+                    'value' => $total,
+                    'total' => $total,
+                    'discount' => '0.0000',
+                    'quantity' => '1.0000',
+                    'product_code' => $productCode,
+                    'description' => $description,
+                    'raw_row' => [
+                        'machine_id' => $machine->id,
+                        'machine_client_id' => $machine->zs_client_id,
+                        'id' => $index + 1,
+                    ],
+                ]);
+                EventReportPaymentDocument::create([
+                    'event_id' => $event->id,
+                    'event_report_import_id' => $previousImport->id,
+                    'machine_id' => $machine->id,
+                    'machine_client_id' => $machine->zs_client_id,
+                    'store_code' => '1',
+                    'store_name' => 'Loja incremental',
+                    'sale_date' => '2026-08-13',
+                    'sale_datetime' => '2026-08-13 20:00:00',
+                    'doc_type' => 'FS',
+                    'document_series' => 'A2026',
+                    'document_number' => $documentNumber,
+                    'paid' => true,
+                    'document_total' => $total,
+                    'payment_key' => 'header',
+                    'payment_code' => '3',
+                    'total' => $total,
+                    'is_unallocated' => false,
+                    'dedupe_key' => hash('sha256', 'previous-'.$documentNumber),
+                ]);
+            }
+
+            $expectFullRefresh = false;
+            Http::fake([
+                'https://api.zonesoft.org/v3/documents/getInstances' => function ($request) use (&$expectFullRefresh) {
+                    $this->assertSame(
+                        $expectFullRefresh
+                            ? "loja = 1 and data >= '2026-08-10' and data <= '2026-08-15'"
+                            : "loja = 1 and data >= '2026-08-10' and data <= '2026-08-15' and lastupdate >= '2026-08-14 11:30:00'",
+                        $request->data()['document']['condition'] ?? null,
+                    );
+
+                    $documents = $expectFullRefresh
+                        ? [
+                            $this->completeDocumentFixture(100, 7, 700, 'Documento atualizado'),
+                            $this->completeDocumentFixture(101, 3, 701, 'Documento inalterado'),
+                            $this->completeDocumentFixture(102, 4, 702, 'Documento novo'),
+                        ]
+                        : [
+                            $this->completeDocumentFixture(100, 7, 700, 'Documento atualizado'),
+                            $this->completeDocumentFixture(102, 4, 702, 'Documento novo'),
+                            [
+                                'loja' => 1,
+                                'numero' => 103,
+                                'doc' => 'FS',
+                                'serie' => 'A2026',
+                                'anulado' => 1,
+                            ],
+                        ];
+
+                    return Http::response([
+                        'Response' => [
+                            'StatusCode' => 200,
+                            'StatusMessage' => 'OK',
+                            'Content' => [
+                                'document' => $documents,
+                            ],
+                        ],
+                    ]);
+                },
+            ]);
+
+            $import = app(EventReportSyncService::class)->sync($event, $admin);
+
+            $this->assertSame('completed', $import->status);
+            $this->assertSame('incremental', $import->summary['document_fetch_mode'] ?? null);
+            $this->assertSame(3, $import->imported_rows_count);
+            $this->assertSame(1, $import->summary['reused_rows_count'] ?? null);
+            $this->assertSame(2, $import->summary['fetched_rows_count'] ?? null);
+            $this->assertSame('14.0000', $import->summary['sales_total'] ?? null);
+            $this->assertSame(
+                '2026-08-14T12:00:00+01:00',
+                $import->summary['machine_document_cursors'][(string) $machine->id]['cursor'] ?? null,
+            );
+            $this->assertSame(
+                '2026-08-14T11:30:00+01:00',
+                $import->summary['machine_document_cursors'][(string) $machine->id]['requested_after'] ?? null,
+            );
+            $this->assertSame(
+                '2026-08-14T11:00:00+01:00',
+                $import->summary['last_full_document_sync_at'] ?? null,
+            );
+            $this->assertDatabaseHas('event_report_rows', [
+                'event_report_import_id' => $import->id,
+                'document_number' => '100',
+                'description' => 'Documento atualizado',
+                'total' => 7,
+            ]);
+            $this->assertDatabaseHas('event_report_rows', [
+                'event_report_import_id' => $import->id,
+                'document_number' => '101',
+                'description' => 'Documento inalterado',
+                'total' => 3,
+            ]);
+            $this->assertDatabaseHas('event_report_rows', [
+                'event_report_import_id' => $import->id,
+                'document_number' => '102',
+                'description' => 'Documento novo',
+                'total' => 4,
+            ]);
+            $this->assertDatabaseMissing('event_report_rows', [
+                'event_report_import_id' => $import->id,
+                'document_number' => '103',
+            ]);
+            $this->assertSame(3, $import->paymentDocuments()->count());
+            $this->assertSame(14.0, (float) $import->paymentDocuments()->sum('total'));
+            $this->assertFalse($previousImport->fresh()->is_active);
+            Http::assertSentCount(1);
+
+            CarbonImmutable::setTestNow(
+                CarbonImmutable::parse('2026-08-15 13:01:00', 'Europe/Lisbon'),
+            );
+            $expectFullRefresh = true;
+
+            $fullImport = app(EventReportSyncService::class)->sync($event, $admin);
+
+            $this->assertSame('full', $fullImport->summary['document_fetch_mode'] ?? null);
+            $this->assertSame(0, $fullImport->summary['reused_rows_count'] ?? null);
+            $this->assertSame(3, $fullImport->summary['fetched_rows_count'] ?? null);
+            $this->assertSame('14.0000', $fullImport->summary['sales_total'] ?? null);
+            $this->assertSame(
+                '2026-08-15T13:01:00+01:00',
+                $fullImport->summary['last_full_document_sync_at'] ?? null,
+            );
+        } finally {
+            CarbonImmutable::setTestNow();
+        }
     }
 
     public function test_sync_uses_event_date_as_start_when_only_report_end_is_configured(): void
@@ -2047,6 +2274,42 @@ class EventReportImportTest extends TestCase
             'is_active' => true,
             'status' => 'completed',
         ]);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function completeDocumentFixture(
+        int $documentNumber,
+        float $total,
+        int $productCode,
+        string $description,
+    ): array {
+        return [
+            'loja' => 1,
+            'numero' => $documentNumber,
+            'doc' => 'FS',
+            'serie' => 'A2026',
+            'data' => '2026-08-13',
+            'datahora' => '2026-08-13 20:00:00',
+            'pagamento' => 3,
+            'total' => $total,
+            'pago' => 1,
+            'vendas' => [[
+                'id' => $documentNumber,
+                'loja' => 1,
+                'numero' => $documentNumber,
+                'doc' => 'FS',
+                'serie' => 'A2026',
+                'data' => '2026-08-13',
+                'datahora' => '2026-08-13 20:00:00',
+                'codigo' => $productCode,
+                'descricao' => $description,
+                'qtd' => 1,
+                'valor' => $total,
+                'total' => $total,
+            ]],
+        ];
     }
 
     /**

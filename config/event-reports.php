@@ -12,5 +12,7 @@ return [
     'zonesoft' => [
         'complete_documents' => (bool) env('EVENT_REPORT_COMPLETE_DOCUMENTS', true),
         'machine_sync_concurrency' => (int) env('EVENT_REPORT_MACHINE_SYNC_CONCURRENCY', 10),
+        'incremental_overlap_minutes' => (int) env('EVENT_REPORT_INCREMENTAL_OVERLAP_MINUTES', 15),
+        'incremental_full_refresh_hours' => (int) env('EVENT_REPORT_INCREMENTAL_FULL_REFRESH_HOURS', 24),
     ],
 ];
