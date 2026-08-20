@@ -232,9 +232,17 @@ body {
 .app-nav-link.is-active,
 .app-report-navigation-item.is-active {
     color: #ffffff;
-    background: #00419b;
     box-shadow: none;
     font-weight: 500;
+}
+
+.app-nav-link.is-active {
+    background: #00419b;
+}
+
+.app-report-navigation-item.is-active {
+    border-left: 2px solid #e7ff49;
+    background: #082742;
 }
 
 .app-nav-icon {
@@ -640,6 +648,11 @@ body {
 .contacto-zone-filter-row {
     overflow-x: auto;
     border-bottom: 1px solid rgba(237, 237, 237, 0.08);
+    scrollbar-width: none;
+}
+
+.contacto-zone-filter-row::-webkit-scrollbar {
+    display: none;
 }
 
 .contacto-zone-filter-row .contacto-label {
@@ -648,6 +661,7 @@ body {
 
 .contacto-zone-filter-row button {
     flex: none;
+    min-height: 2.5rem;
     border: 1px solid rgba(237, 237, 237, 0.1);
     border-radius: 999px;
     padding: 0.35rem 0.75rem;
@@ -666,6 +680,25 @@ body {
     color: #03182b;
     border-color: #e7ff49;
     background: #e7ff49;
+}
+
+.contacto-zone-filter-actions {
+    position: sticky;
+    right: 0;
+    display: flex;
+    margin-left: auto;
+    gap: 0.45rem;
+    padding-left: 1rem;
+    background: linear-gradient(90deg, rgba(6, 31, 54, 0), #061f36 1rem);
+}
+
+.contacto-zone-filter-actions button {
+    border-radius: 0.5rem;
+}
+
+.contacto-zone-filter-actions button:disabled {
+    cursor: not-allowed;
+    opacity: 0.35;
 }
 
 .contacto-zone-total {
@@ -711,14 +744,15 @@ body {
     background: #061f36;
 }
 
-.contacto-stream-bar > div {
+.contacto-stream-bar > div:first-child,
+.contacto-stream-meta {
     display: flex;
     min-width: 0;
     align-items: center;
     gap: 0.55rem;
 }
 
-.contacto-stream-bar > div > span {
+.contacto-stream-bar > div:first-child > span {
     width: 0.45rem;
     height: 0.45rem;
     flex: none;
@@ -726,12 +760,29 @@ body {
     background: #e7ff49;
 }
 
-.contacto-stream-bar > div > span.is-processing {
+.contacto-stream-bar > div:first-child > span.is-processing {
     animation: report-dashboard-pulse 1.4s ease-in-out infinite;
 }
 
-.contacto-stream-bar > div > span.is-failed {
+.contacto-stream-bar > div:first-child > span.is-failed {
     background: #d64545;
+}
+
+.contacto-stream-meta {
+    flex: none;
+}
+
+.contacto-stream-meta > span {
+    color: #8ea3b8;
+    font-size: 0.6875rem;
+}
+
+.contacto-stream-meta em {
+    border: 1px solid rgba(231, 255, 73, 0.55);
+    border-radius: 999px;
+    padding: 0.25rem 0.55rem;
+    color: #e7ff49;
+    font-weight: 600;
 }
 
 .contacto-stream-bar strong {
@@ -1003,7 +1054,7 @@ body {
     display: block;
     margin-top: 0.2rem;
     color: #8ea3b8;
-    font-size: 0.625rem;
+    font-size: 0.6875rem;
     font-weight: 400;
     letter-spacing: 0.12em;
     text-transform: uppercase;
@@ -1018,44 +1069,137 @@ body {
     font-size: 0.6875rem;
 }
 
+.contacto-panel-controls {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 0.6rem;
+}
+
+.contacto-panel-controls > span {
+    color: #8ea3b8;
+    font-size: 0.625rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+}
+
+.contacto-panel-controls > button {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    border: 1px solid rgba(231, 255, 73, 0.75);
+    border-radius: 999px;
+    min-height: 2.5rem;
+    padding: 0.35rem 0.7rem;
+    color: #e7ff49;
+    font-size: 0.6875rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+}
+
+.contacto-panel-controls > button:hover {
+    color: #03182b;
+    background: #e7ff49;
+}
+
+.contacto-panel-controls > button svg {
+    width: 0.6rem;
+    transition: transform 160ms ease;
+}
+
+.contacto-panel-controls > button svg.is-collapsed {
+    transform: rotate(180deg);
+}
+
 .contacto-hourly-chart {
     position: relative;
-    height: 16rem;
     margin-top: 1rem;
-    border-left: 1px solid rgba(237, 237, 237, 0.08);
-    border-bottom: 1px solid rgba(237, 237, 237, 0.08);
-    background-image:
-        linear-gradient(rgba(237, 237, 237, 0.05) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(237, 237, 237, 0.05) 1px, transparent 1px);
-    background-size: 25% 25%;
+    overflow-x: auto;
 }
 
 .contacto-hourly-chart svg {
+    display: block;
     width: 100%;
-    height: calc(100% - 1.8rem);
+    aspect-ratio: 760 / 250;
     overflow: visible;
 }
 
-.contacto-hourly-chart polyline {
-    fill: none;
-    stroke: #2f6fd0;
-    stroke-width: 1.15;
-    vector-effect: non-scaling-stroke;
-}
-
-.contacto-hourly-chart circle {
-    fill: #e7ff49;
-    stroke: #03182b;
-    stroke-width: 0.6;
-    vector-effect: non-scaling-stroke;
-}
-
-.contacto-hourly-axis {
+.contacto-hourly-legend {
     display: flex;
-    justify-content: space-between;
-    padding-top: 0.55rem;
+    align-items: center;
+    gap: 1rem;
     color: #8ea3b8;
     font-size: 0.625rem;
+    letter-spacing: 0.11em;
+    text-transform: uppercase;
+}
+
+.contacto-hourly-legend span {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+}
+
+.contacto-hourly-legend span::before {
+    width: 0.55rem;
+    height: 0.55rem;
+    content: '';
+}
+
+.contacto-hourly-legend .is-sales::before {
+    background: #2f6fd0;
+}
+
+.contacto-hourly-legend .is-transactions::before {
+    border-radius: 999px;
+    background: #ededed;
+}
+
+.contacto-hourly-grid line {
+    stroke: rgba(237, 237, 237, 0.08);
+    stroke-width: 1;
+    vector-effect: non-scaling-stroke;
+}
+
+.contacto-hourly-y-axis text,
+.contacto-hourly-x-axis text {
+    fill: #8ea3b8;
+    font-family: Inter, sans-serif;
+    font-size: 10px;
+}
+
+.contacto-hourly-bars rect {
+    fill: #2f6fd0;
+    transition: opacity 160ms ease, fill 160ms ease;
+}
+
+.contacto-hourly-bars rect:hover {
+    fill: #4c86e3;
+}
+
+.contacto-hourly-bars rect.is-peak {
+    fill: #e7ff49;
+}
+
+.contacto-hourly-transaction-line {
+    fill: none;
+    stroke: #ededed;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-width: 1.55;
+    vector-effect: non-scaling-stroke;
+}
+
+.contacto-hourly-transaction-points circle {
+    fill: #ededed;
+    stroke: #061f36;
+    stroke-width: 1.25;
+    vector-effect: non-scaling-stroke;
+}
+
+.contacto-hourly-transaction-points circle:hover {
+    fill: #e7ff49;
 }
 
 .contacto-zone-ranking {
@@ -1065,7 +1209,7 @@ body {
 .contacto-zone-ranking-head,
 .contacto-zone-ranking-row {
     display: grid;
-    grid-template-columns: minmax(9rem, 1.2fr) minmax(7rem, 0.8fr) 4rem 4.2rem;
+    grid-template-columns: minmax(8.5rem, 1.2fr) minmax(6.8rem, 0.8fr) minmax(4.8rem, 0.55fr) minmax(6.2rem, 0.65fr) 4.2rem;
     align-items: center;
     gap: 0.7rem;
 }
@@ -1093,7 +1237,7 @@ body {
     background: rgba(8, 39, 66, 0.72);
 }
 
-.contacto-zone-ranking-row > span:first-child {
+.contacto-zone-ranking-name {
     display: flex;
     min-width: 0;
     align-items: center;
@@ -1121,6 +1265,12 @@ body {
 .contacto-zone-ranking-row:first-of-type i,
 .contacto-zone-ranking-row b {
     background: #e7ff49;
+}
+
+.contacto-zone-ranking-metric::before,
+.contacto-zone-ranking-share::before {
+    display: none;
+    content: attr(data-label);
 }
 
 .contacto-zone-ranking-row strong {
@@ -1250,7 +1400,7 @@ body {
     }
 
     .contacto-analysis-grid {
-        grid-template-columns: minmax(0, 1.1fr) minmax(22rem, 0.9fr);
+        grid-template-columns: 1fr;
     }
 }
 
@@ -1347,6 +1497,7 @@ body {
 
     .contacto-dashboard-actions .contacto-header-button {
         flex: 1;
+        min-height: 2.75rem;
         font-size: 0.6875rem;
     }
 
@@ -1412,20 +1563,93 @@ body {
     }
 
     .contacto-zone-ranking {
-        overflow-x: auto;
+        overflow: hidden;
     }
 
-    .contacto-zone-ranking-head,
+    .contacto-zone-ranking-head {
+        display: none;
+    }
+
     .contacto-zone-ranking-row {
-        min-width: 37rem;
+        min-width: 0;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 0.85rem 1rem;
+        padding: 1rem 0;
     }
 
-    .contacto-hourly-chart {
-        height: 13rem;
+    .contacto-zone-ranking-name {
+        grid-column: 1 / -1;
+        font-size: 0.8125rem;
+    }
+
+    .contacto-zone-ranking-metric,
+    .contacto-zone-ranking-share {
+        display: grid;
+        gap: 0.2rem;
+        text-align: left;
+    }
+
+    .contacto-zone-ranking-metric::before,
+    .contacto-zone-ranking-share::before {
+        display: block;
+        color: #8ea3b8;
+        font-size: 0.625rem;
+        font-weight: 400;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+    }
+
+    .contacto-panel > header {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .contacto-panel-controls {
+        width: 100%;
+        flex-wrap: wrap;
+        justify-content: space-between;
+    }
+
+    .contacto-panel-controls > button,
+    .report-dashboard-summary-view-toggle button {
+        min-height: 2.75rem;
+    }
+
+    .contacto-panel-controls > span {
+        display: none;
+    }
+
+    .contacto-hourly-chart svg {
+        min-width: 38rem;
+    }
+
+    .contacto-hourly-chart::after {
+        position: sticky;
+        right: 0;
+        display: block;
+        width: max-content;
+        margin: 0.55rem 0 0 auto;
+        color: #8ea3b8;
+        font-size: 0.6875rem;
+        content: 'Deslize para ver todas as horas';
     }
 
     .contacto-payment-summary {
-        grid-template-columns: repeat(5, minmax(10rem, 1fr));
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        overflow: hidden;
+    }
+
+    .contacto-payment-summary > header {
+        grid-column: 1 / -1;
+    }
+
+    .contacto-payment-summary > header,
+    .contacto-payment-summary > button {
+        min-width: 0;
+    }
+
+    .contacto-payment-summary > button:nth-of-type(odd) {
+        border-left: 0;
     }
 }
 

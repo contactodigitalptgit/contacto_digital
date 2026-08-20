@@ -87,8 +87,10 @@ interface BarGroupItem {
     stores_count: number;
     members: string[];
     rows_count: number;
+    tickets_count: number;
     quantity_total: number;
     sales_total: number;
+    average_ticket: number;
 }
 
 interface ZoneDeviceGroup {
@@ -248,6 +250,8 @@ interface ZonePerformanceRow {
     label: string;
     totalSales: number;
     devicesCount: number;
+    ticketsCount: number;
+    averageTicket: number;
     averageSales: number;
     performanceWidth: string;
 }
@@ -282,6 +286,16 @@ interface ChartDailyPoint extends DailySale {
 interface ChartHourlyPoint extends HourlySale {
     x: number;
     y: number;
+}
+
+interface SummaryHourlyPoint extends HourlySale {
+    x: number;
+    bar_x: number;
+    bar_width: number;
+    sales_y: number;
+    sales_height: number;
+    transaction_y: number;
+    is_peak: boolean;
 }
 
 interface ChartOperationalItem {
@@ -357,6 +371,8 @@ const highlightScope = ref<HighlightScope>('zones');
 const highlightSearch = ref('');
 const highlightViewMode = ref<ViewMode>('list');
 const selectedHourlyDate = ref('all');
+const hourlyPanelExpanded = ref(true);
+const zonePanelExpanded = ref(true);
 const detailModal = ref<DetailModal>(null);
 const filtersOpen = ref(false);
 const eventSwitcherOpen = ref(false);
@@ -664,6 +680,8 @@ const zonePerformanceRows = computed<ZonePerformanceRow[]>(() =>
         label: group.label,
         totalSales: group.sales_total,
         devicesCount: group.stores_count,
+        ticketsCount: group.tickets_count,
+        averageTicket: group.average_ticket,
         averageSales: group.stores_count > 0 ? group.sales_total / group.stores_count : 0,
         performanceWidth: getRatioWidth(group.sales_total, maxZoneSales.value),
     })),
@@ -801,6 +819,99 @@ const hourlySeries = computed<HourlySale[]>(() => {
         };
     });
 });
+const summaryHourlySeries = computed<HourlySale[]>(() => {
+    const activeHours = hourlySeries.value
+        .filter((sale) => sale.sales_total > 0 || sale.tickets_count > 0)
+        .map((sale) => sale.hour)
+        .sort((left, right) => left - right);
+
+    if (activeHours.length === 0) {
+        return [];
+    }
+
+    let largestGap = -1;
+    let startHour = activeHours[0];
+
+    activeHours.forEach((hour, index) => {
+        const nextHour = index === activeHours.length - 1
+            ? activeHours[0] + 24
+            : activeHours[index + 1];
+        const gap = nextHour - hour;
+
+        if (gap > largestGap) {
+            largestGap = gap;
+            startHour = nextHour % 24;
+        }
+    });
+
+    const endHour = (startHour + 23 - (largestGap - 1)) % 24;
+    const operatingHourCount = ((endHour - startHour + 24) % 24) + 1;
+    const totalsByHour = new Map(hourlySeries.value.map((sale) => [sale.hour, sale]));
+
+    return Array.from({ length: operatingHourCount }, (_, index) => {
+        const hour = (startHour + index) % 24;
+
+        return totalsByHour.get(hour) as HourlySale;
+    });
+});
+const summaryHourlySalesMax = computed(() => niceChartAxisMax(
+    Math.max(...summaryHourlySeries.value.map((sale) => Math.max(0, sale.sales_total)), 0),
+));
+const summaryHourlyTicketsMax = computed(() => niceChartAxisMax(
+    Math.max(...summaryHourlySeries.value.map((sale) => Math.max(0, sale.tickets_count)), 0),
+));
+const summaryHourlyChartPoints = computed<SummaryHourlyPoint[]>(() => {
+    const chartWidth = 760;
+    const left = 52;
+    const right = 48;
+    const top = 16;
+    const bottom = 215;
+    const plotWidth = chartWidth - left - right;
+    const plotHeight = bottom - top;
+    const slotWidth = plotWidth / Math.max(summaryHourlySeries.value.length, 1);
+    const barWidth = Math.min(22, Math.max(5, slotWidth * 0.44));
+    const peakSales = Math.max(...summaryHourlySeries.value.map((sale) => sale.sales_total), 0);
+
+    return summaryHourlySeries.value.map((sale, index) => {
+        const x = left + (slotWidth * (index + 0.5));
+        const salesRatio = Math.max(0, sale.sales_total) / summaryHourlySalesMax.value;
+        const transactionRatio = Math.max(0, sale.tickets_count) / summaryHourlyTicketsMax.value;
+        const salesY = bottom - (salesRatio * plotHeight);
+
+        return {
+            ...sale,
+            x,
+            bar_x: x - (barWidth / 2),
+            bar_width: barWidth,
+            sales_y: salesY,
+            sales_height: bottom - salesY,
+            transaction_y: bottom - (transactionRatio * plotHeight),
+            is_peak: peakSales > 0 && sale.sales_total === peakSales,
+        };
+    });
+});
+const summaryHourlyTransactionPath = computed(() => buildSmoothChartPath(
+    summaryHourlyChartPoints.value.map((point) => ({ x: point.x, y: point.transaction_y })),
+));
+const summaryHourlySalesTicks = computed(() => Array.from({ length: 5 }, (_, index) => {
+    const ratio = index / 4;
+
+    return {
+        y: 215 - (ratio * 199),
+        value: summaryHourlySalesMax.value * ratio,
+    };
+}).reverse());
+const summaryHourlyTicketTicks = computed(() => Array.from({ length: 5 }, (_, index) => {
+    const ratio = index / 4;
+
+    return {
+        y: 215 - (ratio * 199),
+        value: Math.round(summaryHourlyTicketsMax.value * ratio),
+    };
+}).reverse());
+const summaryHourlyAxisLabels = computed(() => summaryHourlyChartPoints.value.filter(
+    (_, index, points) => index % 2 === 0 || index === points.length - 1,
+));
 const hourlyChartPoints = computed<ChartHourlyPoint[]>(() => {
     const max = Math.max(...hourlySeries.value.map((sale) => sale.sales_total), 1);
 
@@ -822,7 +933,9 @@ const hourlyPeakItems = computed(() => [...selectedHourlySales.value]
     .filter((sale) => sale.sales_total > 0)
     .sort((left, right) => right.sales_total - left.sales_total)
     .slice(0, 3));
-const primaryHourlyPeak = computed(() => hourlyPeakItems.value[0] ?? null);
+const primaryHourlyPeak = computed(() => [...hourlySeries.value]
+    .filter((sale) => sale.sales_total > 0)
+    .sort((left, right) => right.sales_total - left.sales_total)[0] ?? null);
 const hourlySelectedTotal = computed(() => selectedHourlySales.value.reduce(
     (total, sale) => total + sale.sales_total,
     0,
@@ -1234,6 +1347,56 @@ function formatDate(value: string | null) {
         : 'Sem data';
 }
 
+function niceChartAxisMax(value: number): number {
+    if (!Number.isFinite(value) || value <= 0) {
+        return 1;
+    }
+
+    const roughStep = value / 4;
+    const magnitude = 10 ** Math.floor(Math.log10(roughStep));
+    const step = Math.ceil(roughStep / magnitude) * magnitude;
+
+    return step * 4;
+}
+
+function buildSmoothChartPath(points: Array<{ x: number; y: number }>): string {
+    if (points.length === 0) {
+        return '';
+    }
+
+    if (points.length === 1) {
+        return `M ${points[0].x.toFixed(2)} ${points[0].y.toFixed(2)}`;
+    }
+
+    return points.reduce((path, point, index) => {
+        if (index === 0) {
+            return `M ${point.x.toFixed(2)} ${point.y.toFixed(2)}`;
+        }
+
+        const previous = points[index - 1];
+        const beforePrevious = points[index - 2] ?? previous;
+        const next = points[index + 1] ?? point;
+        const firstControlX = previous.x + ((point.x - beforePrevious.x) / 6);
+        const firstControlY = previous.y + ((point.y - beforePrevious.y) / 6);
+        const secondControlX = point.x - ((next.x - previous.x) / 6);
+        const secondControlY = point.y - ((next.y - previous.y) / 6);
+
+        return `${path} C ${firstControlX.toFixed(2)} ${firstControlY.toFixed(2)}, ${secondControlX.toFixed(2)} ${secondControlY.toFixed(2)}, ${point.x.toFixed(2)} ${point.y.toFixed(2)}`;
+    }, '');
+}
+
+function formatChartMoneyAxis(value: number): string {
+    if (Math.abs(value) >= 1000) {
+        return `${new Intl.NumberFormat('pt-PT', { maximumFractionDigits: 0 }).format(value / 1000)}k €`;
+    }
+
+    return `${formatNumber(value)} €`;
+}
+
+function formatChartCountAxis(value: number): string {
+    return new Intl.NumberFormat('pt-PT', { maximumFractionDigits: 0 }).format(value);
+}
+
 function formatMoney(value: number) {
     return new Intl.NumberFormat('pt-PT', { style: 'currency', currency: 'EUR' }).format(value);
 }
@@ -1639,7 +1802,7 @@ function getDifferenceClass(value: number | null) {
                                 <button
                                     type="button"
                                     :class="{ 'is-active': localFilters.bar_group === '' }"
-                                    @click="localFilters.bar_group !== '' ? applyBarGroupFilter(localFilters.bar_group) : undefined"
+                                    @click="applyBarGroupFilter(localFilters.bar_group)"
                                 >
                                     Todas
                                 </button>
@@ -1652,6 +1815,22 @@ function getDifferenceClass(value: number | null) {
                                 >
                                     {{ option.label }}
                                 </button>
+                                <div class="contacto-zone-filter-actions">
+                                    <button
+                                        v-if="sectionIsVisible('comparison')"
+                                        type="button"
+                                        @click="activeSection = 'comparison'"
+                                    >
+                                        Comparar
+                                    </button>
+                                    <button
+                                        type="button"
+                                        :disabled="activeFilterCount === 0"
+                                        @click="clearFilters"
+                                    >
+                                        Limpar
+                                    </button>
+                                </div>
                             </div>
                             <div class="contacto-zone-total">
                                 <span>{{ localFilters.bar_group || 'Todas as zonas' }}</span>
@@ -1671,7 +1850,10 @@ function getDifferenceClass(value: number | null) {
                                 <strong>{{ hasProcessingSync ? 'Sincronização em curso' : 'Dados atualizados' }}</strong>
                                 <small>Última atualização: {{ formatDateTime(props.summary.last_synced_at) }}</small>
                             </div>
-                            <em>{{ formatNumber(props.summary.filtered_rows) }} linhas analisadas</em>
+                            <div class="contacto-stream-meta">
+                                <span>{{ formatNumber(props.summary.filtered_rows) }} linhas analisadas</span>
+                                <em v-if="props.autoSync.enabled">Próxima: {{ autoSyncCountdown }}</em>
+                            </div>
                         </section>
 
                         <section class="contacto-kpi-mesh">
@@ -1742,64 +1924,136 @@ function getDifferenceClass(value: number | null) {
                                 <header>
                                     <div>
                                         <span class="contacto-label">Vendas por hora</span>
-                                        <strong>Faturação e transações</strong>
                                     </div>
-                                    <label v-if="hourlyDateOptions.length > 1">
-                                        <span class="sr-only">Dia do evento</span>
-                                        <select v-model="selectedHourlyDate">
-                                            <option value="all">Todos os dias</option>
-                                            <option v-for="option in hourlyDateOptions" :key="`summary-${option.date}`" :value="option.date">
-                                                {{ option.label }}
-                                            </option>
-                                        </select>
-                                    </label>
+                                    <div class="contacto-panel-controls">
+                                        <span>Faturação e transações</span>
+                                        <label v-if="hourlyDateOptions.length > 1">
+                                            <span class="sr-only">Dia do evento</span>
+                                            <select v-model="selectedHourlyDate">
+                                                <option value="all">Todos os dias</option>
+                                                <option v-for="option in hourlyDateOptions" :key="`summary-${option.date}`" :value="option.date">
+                                                    {{ option.label }}
+                                                </option>
+                                            </select>
+                                        </label>
+                                        <button type="button" @click="hourlyPanelExpanded = !hourlyPanelExpanded">
+                                            {{ hourlyPanelExpanded ? 'Ocultar' : 'Mostrar' }}
+                                            <svg viewBox="0 0 12 8" fill="none" aria-hidden="true" :class="{ 'is-collapsed': !hourlyPanelExpanded }">
+                                                <path d="m1 1 5 5 5-5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+                                            </svg>
+                                        </button>
+                                    </div>
                                 </header>
-                                <div v-if="props.hourlySales.length" class="contacto-hourly-chart" role="img" :aria-label="hourlyChartAriaLabel">
-                                    <svg viewBox="0 0 100 100" preserveAspectRatio="none">
-                                        <defs>
-                                            <linearGradient id="contacto-hourly-area" x1="0" y1="0" x2="0" y2="1">
-                                                <stop offset="0%" stop-color="#00419b" stop-opacity="0.46" />
-                                                <stop offset="100%" stop-color="#00419b" stop-opacity="0.03" />
-                                            </linearGradient>
-                                        </defs>
-                                        <polygon :points="hourlyChartAreaPoints" fill="url(#contacto-hourly-area)" />
-                                        <polyline :points="hourlyChartLinePoints" />
-                                        <circle
-                                            v-if="primaryHourlyPeak"
-                                            :cx="hourlyChartPoints.find((point) => point.hour === primaryHourlyPeak?.hour)?.x"
-                                            :cy="hourlyChartPoints.find((point) => point.hour === primaryHourlyPeak?.hour)?.y"
-                                            r="1.5"
-                                        />
-                                    </svg>
-                                    <div class="contacto-hourly-axis" aria-hidden="true">
-                                        <span v-for="hour in hourlyAxisLabels" :key="`summary-hour-${hour.hour}`">{{ hour.hour_label }}</span>
+                                <div
+                                    v-if="props.hourlySales.length && hourlyPanelExpanded"
+                                    class="contacto-hourly-chart"
+                                    role="img"
+                                    :aria-label="hourlyChartAriaLabel"
+                                >
+                                    <div class="contacto-hourly-legend" aria-hidden="true">
+                                        <span class="is-sales">Faturação (€)</span>
+                                        <span class="is-transactions">Transações</span>
                                     </div>
+                                    <svg viewBox="0 0 760 250" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
+                                        <g class="contacto-hourly-grid">
+                                            <line
+                                                v-for="tick in summaryHourlySalesTicks"
+                                                :key="`sales-grid-${tick.y}`"
+                                                x1="52"
+                                                x2="712"
+                                                :y1="tick.y"
+                                                :y2="tick.y"
+                                            />
+                                        </g>
+                                        <g class="contacto-hourly-y-axis is-sales-axis">
+                                            <text
+                                                v-for="tick in summaryHourlySalesTicks"
+                                                :key="`sales-tick-${tick.y}`"
+                                                x="45"
+                                                :y="tick.y + 3"
+                                                text-anchor="end"
+                                            >{{ formatChartMoneyAxis(tick.value) }}</text>
+                                        </g>
+                                        <g class="contacto-hourly-y-axis is-ticket-axis">
+                                            <text
+                                                v-for="tick in summaryHourlyTicketTicks"
+                                                :key="`ticket-tick-${tick.y}`"
+                                                x="719"
+                                                :y="tick.y + 3"
+                                            >{{ formatChartCountAxis(tick.value) }}</text>
+                                        </g>
+                                        <g class="contacto-hourly-bars">
+                                            <rect
+                                                v-for="point in summaryHourlyChartPoints"
+                                                :key="`summary-bar-${point.hour}`"
+                                                :class="{ 'is-peak': point.is_peak }"
+                                                :x="point.bar_x"
+                                                :y="point.sales_y"
+                                                :width="point.bar_width"
+                                                :height="Math.max(point.sales_height, 1)"
+                                                rx="2"
+                                            >
+                                                <title>{{ point.hour_label }} · {{ formatMoney(point.sales_total) }} · {{ formatNumber(point.tickets_count) }} transações</title>
+                                            </rect>
+                                        </g>
+                                        <path :d="summaryHourlyTransactionPath" class="contacto-hourly-transaction-line" />
+                                        <g class="contacto-hourly-transaction-points">
+                                            <circle
+                                                v-for="point in summaryHourlyChartPoints"
+                                                :key="`summary-transaction-${point.hour}`"
+                                                :cx="point.x"
+                                                :cy="point.transaction_y"
+                                                r="3"
+                                            >
+                                                <title>{{ point.hour_label }} · {{ formatNumber(point.tickets_count) }} transações</title>
+                                            </circle>
+                                        </g>
+                                        <g class="contacto-hourly-x-axis">
+                                            <text
+                                                v-for="point in summaryHourlyAxisLabels"
+                                                :key="`summary-hour-${point.hour}`"
+                                                :x="point.x"
+                                                y="239"
+                                                text-anchor="middle"
+                                            >{{ point.hour_label }}</text>
+                                        </g>
+                                    </svg>
                                 </div>
-                                <p v-else class="contacto-empty">Sem dados horários disponíveis.</p>
+                                <p v-else-if="!props.hourlySales.length" class="contacto-empty">Sem dados horários disponíveis.</p>
                             </article>
 
                             <article class="contacto-panel contacto-zone-ranking">
                                 <header>
                                     <div>
                                         <span class="contacto-label">Desempenho por zona</span>
-                                        <strong>Clique para filtrar</strong>
+                                    </div>
+                                    <div class="contacto-panel-controls">
+                                        <span>Clique para filtrar</span>
+                                        <button type="button" @click="zonePanelExpanded = !zonePanelExpanded">
+                                            {{ zonePanelExpanded ? 'Ocultar' : 'Mostrar' }}
+                                            <svg viewBox="0 0 12 8" fill="none" aria-hidden="true" :class="{ 'is-collapsed': !zonePanelExpanded }">
+                                                <path d="m1 1 5 5 5-5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+                                            </svg>
+                                        </button>
                                     </div>
                                 </header>
-                                <div class="contacto-zone-ranking-head" aria-hidden="true">
-                                    <span>Zona</span><span>Faturação</span><span>Devices</span><span>% total</span>
+                                <div v-if="zonePanelExpanded" class="contacto-zone-ranking-head" aria-hidden="true">
+                                    <span>Zona</span><span>Faturação</span><span>Transações</span><span>Ticket médio</span><span>% total</span>
                                 </div>
                                 <button
                                     v-for="(zone, index) in leadingZoneRows"
+                                    v-show="zonePanelExpanded"
                                     :key="`leader-${zone.label}`"
                                     type="button"
                                     class="contacto-zone-ranking-row"
                                     :class="{ 'is-active': localFilters.bar_group === getZoneFilterValue(zone.label) }"
                                     @click="applyBarGroupFilter(getZoneFilterValue(zone.label))"
                                 >
-                                    <span><em>{{ index + 1 }}</em><i />{{ zone.label }}</span>
-                                    <strong>{{ formatMoney(zone.totalSales) }}</strong>
-                                    <span>{{ formatNumber(zone.devicesCount) }}</span>
-                                    <b>{{ props.summary.total_sales > 0 ? `${((zone.totalSales / props.summary.total_sales) * 100).toFixed(1).replace('.', ',')}%` : '0,0%' }}</b>
+                                    <span class="contacto-zone-ranking-name"><em>{{ index + 1 }}</em><i />{{ zone.label }}</span>
+                                    <strong class="contacto-zone-ranking-metric" data-label="Faturação">{{ formatMoney(zone.totalSales) }}</strong>
+                                    <span class="contacto-zone-ranking-metric" data-label="Transações">{{ formatNumber(zone.ticketsCount) }}</span>
+                                    <span class="contacto-zone-ranking-metric" data-label="Ticket médio">{{ formatMoney(zone.averageTicket) }}</span>
+                                    <b class="contacto-zone-ranking-share" data-label="% total">{{ props.summary.total_sales > 0 ? `${((zone.totalSales / props.summary.total_sales) * 100).toFixed(1).replace('.', ',')}%` : '0,0%' }}</b>
                                 </button>
                             </article>
                         </section>
@@ -1878,7 +2132,7 @@ function getDifferenceClass(value: number | null) {
                             </section>
 
                             <section
-                                v-if="isBlockVisible('chart_daily')"
+                                v-if="isBlockVisible('chart_daily') && props.dailySales.length > 1"
                                 class="dash-card report-dashboard-analytics-card report-dashboard-analytics-line-card"
                                 :style="blockStyle('chart_daily')"
                             >

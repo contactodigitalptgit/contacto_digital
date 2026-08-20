@@ -494,10 +494,13 @@ class EventDashboardController extends Controller
      */
     private function buildBarGroups(Builder $query): array
     {
+        $ticketExpression = $this->ticketSqlExpression($query);
+
         /** @var Collection<int, EventReportRow> $stores */
         $stores = $query
             ->select('store_name', 'store_code')
             ->selectRaw('COUNT(*) as rows_count')
+            ->selectRaw("COUNT(DISTINCT {$ticketExpression}) as tickets_count")
             ->selectRaw('COALESCE(SUM(quantity), 0) as quantity_total')
             ->selectRaw('COALESCE(SUM(total), 0) as sales_total')
             ->groupBy('store_name', 'store_code')
@@ -513,14 +516,20 @@ class EventDashboardController extends Controller
                     ->sort()
                     ->values()
                     ->all();
+                $ticketsCount = (int) $groupStores->sum('tickets_count');
+                $salesTotal = round((float) $groupStores->sum('sales_total'), 4);
 
                 return [
                     'label' => $label,
                     'stores_count' => count($members),
                     'members' => $members,
                     'rows_count' => (int) $groupStores->sum('rows_count'),
+                    'tickets_count' => $ticketsCount,
                     'quantity_total' => round((float) $groupStores->sum('quantity_total'), 4),
-                    'sales_total' => round((float) $groupStores->sum('sales_total'), 4),
+                    'sales_total' => $salesTotal,
+                    'average_ticket' => $ticketsCount > 0
+                        ? round($salesTotal / $ticketsCount, 4)
+                        : 0.0,
                 ];
             })
             ->sortByDesc('sales_total')

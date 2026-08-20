@@ -111,7 +111,9 @@ class EventDashboardTest extends TestCase
                 ))
                 ->where('barGroups', fn ($groups): bool => collect($groups)->contains(
                     fn (array $group): bool => $group['label'] === 'Bar 1'
-                        && empty(array_diff($expectedMembers, $group['members'])),
+                        && empty(array_diff($expectedMembers, $group['members']))
+                        && $group['tickets_count'] === $expectedCount
+                        && (float) $group['average_ticket'] === 4.125,
                 )))
             ->reload(fn (AssertableInertia $details) => $details
                 ->where('pagination.total', $expectedCount)
