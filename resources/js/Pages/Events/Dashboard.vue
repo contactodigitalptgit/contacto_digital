@@ -23,6 +23,8 @@ interface EventMeta {
     title: string;
     description: string | null;
     event_date: string;
+    report_starts_at: string | null;
+    report_ends_at: string | null;
     client_name: string;
     client_business_name: string | null;
     processing_imports_count: number;
@@ -1004,14 +1006,29 @@ const summaryTopProducts = computed(() => [...props.topProducts]
     .sort((left, right) => right.sales_total - left.sales_total)
     .slice(0, 5));
 const eventPeriodLabel = computed(() => {
-    const firstDay = props.dailySales[0]?.label || formatDate(props.event.event_date);
-    const lastDay = props.dailySales[props.dailySales.length - 1]?.label;
+    const firstDate = props.event.report_starts_at || props.dailySales[0]?.date || props.event.event_date;
+    const lastDate = props.event.report_ends_at || props.dailySales[props.dailySales.length - 1]?.date;
+    const firstDay = formatPeriodDate(firstDate);
+    const lastDay = lastDate ? formatPeriodDate(lastDate) : null;
 
     return lastDay && lastDay !== firstDay ? `${firstDay} - ${lastDay}` : firstDay;
 });
 const eventStatusLabel = computed(() => hasProcessingSync.value || props.autoSync.enabled
     ? 'Em curso'
     : 'Concluído');
+const syncMachinesTotal = computed(() => props.syncStatus.machines_total > 0
+    ? props.syncStatus.machines_total
+    : props.summary.machines_count);
+const syncMachinesProcessed = computed(() => (hasProcessingSync.value || props.syncStatus.is_stale) && props.syncStatus.machines_total > 0
+    ? Math.min(props.syncStatus.machines_processed, syncMachinesTotal.value)
+    : props.summary.machines_count);
+const syncMachinesPending = computed(() => Math.max(0, syncMachinesTotal.value - syncMachinesProcessed.value));
+const syncCompletionPercentage = computed(() => syncMachinesTotal.value > 0
+    ? Math.min(100, Math.max(0, (syncMachinesProcessed.value / syncMachinesTotal.value) * 100))
+    : 0);
+const filteredCoveragePercentage = computed(() => props.summary.total_rows > 0
+    ? Math.min(100, Math.max(0, (props.summary.filtered_rows / props.summary.total_rows) * 100))
+    : 0);
 const hourlyChartAriaLabel = computed(() => hourlyPeakItems.value
     .map((sale) => `${sale.label}, ${sale.hour_label}: ${formatMoney(sale.sales_total)}`)
     .join(', '));
@@ -1237,6 +1254,16 @@ const closeEventSwitcher = () => {
     eventSwitcherOpen.value = false;
 };
 
+const printDashboard = () => {
+    if (typeof window === 'undefined') {
+        return;
+    }
+
+    eventSwitcherOpen.value = false;
+    filtersOpen.value = false;
+    window.print();
+};
+
 const openDetailModal = (modal: Exclude<DetailModal, null>) => {
     detailModal.value = modal;
 };
@@ -1403,6 +1430,14 @@ function formatDate(value: string | null) {
     return value
         ? new Intl.DateTimeFormat('pt-PT', { dateStyle: 'long' }).format(new Date(value))
         : 'Sem data';
+}
+
+function formatPeriodDate(value: string) {
+    return new Intl.DateTimeFormat('pt-PT', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+    }).format(new Date(value));
 }
 
 function niceChartAxisMax(value: number): number {
@@ -1640,39 +1675,18 @@ function getDifferenceClass(value: number | null) {
                 </div>
 
                 <div class="contacto-dashboard-actions">
-                    <button
-                        v-if="props.previewMode"
-                        type="button"
-                        class="contacto-header-button is-primary"
-                        :class="{ 'cursor-not-allowed opacity-70': isSyncingReport || hasProcessingSync }"
-                        :disabled="isSyncingReport || hasProcessingSync"
-                        @click="submitReportSync"
-                    >
-                        {{
-                            hasProcessingSync
-                                ? 'Sincronização em andamento'
-                                : isSyncingReport
-                                  ? 'A sincronizar...'
-                                  : 'Sincronizar agora'
-                        }}
-                    </button>
-
-                    <div v-if="props.autoSync.enabled || hasProcessingSync" class="report-dashboard-sync-countdown report-dashboard-header-sync">
-                        <span>{{ hasProcessingSync ? 'Sincronização em curso' : 'Próxima sincronização' }}</span>
-                        <strong>{{ autoSyncCountdown }}</strong>
-                    </div>
-
-                    <button
-                        type="button"
-                        class="contacto-header-button"
-                        :class="{ 'is-active': filtersOpen || activeFilterCount > 0 }"
-                        @click="filtersOpen = !filtersOpen"
-                    >
+                    <span class="contacto-header-period">
                         <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                            <path d="M4 5h16l-6 7v5l-4 2v-7L4 5Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" />
+                            <path d="M7 3v3m10-3v3M4 9h16M5 5h14a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1Z" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" />
                         </svg>
-                        Filtrar bares
-                        <span v-if="activeFilterCount > 0">{{ activeFilterCount }}</span>
+                        {{ eventPeriodLabel }}
+                    </span>
+
+                    <button type="button" class="contacto-header-button" @click="printDashboard">
+                        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                            <path d="M12 3v11m0 0 4-4m-4 4-4-4M5 14v5h14v-5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
+                        </svg>
+                        Exportar relatório
                     </button>
 
                     <a
@@ -1682,9 +1696,9 @@ function getDifferenceClass(value: number | null) {
                         class="contacto-header-button"
                     >
                         <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                            <path d="m21 3-8.2 18-2.4-7.4L3 11.2 21 3Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" />
+                            <path d="M12 3 4.5 6v5.2c0 4.5 3 8.6 7.5 9.8 4.5-1.2 7.5-5.3 7.5-9.8V6L12 3Zm-3 9 2 2 4-4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" />
                         </svg>
-                        Ajuda
+                        Equipa Contacto Digital
                     </a>
                 </div>
             </div>
@@ -1881,8 +1895,8 @@ function getDifferenceClass(value: number | null) {
                             </div>
                             <div class="contacto-zone-period">
                                 <span class="contacto-label">Período</span>
-                                <strong>{{ props.dailySales[0]?.label || formatDate(props.event.event_date) }}</strong>
-                                <span v-if="props.dailySales.length > 1">até {{ props.dailySales[props.dailySales.length - 1]?.label }}</span>
+                                <strong>{{ eventPeriodLabel }}</strong>
+                                <span class="contacto-zone-hours">Todas as horas do evento</span>
                                 <button type="button" @click="filtersOpen = true">Ajustar filtros</button>
                             </div>
                         </section>
@@ -1896,6 +1910,14 @@ function getDifferenceClass(value: number | null) {
                             <div class="contacto-stream-meta">
                                 <span>{{ formatNumber(props.summary.filtered_rows) }} linhas analisadas</span>
                                 <em v-if="props.autoSync.enabled">Próxima: {{ autoSyncCountdown }}</em>
+                                <button
+                                    v-if="props.previewMode"
+                                    type="button"
+                                    :disabled="isSyncingReport || hasProcessingSync"
+                                    @click="submitReportSync"
+                                >
+                                    {{ hasProcessingSync ? 'A sincronizar' : isSyncingReport ? 'A iniciar' : 'Sincronizar agora' }}
+                                </button>
                             </div>
                         </section>
 
@@ -2101,18 +2123,6 @@ function getDifferenceClass(value: number | null) {
                             </article>
                         </section>
 
-                        <section v-if="isBlockVisible('payments')" class="contacto-payment-summary">
-                            <header>
-                                <span>{{ blockHelper('payments', 'Formas de pagamento') }}</span>
-                                <strong>{{ blockLabel('payments', 'Pagamentos das vendas') }}</strong>
-                            </header>
-                            <button v-for="card in paymentCards" :key="`compact-${card.key}`" type="button" @click="openDetailModal('payments')">
-                                <span>{{ card.label }}</span>
-                                <strong>{{ card.value }}</strong>
-                                <small>{{ card.helper }}</small>
-                            </button>
-                        </section>
-
                         <section class="contacto-event-bests" aria-labelledby="contacto-event-bests-title">
                             <header>
                                 <span class="contacto-label" id="contacto-event-bests-title">Os melhores do evento</span>
@@ -2158,7 +2168,7 @@ function getDifferenceClass(value: number | null) {
                             </div>
                         </section>
 
-                        <section class="contacto-summary-details">
+                        <section class="contacto-summary-insights">
                             <article class="contacto-panel contacto-top-products-summary">
                                 <header>
                                     <span class="contacto-label">Produtos mais vendidos</span>
@@ -2178,6 +2188,92 @@ function getDifferenceClass(value: number | null) {
                                 <p v-else class="contacto-empty">Sem produtos sincronizados.</p>
                             </article>
 
+                            <article v-if="isBlockVisible('payments')" class="contacto-panel contacto-payment-distribution">
+                                <header>
+                                    <span class="contacto-label">{{ blockHelper('payments', 'Distribuição das vendas') }}</span>
+                                    <small>Por método</small>
+                                </header>
+                                <div v-if="chartPaymentItems.length" class="contacto-payment-distribution-layout">
+                                    <button
+                                        type="button"
+                                        class="contacto-payment-donut"
+                                        :style="chartPaymentDonutStyle"
+                                        :aria-label="chartPaymentAriaLabel"
+                                        @click="openDetailModal('payments')"
+                                    >
+                                        <span>
+                                            <small>Total</small>
+                                            <strong>{{ formatMoney(chartPaymentTotal) }}</strong>
+                                        </span>
+                                    </button>
+                                    <div class="contacto-payment-legend">
+                                        <article v-for="payment in chartPaymentItems" :key="`summary-payment-${payment.key}`">
+                                            <i :style="{ backgroundColor: payment.color }" />
+                                            <span><strong>{{ payment.label }}</strong><small>{{ formatMoney(payment.value) }}</small></span>
+                                            <b>{{ payment.percentage.toFixed(1).replace('.', ',') }}%</b>
+                                        </article>
+                                    </div>
+                                </div>
+                                <p v-else class="contacto-empty">Sem pagamentos sincronizados.</p>
+                            </article>
+                        </section>
+
+                        <section class="contacto-summary-operations">
+                            <article class="contacto-panel contacto-sync-feed">
+                                <header>
+                                    <span class="contacto-label">Atividade da sincronização</span>
+                                    <small>Dados reais</small>
+                                </header>
+                                <div>
+                                    <article>
+                                        <i :class="{ 'is-failed': props.syncStatus.is_stale }" />
+                                        <span>
+                                            <strong>Última sincronização válida</strong>
+                                            <small>{{ formatDateTime(props.syncStatus.last_success_at || props.summary.last_synced_at) }}</small>
+                                        </span>
+                                    </article>
+                                    <article v-if="props.syncStatus.latest_attempt_at">
+                                        <i :class="{ 'is-processing': hasProcessingSync, 'is-failed': props.syncStatus.is_stale }" />
+                                        <span>
+                                            <strong>{{ hasProcessingSync ? 'Tentativa em processamento' : 'Última tentativa registada' }}</strong>
+                                            <small>{{ formatDateTime(props.syncStatus.latest_attempt_at) }}</small>
+                                        </span>
+                                    </article>
+                                    <article>
+                                        <i />
+                                        <span>
+                                            <strong>{{ autoSyncStatusLabel }}</strong>
+                                            <small v-if="props.autoSync.enabled">Próxima verificação em {{ autoSyncCountdown }}</small>
+                                            <small v-else>Sem nova sincronização agendada</small>
+                                        </span>
+                                    </article>
+                                </div>
+                            </article>
+
+                            <article class="contacto-panel contacto-operational-alerts" :class="{ 'is-warning': props.syncStatus.is_stale }">
+                                <header>
+                                    <span class="contacto-label">Alertas operacionais</span>
+                                    <small>Sincronização</small>
+                                </header>
+                                <div>
+                                    <i :class="{ 'is-processing': hasProcessingSync, 'is-failed': props.syncStatus.is_stale }" />
+                                    <span>
+                                        <strong v-if="props.syncStatus.is_stale">A última tentativa não foi concluída</strong>
+                                        <strong v-else-if="hasProcessingSync">A sincronização está em curso</strong>
+                                        <strong v-else>Nenhum alerta crítico</strong>
+                                        <small v-if="props.syncStatus.message">{{ props.syncStatus.message }}</small>
+                                        <small v-else>Os valores apresentados pertencem à última importação válida.</small>
+                                    </span>
+                                </div>
+                                <footer>
+                                    <span>{{ formatNumber(props.summary.filtered_rows) }} linhas visíveis</span>
+                                    <strong>{{ filteredCoveragePercentage.toFixed(0) }}% da seleção</strong>
+                                </footer>
+                            </article>
+                        </section>
+
+                        <section class="contacto-summary-details">
+
                             <article class="contacto-panel contacto-event-sheet">
                                 <header>
                                     <span class="contacto-label">Ficha do evento</span>
@@ -2191,6 +2287,31 @@ function getDifferenceClass(value: number | null) {
                                     <div><dt>Zonas</dt><dd>{{ formatNumber(props.summary.bar_groups_count) }}</dd></div>
                                     <div><dt>Estado</dt><dd>{{ eventStatusLabel }}</dd></div>
                                 </dl>
+                            </article>
+
+                            <article class="contacto-panel contacto-operational-state">
+                                <header>
+                                    <span class="contacto-label">Estado operacional</span>
+                                    <small>Frota sincronizada</small>
+                                </header>
+                                <div>
+                                    <article>
+                                        <span>Sincronizadas</span>
+                                        <strong>{{ formatNumber(props.summary.machines_count) }}</strong>
+                                    </article>
+                                    <article>
+                                        <span>Processadas</span>
+                                        <strong>{{ formatNumber(syncMachinesProcessed) }}</strong>
+                                    </article>
+                                    <article>
+                                        <span>Pendentes</span>
+                                        <strong>{{ formatNumber(syncMachinesPending) }}</strong>
+                                    </article>
+                                </div>
+                                <footer>
+                                    <span><i :style="{ width: `${syncCompletionPercentage}%` }" /></span>
+                                    <small>{{ syncCompletionPercentage.toFixed(0) }}% das máquinas da última tentativa processadas</small>
+                                </footer>
                             </article>
                         </section>
                     </div>

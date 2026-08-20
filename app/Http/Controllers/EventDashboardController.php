@@ -148,6 +148,8 @@ class EventDashboardController extends Controller
                 'title' => $event->title,
                 'description' => $event->description,
                 'event_date' => $event->event_date->toISOString(),
+                'report_starts_at' => $event->report_starts_at?->toISOString(),
+                'report_ends_at' => $event->report_ends_at?->toISOString(),
                 'client_name' => $event->client->name,
                 'client_business_name' => $event->client->business_name,
                 'processing_imports_count' => (int) $event->processing_report_imports_count,

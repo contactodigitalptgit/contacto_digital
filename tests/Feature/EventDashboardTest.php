@@ -256,6 +256,8 @@ class EventDashboardTest extends TestCase
             ->where('integration.machines_count', 2)
             ->where('event.show_zt_card', true)
             ->where('event.processing_imports_count', 0)
+            ->where('event.report_starts_at', $event->report_starts_at->toISOString())
+            ->where('event.report_ends_at', $event->report_ends_at->toISOString())
             ->where('summary.total_rows', 6)
             ->where('summary.processing_imports_count', 0)
             ->where('summary.tickets_count', 6)
