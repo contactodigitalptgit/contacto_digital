@@ -54,6 +54,16 @@ Route::middleware(['auth', 'admin'])->group(function () {
 Route::middleware(['auth', 'active.client'])->group(function () {
     Route::get('/events/{event}/dashboard', [EventDashboardController::class, 'show'])
         ->name('events.dashboard');
+    Route::get('/events/{event}/produtos', [EventDashboardController::class, 'products'])
+        ->name('events.products');
+    Route::get('/events/{event}/pagamentos', [EventDashboardController::class, 'payments'])
+        ->name('events.payments');
+    Route::get('/events/{event}/zonas', [EventDashboardController::class, 'zones'])
+        ->name('events.zones');
+    Route::get('/events/{event}/performance', [EventDashboardController::class, 'performance'])
+        ->name('events.performance');
+    Route::get('/events/{event}/comparar', [EventDashboardController::class, 'comparison'])
+        ->name('events.comparison');
 });
 
 Route::middleware(['auth', 'active.client', 'admin'])
@@ -68,6 +78,16 @@ Route::middleware(['auth', 'active.client', 'admin'])
             ->name('events.toggle-status');
         Route::get('events/{event}/dashboard', [EventDashboardController::class, 'preview'])
             ->name('events.dashboard');
+        Route::get('events/{event}/produtos', [EventDashboardController::class, 'previewProducts'])
+            ->name('events.products');
+        Route::get('events/{event}/pagamentos', [EventDashboardController::class, 'previewPayments'])
+            ->name('events.payments');
+        Route::get('events/{event}/zonas', [EventDashboardController::class, 'previewZones'])
+            ->name('events.zones');
+        Route::get('events/{event}/performance', [EventDashboardController::class, 'previewPerformance'])
+            ->name('events.performance');
+        Route::get('events/{event}/comparar', [EventDashboardController::class, 'previewComparison'])
+            ->name('events.comparison');
         Route::get('events/{event}/dashboard-configuration/edit', [EventDashboardConfigurationController::class, 'edit'])
             ->name('events.dashboard-configuration.edit');
         Route::patch('events/{event}/dashboard-configuration', [EventDashboardConfigurationController::class, 'update'])

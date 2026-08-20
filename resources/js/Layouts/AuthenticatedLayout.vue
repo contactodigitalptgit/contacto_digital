@@ -52,7 +52,20 @@ const primaryNavigation = computed<NavItem[]>(() => {
 
 const mobileNavigation = computed<NavItem[]>(() => primaryNavigation.value);
 
-const isEventDashboard = () => route().current('events.dashboard') || route().current('admin.events.dashboard');
+const isEventDashboard = () => [
+    'events.dashboard',
+    'events.products',
+    'events.payments',
+    'events.zones',
+    'events.performance',
+    'events.comparison',
+    'admin.events.dashboard',
+    'admin.events.products',
+    'admin.events.payments',
+    'admin.events.zones',
+    'admin.events.performance',
+    'admin.events.comparison',
+].some((name) => route().current(name));
 
 const isActive = (item: NavItem) => {
     if (isEventDashboard()) {

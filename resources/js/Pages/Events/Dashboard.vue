@@ -46,6 +46,7 @@ interface EventSummary {
     filtered_rows: number;
     bar_groups_count: number;
     total_sales: number;
+    event_total_sales: number;
     total_value: number;
     total_discount: number;
     total_quantity: number;
@@ -83,6 +84,9 @@ interface BreakdownItem {
     rows_count: number;
     quantity_total: number;
     sales_total: number;
+    offered_quantity?: number;
+    sold_quantity?: number;
+    category?: string;
 }
 
 interface BarGroupItem {
@@ -226,6 +230,8 @@ interface DashboardFilters {
     product: string;
     date_from: string;
     date_to: string;
+    hour_from: string;
+    hour_to: string;
     total_min: string;
     total_max: string;
 }
@@ -336,6 +342,7 @@ const props = withDefaults(defineProps<{
     dashboardConfiguration: DashboardConfiguration;
     dashboardEditor?: DashboardEditorMeta | null;
     previewMode?: boolean;
+    initialSection?: DashboardSection;
     backUrl: string;
     backLabel: string;
 }>(), {
@@ -367,9 +374,10 @@ const props = withDefaults(defineProps<{
     zoneDevices: () => [],
     filterOptions: () => ({ barGroups: [], stores: [], products: [] }),
     dashboardEditor: null,
+    initialSection: 'summary',
 });
 
-const activeSection = ref<DashboardSection>('summary');
+const activeSection = ref<DashboardSection>(props.initialSection);
 const selectedProductView = ref('total');
 const productSearch = ref('');
 const productSort = ref<ProductSort>('quantity');
@@ -432,12 +440,45 @@ const mainSidebarSections = computed(() => sidebarSections.value.filter((section
 const comparisonSidebarSection = computed(() => sidebarSections.value.find((section) => section.key === 'comparison') ?? null);
 const quickZoneOptions = computed(() => props.filterOptions.barGroups.slice(0, 6));
 const hiddenQuickZoneCount = computed(() => Math.max(0, props.filterOptions.barGroups.length - quickZoneOptions.value.length));
+const hourOptions = Array.from({ length: 24 }, (_, hour) => ({
+    value: String(hour),
+    label: `${String(hour).padStart(2, '0')}:00`,
+}));
 
 watch(dashboardSections, (sections) => {
     if (!sections.some((section) => section.key === activeSection.value)) {
         activeSection.value = sections[0]?.key ?? 'summary';
     }
 }, { immediate: true });
+
+watch(() => props.initialSection, (section) => {
+    activeSection.value = section;
+});
+
+function sidebarSectionUrl(section: DashboardSection): string | null {
+    const routeSuffix = {
+        summary: 'dashboard',
+        products: 'products',
+        reconciliation: 'payments',
+        zones: 'zones',
+        highlights: 'performance',
+        comparison: 'comparison',
+    }[section];
+
+    if (!routeSuffix) {
+        return null;
+    }
+
+    return route(`${props.previewMode ? 'admin.events' : 'events'}.${routeSuffix}`, props.event.id);
+}
+
+const reportSectionTitle = computed(() => ({
+    products: 'Produtos',
+    reconciliation: 'Pagamentos',
+    zones: 'Zonas',
+    highlights: 'Performance',
+    comparison: 'Comparar edições',
+}[activeSection.value] ?? 'Dashboard'));
 
 function configuredBlock(key: string): DashboardConfigurationItem | undefined {
     return activeDashboardConfiguration.value.blocks.find((block) => block.key === key);
@@ -715,6 +756,32 @@ const maxProductQuantity = computed(() =>
 const maxProductSales = computed(() =>
     visibleProducts.value.reduce((max, item) => Math.max(max, item.sales_total), 0),
 );
+const productSoldQuantity = computed(() => activeProducts.value.reduce(
+    (total, item) => total + (item.sold_quantity ?? item.quantity_total),
+    0,
+));
+const productOfferedQuantity = computed(() => activeProducts.value.reduce(
+    (total, item) => total + (item.offered_quantity ?? 0),
+    0,
+));
+const productServedQuantity = computed(() => productSoldQuantity.value + productOfferedQuantity.value);
+const productOfferWeight = computed(() => productServedQuantity.value > 0
+    ? (productOfferedQuantity.value / productServedQuantity.value) * 100
+    : 0);
+const averageProductValue = computed(() => props.summary.total_quantity !== 0
+    ? props.summary.total_sales / props.summary.total_quantity
+    : 0);
+const averageTopUp = computed(() => props.paymentSummary.top_up_documents_count > 0
+    ? props.paymentSummary.top_up_loaded / props.paymentSummary.top_up_documents_count
+    : 0);
+const paymentMethodsTotal = computed(() => props.paymentSummary.multibanco
+    + props.paymentSummary.cash
+    + props.paymentSummary.other
+    + (showZtCard.value ? props.paymentSummary.zticket : 0));
+const selectedZoneShare = computed(() => props.summary.event_total_sales > 0
+    ? (props.summary.total_sales / props.summary.event_total_sales) * 100
+    : 0);
+const selectedZoneLabel = computed(() => localFilters.value.bar_group || 'Todas as zonas');
 const maxZoneSales = computed(() =>
     props.barGroups.reduce((max, group) => Math.max(max, group.sales_total), 0),
 );
@@ -1362,6 +1429,8 @@ const clearFilters = () => {
         product: '',
         date_from: '',
         date_to: '',
+        hour_from: '',
+        hour_to: '',
         total_min: '',
         total_max: '',
     };
@@ -1548,6 +1617,14 @@ function getHighlightShare(value: number) {
     return `${((value / highlightTotal.value) * 100).toFixed(1).replace('.', ',')}%`;
 }
 
+function getSalesShare(value: number) {
+    if (props.summary.total_sales <= 0) {
+        return '0,0%';
+    }
+
+    return `${((value / props.summary.total_sales) * 100).toFixed(1).replace('.', ',')}%`;
+}
+
 function getDeviceLabel(item: BreakdownItem) {
     return item.code ? `${item.code} - ${item.label}` : item.label;
 }
@@ -1566,26 +1643,25 @@ function getDifferenceClass(value: number | null) {
 </script>
 
 <template>
-    <Head :title="`Evento - ${props.event.title}`" />
+    <Head :title="`${reportSectionTitle} - ${props.event.title}`" />
 
     <AuthenticatedLayout>
         <template #sidebar-navigation="{ isAdmin }">
             <section class="contacto-sidebar-navigation" aria-label="Navegação principal">
                 <div class="contacto-sidebar-menu">
-                    <button
+                    <Link
                         v-for="section in mainSidebarSections"
                         :key="section.key"
-                        type="button"
+                        :href="sidebarSectionUrl(section.key) || '#'"
                         class="contacto-sidebar-menu-item"
                         :class="{
                             'is-active': sidebarSectionIsActive(section.key),
                             'is-dashboard': section.key === 'summary',
                         }"
-                        @click="activeSection = section.key"
                     >
                         <AppSidebarIcon :name="section.icon" />
                         <span>{{ section.label }}</span>
-                    </button>
+                    </Link>
 
                     <Link
                         v-if="isAdmin"
@@ -1605,16 +1681,15 @@ function getDifferenceClass(value: number | null) {
                         <span>Clientes</span>
                     </Link>
 
-                    <button
+                    <Link
                         v-if="comparisonSidebarSection"
-                        type="button"
+                        :href="sidebarSectionUrl(comparisonSidebarSection.key) || '#'"
                         class="contacto-sidebar-menu-item"
                         :class="{ 'is-active': sidebarSectionIsActive(comparisonSidebarSection.key) }"
-                        @click="activeSection = comparisonSidebarSection.key"
                     >
                         <AppSidebarIcon :name="comparisonSidebarSection.icon" />
                         <span>{{ comparisonSidebarSection.label }}</span>
-                    </button>
+                    </Link>
 
                     <Link
                         v-if="props.dashboardEditor?.enabled"
@@ -1731,19 +1806,18 @@ function getDifferenceClass(value: number | null) {
                     </div>
 
                     <nav class="report-dashboard-navigation-list">
-                        <button
+                        <Link
                             v-for="section in sidebarSections"
                             :key="section.key"
-                            type="button"
+                            :href="sidebarSectionUrl(section.key) || '#'"
                             class="report-dashboard-navigation-item"
                             :class="{ 'is-active': sidebarSectionIsActive(section.key) }"
-                            @click="activeSection = section.key"
                         >
                             <span class="report-dashboard-navigation-number">
                                 <AppSidebarIcon :name="section.icon" />
                             </span>
                             <strong>{{ section.label }}</strong>
-                        </button>
+                        </Link>
                     </nav>
 
                     <div class="report-dashboard-navigation-status">
@@ -1819,6 +1893,20 @@ function getDifferenceClass(value: number | null) {
                                 <input v-model="localFilters.date_to" type="date" class="dash-input" />
                             </label>
                             <label>
+                                <span>Hora inicial</span>
+                                <select v-model="localFilters.hour_from" class="dash-input">
+                                    <option value="">Início</option>
+                                    <option v-for="option in hourOptions" :key="`from-${option.value}`" :value="option.value">{{ option.label }}</option>
+                                </select>
+                            </label>
+                            <label>
+                                <span>Hora final</span>
+                                <select v-model="localFilters.hour_to" class="dash-input">
+                                    <option value="">Fim</option>
+                                    <option v-for="option in hourOptions" :key="`to-${option.value}`" :value="option.value">{{ option.label }}</option>
+                                </select>
+                            </label>
+                            <label>
                                 <span>Total mínimo</span>
                                 <input v-model="localFilters.total_min" inputmode="decimal" class="dash-input" placeholder="0,00" />
                             </label>
@@ -1840,6 +1928,59 @@ function getDifferenceClass(value: number | null) {
                     <p v-else-if="syncIntegrationError" class="dash-modal-error">
                         {{ syncIntegrationError }}
                     </p>
+
+                    <section
+                        v-if="!['summary', 'comparison', 'charts'].includes(activeSection)"
+                        class="contacto-report-filterbar"
+                        aria-label="Filtros do relatório"
+                    >
+                        <div class="contacto-report-filterbar-zones">
+                            <span class="contacto-label">Zona</span>
+                            <button
+                                type="button"
+                                :class="{ 'is-active': localFilters.bar_group === '' }"
+                                @click="applyBarGroupFilter('')"
+                            >
+                                Todas
+                            </button>
+                            <button
+                                v-for="option in quickZoneOptions"
+                                :key="`section-zone-${option.value}`"
+                                type="button"
+                                :class="{ 'is-active': localFilters.bar_group === option.value }"
+                                @click="applyBarGroupFilter(option.value)"
+                            >
+                                {{ option.label }}
+                            </button>
+                            <button
+                                v-if="hiddenQuickZoneCount > 0"
+                                type="button"
+                                class="contacto-report-more"
+                                @click="filtersOpen = true"
+                            >
+                                +{{ hiddenQuickZoneCount }}
+                            </button>
+                        </div>
+
+                        <div class="contacto-report-filterbar-period">
+                            <span class="contacto-label">Período</span>
+                            <input v-model="localFilters.date_from" type="date" class="contacto-report-select" @change="applyFilters" />
+                            <span>até</span>
+                            <input v-model="localFilters.date_to" type="date" class="contacto-report-select" @change="applyFilters" />
+                            <span class="contacto-label contacto-report-hour-label">Hora</span>
+                            <select v-model="localFilters.hour_from" class="contacto-report-select" @change="applyFilters">
+                                <option value="">Início</option>
+                                <option v-for="option in hourOptions" :key="`inline-from-${option.value}`" :value="option.value">{{ option.label }}</option>
+                            </select>
+                            <span>até</span>
+                            <select v-model="localFilters.hour_to" class="contacto-report-select" @change="applyFilters">
+                                <option value="">Fim</option>
+                                <option v-for="option in hourOptions" :key="`inline-to-${option.value}`" :value="option.value">{{ option.label }}</option>
+                            </select>
+                            <button type="button" class="contacto-report-refine" @click="filtersOpen = true">Ajustar filtros</button>
+                            <button v-if="activeFilterCount > 0" type="button" class="contacto-report-clear" @click="clearFilters">Limpar</button>
+                        </div>
+                    </section>
 
                     <div
                         v-if="activeSection === 'summary'"
@@ -2606,13 +2747,8 @@ function getDifferenceClass(value: number | null) {
                         </div>
                     </div>
 
-                    <div v-else-if="activeSection === 'products'" class="report-dashboard-view">
-                        <header class="report-dashboard-view-header">
-                            <div>
-                                <span>Mix de consumo</span>
-                                <h3>Produtos mais vendidos</h3>
-                                <p>Ranking por quantidade, com leitura total e por dia.</p>
-                            </div>
+                    <div v-else-if="activeSection === 'products'" class="contacto-menu-page">
+                        <div class="contacto-menu-toolbar">
                             <div class="report-dashboard-segmented">
                                 <button
                                     v-for="tab in productTabs"
@@ -2624,74 +2760,104 @@ function getDifferenceClass(value: number | null) {
                                     {{ tab.label }}
                                 </button>
                             </div>
-                        </header>
+                            <label class="report-dashboard-search">
+                                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                                    <circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="1.8" />
+                                    <path d="m16 16 4 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
+                                </svg>
+                                <input v-model="productSearch" type="search" placeholder="Pesquisar produto..." />
+                            </label>
+                        </div>
 
-                        <section class="dash-card report-dashboard-products-panel">
-                            <div class="report-dashboard-analytics-toolbar">
-                                <label class="report-dashboard-search">
-                                    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                                        <circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="1.8" />
-                                        <path d="m16 16 4 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
-                                    </svg>
-                                    <input v-model="productSearch" type="search" placeholder="Pesquisar produto..." />
-                                </label>
+                        <section class="contacto-menu-kpis is-four">
+                            <article>
+                                <span>Vendido</span>
+                                <strong>{{ formatNumber(productSoldQuantity) }}</strong>
+                                <small>Unidades pagas</small>
+                            </article>
+                            <article>
+                                <span>Oferecido</span>
+                                <strong>{{ formatNumber(productOfferedQuantity) }}</strong>
+                                <small>Unidades com total zero</small>
+                            </article>
+                            <article>
+                                <span>Total servido</span>
+                                <strong>{{ formatNumber(productServedQuantity) }}</strong>
+                                <small>Vendido + oferecido</small>
+                            </article>
+                            <article>
+                                <span>Peso das ofertas</span>
+                                <strong>{{ productOfferWeight.toFixed(1).replace('.', ',') }}%</strong>
+                                <small>Do total servido</small>
+                            </article>
+                        </section>
 
-                                <button
-                                    type="button"
-                                    class="report-dashboard-sort-button"
-                                    @click="productSort = productSort === 'quantity' ? 'sales' : 'quantity'"
-                                >
-                                    {{ productSort === 'quantity' ? 'Quantidade ↓' : 'Valor € ↓' }}
+                        <section class="contacto-menu-panel">
+                            <header>
+                                <div>
+                                    <span>Ranking de produtos</span>
+                                    <small>{{ formatNumber(visibleProducts.length) }} referências apresentadas</small>
+                                </div>
+                                <button type="button" @click="productSort = productSort === 'quantity' ? 'sales' : 'quantity'">
+                                    {{ productSort === 'quantity' ? 'Ordenar por quantidade' : 'Ordenar por faturação' }}
                                 </button>
+                            </header>
 
-                                <div class="report-dashboard-view-toggle" aria-label="Visualização dos produtos">
-                                    <button type="button" :class="{ 'is-active': productViewMode === 'list' }" @click="productViewMode = 'list'">Lista</button>
-                                    <button type="button" :class="{ 'is-active': productViewMode === 'chart' }" @click="productViewMode = 'chart'">Gráfico</button>
-                                </div>
+                            <div class="contacto-menu-table-wrap">
+                                <table class="contacto-menu-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Produto</th>
+                                            <th>Referência</th>
+                                            <th class="text-right">Vendido</th>
+                                            <th class="text-right">Oferecido</th>
+                                            <th class="text-right">Total servido</th>
+                                            <th class="text-right">Valor faturado</th>
+                                            <th class="text-right">% das vendas</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <tr v-for="product in visibleProducts" :key="`product-ranking-${product.code ?? product.label}`">
+                                            <td><strong>{{ product.label }}</strong></td>
+                                            <td>{{ product.code || '—' }}</td>
+                                            <td class="text-right">{{ formatNumber(product.sold_quantity ?? product.quantity_total) }}</td>
+                                            <td class="text-right">{{ formatNumber(product.offered_quantity ?? 0) }}</td>
+                                            <td class="text-right contacto-menu-accent">{{ formatNumber(product.quantity_total) }}</td>
+                                            <td class="text-right">{{ formatMoney(product.sales_total) }}</td>
+                                            <td class="text-right">{{ getSalesShare(product.sales_total) }}</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
                             </div>
+                            <p v-if="!visibleProducts.length" class="report-dashboard-empty">Sem produtos para esta pesquisa.</p>
+                        </section>
 
-                            <div v-if="visibleProducts.length && productViewMode === 'list'" class="report-dashboard-products-grid">
-                                <div v-for="(column, columnIndex) in productColumns" :key="columnIndex" class="space-y-4">
-                                    <article
-                                        v-for="(product, productIndex) in column"
-                                        :key="`${columnIndex}-${product.code ?? product.label}`"
-                                        class="report-dashboard-product-row"
-                                    >
-                                        <span class="report-dashboard-rank" :class="{ 'is-top': columnIndex * Math.ceil(visibleProducts.length / 2) + productIndex < 3 }">
-                                            {{ columnIndex * Math.ceil(visibleProducts.length / 2) + productIndex + 1 }}
-                                        </span>
-                                        <div>
-                                            <div class="report-dashboard-product-head">
-                                                <span>{{ product.label }}</span>
-                                                <strong>{{ productSort === 'quantity' ? formatNumber(product.quantity_total) : formatMoney(product.sales_total) }}</strong>
-                                            </div>
-                                            <div class="report-dashboard-product-track">
-                                                <span class="report-dashboard-product-fill" :style="{ width: getProductRatioWidth(product) }" />
-                                            </div>
-                                            <small>{{ formatMoney(product.sales_total) }} faturados</small>
-                                        </div>
-                                    </article>
+                        <section class="contacto-menu-panel contacto-product-bars">
+                            <header>
+                                <div>
+                                    <span>Produtos mais servidos</span>
+                                    <small>Unidades pagas e oferecidas</small>
                                 </div>
-                            </div>
-
-                            <div v-else-if="visibleProducts.length" class="report-dashboard-product-chart">
-                                <article v-for="product in visibleProducts" :key="`chart-${product.code ?? product.label}`">
-                                    <span>{{ product.label }}</span>
-                                    <div><i :style="{ width: getProductRatioWidth(product) }" /></div>
-                                    <strong>{{ productSort === 'quantity' ? formatNumber(product.quantity_total) : formatMoney(product.sales_total) }}</strong>
+                                <strong>Valor médio {{ formatMoney(averageProductValue) }}</strong>
+                            </header>
+                            <div class="contacto-product-bars-grid">
+                                <article v-for="product in visibleProducts.slice(0, 8)" :key="`product-bar-${product.code ?? product.label}`">
+                                    <div>
+                                        <i class="is-sold" :style="{ height: getRatioWidth(product.sold_quantity ?? product.quantity_total, maxProductQuantity) }" />
+                                        <i class="is-offered" :style="{ height: getRatioWidth(product.offered_quantity ?? 0, maxProductQuantity) }" />
+                                    </div>
+                                    <strong>{{ product.label }}</strong>
+                                    <small>{{ formatNumber(product.quantity_total) }} un</small>
                                 </article>
                             </div>
-
-                            <p v-else class="report-dashboard-empty">Sem produtos para esta pesquisa.</p>
                         </section>
                     </div>
 
-                    <div v-else-if="activeSection === 'zones'" class="report-dashboard-view">
-                        <header class="report-dashboard-view-header">
+                    <div v-else-if="activeSection === 'zones'" class="contacto-menu-page">
+                        <div class="contacto-menu-toolbar">
                             <div>
-                                <span>Operação no recinto</span>
-                                <h3>Resumo e performance por zona</h3>
-                                <p>Faturação e detalhe dos devices agrupados pelas zonas reais do relatório.</p>
+                                <span class="contacto-label">Seleção</span>
+                                <strong>{{ selectedZoneLabel }}</strong>
                             </div>
                             <label class="report-dashboard-search">
                                 <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -2700,140 +2866,198 @@ function getDifferenceClass(value: number | null) {
                                 </svg>
                                 <input v-model="zoneSearch" type="search" placeholder="Pesquisar zona ou device..." />
                             </label>
-                        </header>
+                        </div>
 
-                        <section class="dash-card report-dashboard-table-shell">
-                            <table class="dash-table report-dashboard-table">
-                                <thead>
-                                    <tr>
-                                        <th>Zona</th>
-                                        <th class="text-right">Total</th>
-                                        <th class="text-right">Devices</th>
-                                        <th class="text-right">Média</th>
-                                        <th>Performance</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    <tr v-for="zone in visibleZonePerformanceRows" :key="zone.label">
-                                        <td class="report-dashboard-table-title">{{ zone.label }}</td>
-                                        <td class="text-right">{{ formatMoney(zone.totalSales) }}</td>
-                                        <td class="text-right">{{ formatNumber(zone.devicesCount) }}</td>
-                                        <td class="text-right">{{ formatMoney(zone.averageSales) }}</td>
-                                        <td>
-                                            <div class="report-dashboard-performance-track">
-                                                <span class="report-dashboard-performance-fill" :style="{ width: zone.performanceWidth }" />
-                                            </div>
-                                        </td>
-                                    </tr>
-                                </tbody>
-                            </table>
-                        </section>
-
-                        <section>
-                            <div class="report-dashboard-section-heading">
-                                <span>Detalhe</span>
-                                <h3>Vendas por device</h3>
-                            </div>
-                            <div class="report-dashboard-zone-grid">
-                                <article v-for="zone in visibleZoneDevices" :key="zone.label" class="report-dashboard-zone-card">
-                                    <div class="report-dashboard-zone-header">
-                                        <span>{{ zone.label }}</span>
-                                        <strong>{{ formatNumber(zone.devices_count) }} devices</strong>
-                                    </div>
-                                    <div class="report-dashboard-zone-body">
-                                        <div v-for="item in zone.items" :key="`${zone.label}-${item.code ?? item.label}`" class="report-dashboard-zone-row">
-                                            <span>{{ getDeviceLabel(item) }}</span>
-                                            <strong>{{ formatMoney(item.sales_total) }}</strong>
-                                        </div>
-                                    </div>
-                                    <div class="report-dashboard-zone-footer">
-                                        <span>Total</span>
-                                        <strong>{{ formatMoney(zone.total_sales) }}</strong>
-                                    </div>
+                        <section class="contacto-zone-overview">
+                            <article class="contacto-zone-total">
+                                <span>Faturação da seleção</span>
+                                <strong>{{ formatMoney(props.summary.total_sales) }}</strong>
+                                <small>{{ selectedZoneShare.toFixed(1).replace('.', ',') }}% do total do evento</small>
+                            </article>
+                            <div class="contacto-zone-kpis">
+                                <article>
+                                    <span>Ticket médio</span>
+                                    <strong>{{ formatMoney(props.summary.average_ticket) }}</strong>
+                                    <small>Por transação na seleção</small>
+                                </article>
+                                <article>
+                                    <span>Transações</span>
+                                    <strong>{{ formatNumber(props.summary.tickets_count) }}</strong>
+                                    <small>Documentos de venda</small>
+                                </article>
+                                <article>
+                                    <span>Devices</span>
+                                    <strong>{{ formatNumber(props.summary.stores_count) }}</strong>
+                                    <small>Equipamentos com vendas</small>
+                                </article>
+                                <article class="is-accent">
+                                    <span>Peso no evento</span>
+                                    <strong>{{ selectedZoneShare.toFixed(1).replace('.', ',') }}%</strong>
+                                    <small>{{ formatNumber(props.summary.bar_groups_count) }} zonas na seleção</small>
                                 </article>
                             </div>
                         </section>
+
+                        <section v-if="leadingZone" class="contacto-zone-leader">
+                            <div><i /><span>Zona líder</span><strong>{{ leadingZone.label }}</strong></div>
+                            <div><strong>{{ leadingZoneShare.toFixed(1).replace('.', ',') }}%</strong><small>{{ formatMoney(leadingZone.sales_total) }}</small></div>
+                        </section>
+
+                        <section class="contacto-menu-panel">
+                            <header>
+                                <div>
+                                    <span>Desempenho por zona</span>
+                                    <small>Clique numa zona para aplicar o filtro</small>
+                                </div>
+                                <strong>{{ formatMoney(props.summary.total_sales) }} total</strong>
+                            </header>
+                            <div class="contacto-menu-table-wrap">
+                                <table class="contacto-menu-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Zona</th>
+                                            <th class="text-right">Faturação</th>
+                                            <th class="text-right">Transações</th>
+                                            <th class="text-right">Devices</th>
+                                            <th class="text-right">Ticket médio</th>
+                                            <th class="text-right">% total</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <tr
+                                            v-for="zone in visibleZonePerformanceRows"
+                                            :key="zone.label"
+                                            class="is-clickable"
+                                            @click="applyBarGroupFilter(getZoneFilterValue(zone.label))"
+                                        >
+                                            <td><strong>{{ zone.label }}</strong></td>
+                                            <td class="text-right">{{ formatMoney(zone.totalSales) }}</td>
+                                            <td class="text-right">{{ formatNumber(zone.ticketsCount) }}</td>
+                                            <td class="text-right">{{ formatNumber(zone.devicesCount) }}</td>
+                                            <td class="text-right">{{ formatMoney(zone.averageTicket) }}</td>
+                                            <td class="text-right contacto-menu-accent">{{ getSalesShare(zone.totalSales) }}</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </section>
+
+                        <section class="contacto-zone-devices">
+                            <article v-for="zone in visibleZoneDevices" :key="zone.label">
+                                <header><strong>{{ zone.label }}</strong><span>{{ formatNumber(zone.devices_count) }} devices</span></header>
+                                <div v-for="item in zone.items" :key="`${zone.label}-${item.code ?? item.label}`">
+                                    <span>{{ getDeviceLabel(item) }}</span><strong>{{ formatMoney(item.sales_total) }}</strong>
+                                </div>
+                            </article>
+                        </section>
                     </div>
 
-                    <div v-else-if="activeSection === 'reconciliation'" class="report-dashboard-view">
-                        <header class="report-dashboard-view-header">
-                            <div>
-                                <span>Controlo financeiro</span>
-                                <h3>Conciliação de pagamentos</h3>
-                                <p>{{ props.reconciliation.scope_note }}</p>
+                    <div v-else-if="activeSection === 'reconciliation'" class="contacto-menu-page">
+                        <section v-if="showZtCard" class="contacto-payment-overview">
+                            <article class="contacto-payment-total">
+                                <span>Carregamentos ZT - Card</span>
+                                <strong>{{ formatMoney(props.paymentSummary.top_up_loaded) }}</strong>
+                                <small>{{ formatNumber(props.paymentSummary.top_up_documents_count) }} carregamentos registados</small>
+                            </article>
+                            <div class="contacto-payment-kpis">
+                                <article>
+                                    <span>Carregamento médio</span>
+                                    <strong>{{ formatMoney(averageTopUp) }}</strong>
+                                    <small>Por cartão carregado</small>
+                                </article>
+                                <article class="is-accent">
+                                    <span>Saldo por consumir</span>
+                                    <strong>{{ formatMoney(props.paymentSummary.top_up_remaining) }}</strong>
+                                    <small>Carregado menos gasto</small>
+                                </article>
+                                <article>
+                                    <span>Valor gasto</span>
+                                    <strong>{{ formatMoney(props.paymentSummary.top_up_spent) }}</strong>
+                                    <small>Consumo ZT - Card</small>
+                                </article>
+                                <article>
+                                    <span>Total com ZT</span>
+                                    <strong>{{ formatMoney(props.paymentSummary.total_with_zt) }}</strong>
+                                    <small>Vendas + carregamentos</small>
+                                </article>
                             </div>
-                            <label class="report-dashboard-search">
-                                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                                    <circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="1.8" />
-                                    <path d="m16 16 4 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
-                                </svg>
-                                <input v-model="reconciliationSearch" type="search" placeholder="Procurar device..." />
-                            </label>
-                        </header>
+                        </section>
 
-                        <section class="report-dashboard-grid" :class="reconciliationGridClass">
-                            <article class="report-dashboard-summary-card">
-                                <span>Pagamentos</span>
-                                <strong>{{ formatMoney(props.reconciliation.totals.payments_total) }}</strong>
-                                <small>{{ formatNumber(props.reconciliation.documents_count) }} documentos</small>
+                        <section v-else class="contacto-payment-overview">
+                            <article class="contacto-payment-total">
+                                <span>Pagamentos das vendas</span>
+                                <strong>{{ formatMoney(paymentMethodsTotal) }}</strong>
+                                <small>{{ formatNumber(props.paymentSummary.documents_count) }} documentos</small>
                             </article>
-                            <article class="report-dashboard-summary-card">
-                                <span>Vendas</span>
-                                <strong>{{ formatMoney(props.reconciliation.totals.sales_total) }}</strong>
-                                <small>Linhas sincronizadas</small>
+                            <div class="contacto-payment-kpis">
+                                <article><span>Multibanco</span><strong>{{ formatMoney(props.paymentSummary.multibanco) }}</strong><small>{{ getPaymentShare(props.paymentSummary.multibanco) }}</small></article>
+                                <article><span>Dinheiro</span><strong>{{ formatMoney(props.paymentSummary.cash) }}</strong><small>{{ getPaymentShare(props.paymentSummary.cash) }}</small></article>
+                                <article><span>Outros pagamentos</span><strong>{{ formatMoney(props.paymentSummary.other) }}</strong><small>{{ getPaymentShare(props.paymentSummary.other) }}</small></article>
+                                <article class="is-accent"><span>Total faturado</span><strong>{{ formatMoney(props.summary.total_sales) }}</strong><small>Vendas sincronizadas</small></article>
+                            </div>
+                        </section>
+
+                        <section class="contacto-menu-kpis contacto-payment-methods" :class="showZtCard ? 'is-four' : 'is-three'">
+                            <article v-if="metricIsVisible('multibanco')">
+                                <span>{{ metricLabel('multibanco', 'Multibanco') }}</span>
+                                <strong>{{ formatMoney(props.paymentSummary.multibanco) }}</strong>
+                                <small>{{ getPaymentShare(props.paymentSummary.multibanco) }}</small>
                             </article>
-                            <article v-if="showZtPaymentDetails && metricIsVisible('zticket')" class="report-dashboard-summary-card">
+                            <article v-if="showZtCard && metricIsVisible('zticket')">
                                 <span>{{ metricLabel('zticket', 'ZT - Card') }}</span>
-                                <strong>{{ formatMoney(props.reconciliation.totals.zticket) }}</strong>
-                                <small>Pagamento tipo cartão</small>
+                                <strong>{{ formatMoney(props.paymentSummary.zticket) }}</strong>
+                                <small>{{ getPaymentShare(props.paymentSummary.zticket) }}</small>
                             </article>
-                            <article class="report-dashboard-summary-card">
-                                <span>Diferença</span>
-                                <strong :class="['report-dashboard-difference', getDifferenceClass(props.reconciliation.totals.difference)]">
-                                    {{ props.reconciliation.totals.difference === null ? '—' : formatMoney(props.reconciliation.totals.difference) }}
-                                </strong>
-                                <small>Pagamentos menos vendas</small>
+                            <article v-if="metricIsVisible('cash')">
+                                <span>{{ metricLabel('cash', 'Dinheiro') }}</span>
+                                <strong>{{ formatMoney(props.paymentSummary.cash) }}</strong>
+                                <small>{{ getPaymentShare(props.paymentSummary.cash) }}</small>
+                            </article>
+                            <article v-if="metricIsVisible('other_payments')">
+                                <span>{{ metricLabel('other_payments', 'Outros pagamentos') }}</span>
+                                <strong>{{ formatMoney(props.paymentSummary.other) }}</strong>
+                                <small>{{ getPaymentShare(props.paymentSummary.other) }}</small>
                             </article>
                         </section>
 
-                        <section v-if="props.reconciliation.available" class="dash-card report-dashboard-table-shell report-dashboard-reconciliation-shell">
-                            <table class="dash-table report-dashboard-table report-dashboard-reconciliation-table">
-                                <thead>
-                                    <tr>
-                                        <th>Device</th>
-                                        <th v-if="metricIsVisible('multibanco')" class="text-right">{{ metricLabel('multibanco', 'Multibanco') }}</th>
-                                        <th v-if="showZtPaymentDetails && metricIsVisible('zticket')" class="text-right">{{ metricLabel('zticket', 'ZT - Card') }}</th>
-                                        <th v-if="metricIsVisible('cash')" class="text-right">{{ metricLabel('cash', 'Dinheiro') }}</th>
-                                        <th v-if="metricIsVisible('other_payments')" class="text-right">{{ metricLabel('other_payments', 'Outros') }}</th>
-                                        <th class="text-right">Pagamentos</th>
-                                        <th class="text-right">Vendas</th>
-                                        <th class="text-right">Diferença</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    <tr v-for="item in visibleReconciliationItems" :key="item.store_code ?? item.store_name">
-                                        <td>
-                                            <strong>{{ item.store_code || '—' }}</strong>
-                                            <small>{{ item.store_name }}</small>
-                                        </td>
-                                        <td v-if="metricIsVisible('multibanco')" class="text-right">{{ formatMoney(item.multibanco) }}</td>
-                                        <td v-if="showZtPaymentDetails && metricIsVisible('zticket')" class="text-right">{{ formatMoney(item.zticket) }}</td>
-                                        <td v-if="metricIsVisible('cash')" class="text-right">{{ formatMoney(item.cash) }}</td>
-                                        <td v-if="metricIsVisible('other_payments')" class="text-right">{{ formatMoney(item.other) }}</td>
-                                        <td class="text-right font-semibold">{{ formatMoney(item.payments_total) }}</td>
-                                        <td class="text-right">{{ formatMoney(item.sales_total) }}</td>
-                                        <td class="text-right">
-                                            <span :class="['report-dashboard-difference-pill', getDifferenceClass(item.difference)]">
-                                                {{ item.difference === null ? '—' : formatMoney(item.difference) }}
-                                            </span>
-                                        </td>
-                                    </tr>
-                                </tbody>
-                            </table>
+                        <section class="contacto-menu-panel">
+                            <header>
+                                <div><span>Conciliação por device</span><small>{{ props.reconciliation.scope_note }}</small></div>
+                                <label class="report-dashboard-search">
+                                    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="1.8" /><path d="m16 16 4 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" /></svg>
+                                    <input v-model="reconciliationSearch" type="search" placeholder="Procurar device..." />
+                                </label>
+                            </header>
+                            <div v-if="props.reconciliation.available" class="contacto-menu-table-wrap">
+                                <table class="contacto-menu-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Device</th>
+                                            <th v-if="metricIsVisible('multibanco')" class="text-right">{{ metricLabel('multibanco', 'Multibanco') }}</th>
+                                            <th v-if="showZtCard && metricIsVisible('zticket')" class="text-right">{{ metricLabel('zticket', 'ZT - Card') }}</th>
+                                            <th v-if="metricIsVisible('cash')" class="text-right">{{ metricLabel('cash', 'Dinheiro') }}</th>
+                                            <th v-if="metricIsVisible('other_payments')" class="text-right">Outros</th>
+                                            <th class="text-right">Pagamentos</th>
+                                            <th class="text-right">Vendas</th>
+                                            <th class="text-right">Diferença</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <tr v-for="item in visibleReconciliationItems" :key="item.store_code ?? item.store_name">
+                                            <td><strong>{{ item.store_name }}</strong><small>{{ item.store_code || 'Sem código' }}</small></td>
+                                            <td v-if="metricIsVisible('multibanco')" class="text-right">{{ formatMoney(item.multibanco) }}</td>
+                                            <td v-if="showZtCard && metricIsVisible('zticket')" class="text-right">{{ formatMoney(item.zticket) }}</td>
+                                            <td v-if="metricIsVisible('cash')" class="text-right">{{ formatMoney(item.cash) }}</td>
+                                            <td v-if="metricIsVisible('other_payments')" class="text-right">{{ formatMoney(item.other) }}</td>
+                                            <td class="text-right contacto-menu-accent">{{ formatMoney(item.payments_total) }}</td>
+                                            <td class="text-right">{{ formatMoney(item.sales_total) }}</td>
+                                            <td class="text-right"><span :class="['report-dashboard-difference-pill', getDifferenceClass(item.difference)]">{{ item.difference === null ? '—' : formatMoney(item.difference) }}</span></td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                            <p v-else class="report-dashboard-empty">A sincronização atual não contém documentos de pagamento.</p>
                         </section>
-                        <p v-else class="dash-card report-dashboard-empty">
-                            A sincronização atual não contém documentos de pagamento.
-                        </p>
                     </div>
 
                     <div v-else-if="activeSection === 'comparison'" class="report-dashboard-view">
@@ -2933,7 +3157,35 @@ function getDifferenceClass(value: number | null) {
                         </template>
                     </div>
 
-                    <div v-else class="report-dashboard-view">
+                    <div v-else-if="activeSection === 'highlights'" class="contacto-menu-page">
+                        <section class="contacto-performance-chart">
+                            <header>
+                                <div>
+                                    <span>Produtos mais servidos</span>
+                                    <small>Vendido e oferecido por produto</small>
+                                </div>
+                                <strong>Top: {{ mostServedProduct?.label || 'Sem dados' }}</strong>
+                            </header>
+                            <div class="contacto-performance-bars" role="img" aria-label="Produtos vendidos e oferecidos">
+                                <article v-for="product in activeProducts.slice(0, 8)" :key="`performance-product-${product.code ?? product.label}`">
+                                    <div>
+                                        <i class="is-sold" :style="{ height: getRatioWidth(product.sold_quantity ?? product.quantity_total, maxProductQuantity) }" />
+                                        <i class="is-offered" :style="{ height: getRatioWidth(product.offered_quantity ?? 0, maxProductQuantity) }" />
+                                    </div>
+                                    <strong>{{ product.label }}</strong>
+                                    <small>{{ formatNumber(product.quantity_total) }} un</small>
+                                </article>
+                            </div>
+                            <footer><span><i class="is-sold" /> Vendido</span><span><i class="is-offered" /> Oferecido</span></footer>
+                        </section>
+
+                        <section class="contacto-menu-kpis is-four contacto-performance-kpis">
+                            <article><span>Melhor produto</span><strong>{{ bestProductBySales?.label || '—' }}</strong><small>{{ bestProductBySales ? formatMoney(bestProductBySales.sales_total) : formatMoney(0) }}</small></article>
+                            <article><span>Produto mais servido</span><strong>{{ mostServedProduct?.label || '—' }}</strong><small>{{ mostServedProduct ? `${formatNumber(mostServedProduct.quantity_total)} unidades` : 'Sem dados' }}</small></article>
+                            <article><span>Pico horário</span><strong>{{ primaryHourlyPeak?.hour_label || '—' }}</strong><small>{{ primaryHourlyPeak ? formatMoney(primaryHourlyPeak.sales_total) : 'Sem vendas' }}</small></article>
+                            <article class="is-accent"><span>Zona líder</span><strong>{{ leadingZone?.label || '—' }}</strong><small>{{ leadingZone ? formatMoney(leadingZone.sales_total) : 'Sem dados' }}</small></article>
+                        </section>
+
                         <header class="report-dashboard-highlights-toolbar">
                             <div class="report-dashboard-highlights-title">
                                 <span>06</span>

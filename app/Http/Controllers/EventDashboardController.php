@@ -28,6 +28,66 @@ class EventDashboardController extends Controller
 
     public function show(Request $request, Event $event): Response
     {
+        return $this->renderClientDashboard($request, $event, 'summary');
+    }
+
+    public function products(Request $request, Event $event): Response
+    {
+        return $this->renderClientDashboard($request, $event, 'products');
+    }
+
+    public function payments(Request $request, Event $event): Response
+    {
+        return $this->renderClientDashboard($request, $event, 'reconciliation');
+    }
+
+    public function zones(Request $request, Event $event): Response
+    {
+        return $this->renderClientDashboard($request, $event, 'zones');
+    }
+
+    public function performance(Request $request, Event $event): Response
+    {
+        return $this->renderClientDashboard($request, $event, 'highlights');
+    }
+
+    public function comparison(Request $request, Event $event): Response
+    {
+        return $this->renderClientDashboard($request, $event, 'comparison');
+    }
+
+    public function preview(Request $request, Event $event): Response
+    {
+        return $this->renderAdminDashboard($request, $event, 'summary');
+    }
+
+    public function previewProducts(Request $request, Event $event): Response
+    {
+        return $this->renderAdminDashboard($request, $event, 'products');
+    }
+
+    public function previewPayments(Request $request, Event $event): Response
+    {
+        return $this->renderAdminDashboard($request, $event, 'reconciliation');
+    }
+
+    public function previewZones(Request $request, Event $event): Response
+    {
+        return $this->renderAdminDashboard($request, $event, 'zones');
+    }
+
+    public function previewPerformance(Request $request, Event $event): Response
+    {
+        return $this->renderAdminDashboard($request, $event, 'highlights');
+    }
+
+    public function previewComparison(Request $request, Event $event): Response
+    {
+        return $this->renderAdminDashboard($request, $event, 'comparison');
+    }
+
+    private function renderClientDashboard(Request $request, Event $event, string $initialSection): Response
+    {
         $client = $request->user()->client()->firstOrFail();
 
         abort_unless(
@@ -41,10 +101,11 @@ class EventDashboardController extends Controller
             false,
             route('dashboard'),
             'Voltar ao dashboard',
+            $initialSection,
         );
     }
 
-    public function preview(Request $request, Event $event): Response
+    private function renderAdminDashboard(Request $request, Event $event, string $initialSection): Response
     {
         return $this->renderDashboard(
             $request,
@@ -52,6 +113,7 @@ class EventDashboardController extends Controller
             true,
             route('admin.events.index'),
             'Voltar para eventos',
+            $initialSection,
         );
     }
 
@@ -61,6 +123,7 @@ class EventDashboardController extends Controller
         bool $previewMode,
         string $backUrl,
         string $backLabel,
+        string $initialSection,
     ): Response {
         $event->load(['client', 'latestActiveReportImport', 'latestReportImport'])
             ->loadCount([
@@ -79,7 +142,7 @@ class EventDashboardController extends Controller
         $latestActiveImportSummary = is_array($event->latestActiveReportImport?->summary)
             ? $event->latestActiveReportImport->summary
             : [];
-        $eventOptions = $this->buildEventOptions($event, $previewMode);
+        $eventOptions = $this->buildEventOptions($event, $previewMode, $initialSection);
         $dashboardConfiguration = $this->dashboardConfiguration->resolve($event);
 
         $filters = $this->normalizeFilters($request);
@@ -236,6 +299,7 @@ class EventDashboardController extends Controller
                 'next_page_url' => $resolveRows()->nextPageUrl(),
             ]),
             'previewMode' => $previewMode,
+            'initialSection' => $initialSection,
             'backUrl' => $backUrl,
             'backLabel' => $backLabel,
         ]);
@@ -298,7 +362,7 @@ class EventDashboardController extends Controller
     /**
      * @return array<int, array{id: int, title: string, event_date: string, url: string, is_current: bool}>
      */
-    private function buildEventOptions(Event $event, bool $previewMode): array
+    private function buildEventOptions(Event $event, bool $previewMode, string $initialSection): array
     {
         return Event::query()
             ->where('client_id', $event->client_id)
@@ -310,17 +374,29 @@ class EventDashboardController extends Controller
                 'id' => $option->id,
                 'title' => $option->title,
                 'event_date' => $option->event_date->toISOString(),
-                'url' => $previewMode
-                    ? route('admin.events.dashboard', $option)
-                    : route('events.dashboard', $option),
+                'url' => $this->eventSectionUrl($option, $previewMode, $initialSection),
                 'is_current' => $option->id === $event->id,
             ])
             ->values()
             ->all();
     }
 
+    private function eventSectionUrl(Event $event, bool $previewMode, string $section): string
+    {
+        $routeSuffix = match ($section) {
+            'products' => 'products',
+            'reconciliation' => 'payments',
+            'zones' => 'zones',
+            'highlights' => 'performance',
+            'comparison' => 'comparison',
+            default => 'dashboard',
+        };
+
+        return route(($previewMode ? 'admin.events.' : 'events.').$routeSuffix, $event);
+    }
+
     /**
-     * @return array{bar_group: string, store: string, product: string, date_from: string, date_to: string, total_min: string, total_max: string}
+     * @return array{bar_group: string, store: string, product: string, date_from: string, date_to: string, hour_from: string, hour_to: string, total_min: string, total_max: string}
      */
     private function normalizeFilters(Request $request): array
     {
@@ -330,6 +406,8 @@ class EventDashboardController extends Controller
             'product' => ['nullable', 'string', 'max:255'],
             'date_from' => ['nullable', 'date'],
             'date_to' => ['nullable', 'date'],
+            'hour_from' => ['nullable', 'integer', 'between:0,23'],
+            'hour_to' => ['nullable', 'integer', 'between:0,23'],
             'total_min' => ['nullable', 'string', 'max:40'],
             'total_max' => ['nullable', 'string', 'max:40'],
         ]);
@@ -340,6 +418,8 @@ class EventDashboardController extends Controller
             'product' => trim((string) ($validated['product'] ?? '')),
             'date_from' => trim((string) ($validated['date_from'] ?? '')),
             'date_to' => trim((string) ($validated['date_to'] ?? '')),
+            'hour_from' => isset($validated['hour_from']) ? (string) $validated['hour_from'] : '',
+            'hour_to' => isset($validated['hour_to']) ? (string) $validated['hour_to'] : '',
             'total_min' => $this->normalizeDecimalString($validated['total_min'] ?? null),
             'total_max' => $this->normalizeDecimalString($validated['total_max'] ?? null),
         ];
@@ -366,6 +446,8 @@ class EventDashboardController extends Controller
         if ($filters['date_to'] !== '') {
             $this->applyReportingDateFilter($query, '<=', $filters['date_to']);
         }
+
+        $this->applyHourFilter($query, $filters['hour_from'], $filters['hour_to']);
 
         if ($filters['total_min'] !== '') {
             $query->where('total', '>=', (float) $filters['total_min']);
@@ -465,6 +547,7 @@ class EventDashboardController extends Controller
             ->first();
         $filteredRowsCount = (int) ($totals?->rows_count ?? 0);
         $totalSales = (float) ($totals?->total_sales ?? 0);
+        $eventTotalSales = (float) ((clone $baseRowsQuery)->sum('total') ?? 0);
         $ticketsCount = array_sum(array_map(
             fn (array $documentType): int => (int) ($documentType['tickets_count'] ?? 0),
             $documentTypes,
@@ -476,6 +559,7 @@ class EventDashboardController extends Controller
             'filtered_rows' => $filteredRowsCount,
             'bar_groups_count' => count($this->buildBarGroups(clone $filteredRowsQuery)),
             'total_sales' => $totalSales,
+            'event_total_sales' => $eventTotalSales,
             'total_value' => (float) ($totals?->total_value ?? 0),
             'total_discount' => (float) ($totals?->total_discount ?? 0),
             'total_quantity' => (float) ($totals?->total_quantity ?? 0),
@@ -576,6 +660,8 @@ class EventDashboardController extends Controller
             ->selectRaw("{$productDescription} as description")
             ->selectRaw('COUNT(*) as rows_count')
             ->selectRaw('COALESCE(SUM(quantity), 0) as quantity_total')
+            ->selectRaw('COALESCE(SUM(CASE WHEN total = 0 THEN quantity ELSE 0 END), 0) as offered_quantity')
+            ->selectRaw('COALESCE(SUM(CASE WHEN total != 0 THEN quantity ELSE 0 END), 0) as sold_quantity')
             ->selectRaw('COALESCE(SUM(total), 0) as sales_total')
             ->groupByRaw("{$productCode}, {$productDescription}")
             ->orderByDesc('quantity_total')
@@ -587,6 +673,9 @@ class EventDashboardController extends Controller
                 'code' => $row->product_code,
                 'rows_count' => (int) $row->rows_count,
                 'quantity_total' => (float) ($row->quantity_total ?? 0),
+                'offered_quantity' => (float) ($row->offered_quantity ?? 0),
+                'sold_quantity' => (float) ($row->sold_quantity ?? 0),
+                'category' => 'Sem categoria',
                 'sales_total' => (float) ($row->sales_total ?? 0),
             ])
             ->values()
@@ -1441,6 +1530,8 @@ class EventDashboardController extends Controller
             });
         }
 
+        $this->applyHourFilter($query, $filters['hour_from'], $filters['hour_to']);
+
         return $query;
     }
 
@@ -1483,7 +1574,68 @@ class EventDashboardController extends Controller
             })->values();
         }
 
+        if ($filters['hour_from'] !== '' || $filters['hour_to'] !== '') {
+            $documents = $documents->filter(function (array $document) use ($filters): bool {
+                $value = $document['sale_datetime'] ?? null;
+
+                if (! is_string($value) || trim($value) === '') {
+                    return false;
+                }
+
+                try {
+                    $hour = CarbonImmutable::parse($value)->hour;
+                } catch (\Throwable) {
+                    return false;
+                }
+
+                return $this->hourIsWithinRange($hour, $filters['hour_from'], $filters['hour_to']);
+            })->values();
+        }
+
         return $documents;
+    }
+
+    private function applyHourFilter(Builder $query, string $hourFrom, string $hourTo): void
+    {
+        if ($hourFrom === '' && $hourTo === '') {
+            return;
+        }
+
+        $driver = $query->getModel()->getConnection()->getDriverName();
+        $hourExpression = match ($driver) {
+            'pgsql' => 'CAST(EXTRACT(HOUR FROM sale_datetime) AS INTEGER)',
+            'mysql', 'mariadb' => 'HOUR(sale_datetime)',
+            default => "CAST(strftime('%H', sale_datetime) AS INTEGER)",
+        };
+
+        $query->whereNotNull('sale_datetime')
+            ->where(function (Builder $hourQuery) use ($hourExpression, $hourFrom, $hourTo): void {
+                if ($hourFrom !== '' && $hourTo !== '' && (int) $hourFrom > (int) $hourTo) {
+                    $hourQuery
+                        ->whereRaw("{$hourExpression} >= ?", [(int) $hourFrom])
+                        ->orWhereRaw("{$hourExpression} <= ?", [(int) $hourTo]);
+
+                    return;
+                }
+
+                if ($hourFrom !== '') {
+                    $hourQuery->whereRaw("{$hourExpression} >= ?", [(int) $hourFrom]);
+                }
+
+                if ($hourTo !== '') {
+                    $hourQuery->whereRaw("{$hourExpression} <= ?", [(int) $hourTo]);
+                }
+            });
+    }
+
+    private function hourIsWithinRange(int $hour, string $hourFrom, string $hourTo): bool
+    {
+        if ($hourFrom !== '' && $hourTo !== '' && (int) $hourFrom > (int) $hourTo) {
+            return $hour >= (int) $hourFrom || $hour <= (int) $hourTo;
+        }
+
+        return ($hourFrom === '' || $hour >= (int) $hourFrom)
+            && ($hourTo === '' || $hour <= (int) $hourTo);
     }
 
     private function applyReportingDateFilter(Builder $query, string $operator, string $date): Builder
