@@ -166,8 +166,8 @@ body {
 .app-sidebar {
     position: sticky;
     top: 0;
-    width: 15rem;
-    min-width: 15rem;
+    width: 12.5rem;
+    min-width: 12.5rem;
     height: 100vh;
     overflow: hidden;
     background: #03182b;
@@ -177,7 +177,7 @@ body {
 
 .app-sidebar-brand {
     display: flex;
-    min-height: 6.75rem;
+    min-height: 5.5rem;
     flex-direction: column;
     align-items: flex-start;
     justify-content: center;
@@ -234,11 +234,11 @@ body {
 .contacto-sidebar-menu-item {
     display: flex;
     width: 100%;
-    min-height: 2.55rem;
+    min-height: 2.3rem;
     align-items: center;
     gap: 0.75rem;
     border-radius: 0.5rem;
-    padding: 0.65rem 0.75rem;
+    padding: 0.55rem 0.75rem;
     color: #8ea3b8;
     background: transparent;
     font-size: 0.875rem;
@@ -452,7 +452,7 @@ body {
     position: sticky;
     top: 0;
     z-index: 20;
-    min-height: 4.8rem;
+    min-height: 4.15rem;
     background: rgba(3, 24, 43, 0.96);
     border-color: rgba(237, 237, 237, 0.08);
     backdrop-filter: blur(14px);
@@ -460,7 +460,7 @@ body {
 
 .app-page-header-inner {
     max-width: none;
-    padding: 0.9rem 1.5rem;
+    padding: 0.7rem 1.5rem;
 }
 
 .app-header-row {
@@ -736,7 +736,7 @@ body {
 
 .contacto-live-dashboard {
     display: grid;
-    gap: 1.25rem;
+    gap: 1rem;
     animation: contacto-dashboard-reveal 260ms ease-out both;
 }
 
@@ -762,7 +762,7 @@ body {
     min-width: 0;
     align-items: center;
     gap: 0.55rem;
-    padding: 0.75rem 1rem;
+    padding: 0.6rem 0.9rem;
 }
 
 .contacto-zone-filter-row {
@@ -781,7 +781,7 @@ body {
 
 .contacto-zone-filter-row button {
     flex: none;
-    min-height: 2.5rem;
+    min-height: 2.1rem;
     border: 1px solid rgba(237, 237, 237, 0.1);
     border-radius: 999px;
     padding: 0.35rem 0.75rem;
@@ -800,6 +800,11 @@ body {
     color: #03182b;
     border-color: #e7ff49;
     background: #e7ff49;
+}
+
+.contacto-zone-filter-row button.contacto-zone-more {
+    border-style: dashed;
+    color: #c6d1dc;
 }
 
 .contacto-zone-filter-actions {
@@ -1456,6 +1461,222 @@ body {
     font-size: 0.625rem;
 }
 
+.contacto-event-bests,
+.contacto-summary-details {
+    min-width: 0;
+}
+
+.contacto-event-bests {
+    overflow: hidden;
+    border: 1px solid rgba(237, 237, 237, 0.1);
+    border-radius: 1.25rem;
+    padding: 1.15rem;
+    background: #061f36;
+}
+
+.contacto-event-bests > header,
+.contacto-top-products-summary > header,
+.contacto-event-sheet > header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+}
+
+.contacto-event-bests > header small,
+.contacto-top-products-summary > header small,
+.contacto-event-sheet > header small {
+    color: #8ea3b8;
+    font-size: 0.625rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+}
+
+.contacto-event-bests > div {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.75rem;
+    margin-top: 1rem;
+}
+
+.contacto-event-bests article {
+    min-width: 0;
+    border: 1px solid rgba(237, 237, 237, 0.08);
+    border-radius: 0.85rem;
+    padding: 0.95rem;
+    background: #082742;
+}
+
+.contacto-event-bests article > span,
+.contacto-event-bests article > strong,
+.contacto-event-bests article > b,
+.contacto-event-bests article > small {
+    display: block;
+}
+
+.contacto-event-bests article > span {
+    color: #8ea3b8;
+    font-size: 0.625rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+}
+
+.contacto-event-bests article > strong {
+    overflow: hidden;
+    margin-top: 0.5rem;
+    color: #ededed;
+    font-size: 0.875rem;
+    font-weight: 500;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.contacto-event-bests article > b {
+    margin-top: 0.3rem;
+    color: #e7ff49;
+    font-size: 1.2rem;
+    font-weight: 500;
+}
+
+.contacto-event-bests article > small {
+    margin-top: 0.35rem;
+    color: #8ea3b8;
+    font-size: 0.625rem;
+}
+
+.contacto-summary-details {
+    display: grid;
+    grid-template-columns: minmax(0, 1.45fr) minmax(18rem, 0.75fr);
+    gap: 1rem;
+}
+
+.contacto-top-products-table {
+    margin-top: 0.85rem;
+}
+
+.contacto-top-products-head,
+.contacto-top-products-table > article {
+    display: grid;
+    grid-template-columns: minmax(10rem, 1.5fr) minmax(6rem, 0.65fr) minmax(7rem, 0.8fr) 4.25rem;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.contacto-top-products-head {
+    padding: 0.55rem 0;
+    color: #8ea3b8;
+    font-size: 0.625rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+}
+
+.contacto-top-products-table > article {
+    min-height: 3rem;
+    border-top: 1px solid rgba(237, 237, 237, 0.08);
+    color: #c6d1dc;
+    font-size: 0.6875rem;
+}
+
+.contacto-top-product-name {
+    display: grid;
+    min-width: 0;
+    grid-template-columns: 1.25rem minmax(0, 1fr);
+    align-items: center;
+}
+
+.contacto-top-product-name em {
+    grid-row: span 2;
+    color: #8ea3b8;
+    font-style: normal;
+}
+
+.contacto-top-product-name strong {
+    overflow: hidden;
+    color: #ededed;
+    font-weight: 500;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.contacto-top-product-name small {
+    overflow: hidden;
+    color: #8ea3b8;
+    font-size: 0.5625rem;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.contacto-top-products-table > article > b {
+    color: #e7ff49;
+    font-weight: 500;
+    text-align: right;
+}
+
+.contacto-event-sheet dl {
+    display: grid;
+    gap: 0.75rem;
+    margin-top: 1rem;
+}
+
+.contacto-event-sheet dl > div {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 1rem;
+    border-bottom: 1px solid rgba(237, 237, 237, 0.08);
+    padding-bottom: 0.65rem;
+}
+
+.contacto-event-sheet dl > div:last-child {
+    border-bottom: 0;
+    padding-bottom: 0;
+}
+
+.contacto-event-sheet dt {
+    color: #8ea3b8;
+    font-size: 0.6875rem;
+}
+
+.contacto-event-sheet dd {
+    overflow: hidden;
+    color: #ededed;
+    font-size: 0.75rem;
+    text-align: right;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.report-dashboard-sync-status {
+    align-items: center;
+    border-radius: 999px;
+    margin-bottom: 1rem;
+    padding: 0.65rem 1rem;
+}
+
+.report-dashboard-sync-status > div {
+    display: grid;
+    min-width: 0;
+    flex: 1;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.report-dashboard-sync-status p,
+.report-dashboard-sync-status small {
+    margin-top: 0;
+}
+
+.report-dashboard-sync-status p {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.report-dashboard-sync-status small {
+    white-space: nowrap;
+}
+
 .contacto-empty {
     display: grid;
     min-height: 12rem;
@@ -1519,9 +1740,6 @@ body {
         grid-template-columns: minmax(0, 1.2fr) repeat(2, minmax(11rem, 1fr));
     }
 
-    .contacto-analysis-grid {
-        grid-template-columns: 1fr;
-    }
 }
 
 @media (max-width: 1220px) {
@@ -1551,6 +1769,14 @@ body {
     }
 
     .contacto-analysis-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .contacto-event-bests > div {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .contacto-summary-details {
         grid-template-columns: 1fr;
     }
 }
@@ -1656,6 +1882,56 @@ body {
     .contacto-kpi-mesh,
     .contacto-mini-stats {
         grid-template-columns: 1fr;
+    }
+
+    .contacto-event-bests > div {
+        grid-template-columns: 1fr;
+    }
+
+    .report-dashboard-sync-status {
+        align-items: flex-start;
+        border-radius: 1rem;
+    }
+
+    .report-dashboard-sync-status > div {
+        display: block;
+    }
+
+    .report-dashboard-sync-status p,
+    .report-dashboard-sync-status small {
+        margin-top: 0.25rem;
+        white-space: normal;
+    }
+
+    .contacto-top-products-head {
+        display: none;
+    }
+
+    .contacto-top-products-table > article {
+        grid-template-columns: minmax(0, 1fr) auto;
+        padding: 0.75rem 0;
+    }
+
+    .contacto-top-product-name {
+        grid-column: 1 / -1;
+    }
+
+    .contacto-top-products-table > article > span:not(.contacto-top-product-name),
+    .contacto-top-products-table > article > strong,
+    .contacto-top-products-table > article > b {
+        text-align: right;
+    }
+
+    .contacto-top-products-table > article > span:not(.contacto-top-product-name)::before,
+    .contacto-top-products-table > article > strong::before,
+    .contacto-top-products-table > article > b::before {
+        display: block;
+        color: #8ea3b8;
+        content: attr(data-label);
+        font-size: 0.55rem;
+        font-weight: 400;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
     }
 
     .contacto-leader-banner {

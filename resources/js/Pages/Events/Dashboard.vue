@@ -428,6 +428,8 @@ const sidebarSections = computed<SidebarSectionItem[]>(() => sidebarSectionDefin
     }));
 const mainSidebarSections = computed(() => sidebarSections.value.filter((section) => section.key !== 'comparison'));
 const comparisonSidebarSection = computed(() => sidebarSections.value.find((section) => section.key === 'comparison') ?? null);
+const quickZoneOptions = computed(() => props.filterOptions.barGroups.slice(0, 6));
+const hiddenQuickZoneCount = computed(() => Math.max(0, props.filterOptions.barGroups.length - quickZoneOptions.value.length));
 
 watch(dashboardSections, (sections) => {
     if (!sections.some((section) => section.key === activeSection.value)) {
@@ -992,6 +994,21 @@ const leadingZoneShare = computed(() => {
 
     return Math.min(100, Math.max(0, (leadingZone.value.sales_total / props.summary.total_sales) * 100));
 });
+const bestProductBySales = computed(() => [...props.topProducts]
+    .sort((left, right) => right.sales_total - left.sales_total)[0] ?? null);
+const mostServedProduct = computed(() => [...props.topProducts]
+    .sort((left, right) => right.quantity_total - left.quantity_total)[0] ?? null);
+const bestEventDay = computed(() => [...props.dailySales]
+    .sort((left, right) => right.sales_total - left.sales_total)[0] ?? null);
+const summaryTopProducts = computed(() => [...props.topProducts]
+    .sort((left, right) => right.sales_total - left.sales_total)
+    .slice(0, 5));
+const eventPeriodLabel = computed(() => {
+    const firstDay = props.dailySales[0]?.label || formatDate(props.event.event_date);
+    const lastDay = props.dailySales[props.dailySales.length - 1]?.label;
+
+    return lastDay && lastDay !== firstDay ? `${firstDay} - ${lastDay}` : firstDay;
+});
 const eventStatusLabel = computed(() => hasProcessingSync.value || props.autoSync.enabled
     ? 'Em curso'
     : 'Concluído');
@@ -1021,6 +1038,8 @@ const chartPaymentItems = computed<ChartPaymentItem[]>(() => {
         color: palette[index % palette.length],
     }));
 });
+const bestPaymentMethod = computed(() => [...chartPaymentItems.value]
+    .sort((left, right) => right.value - left.value)[0] ?? null);
 const chartPaymentTotal = computed(() => chartPaymentItems.value.reduce((sum, payment) => sum + payment.value, 0));
 const chartPaymentDonutStyle = computed(() => {
     if (chartPaymentTotal.value <= 0) {
@@ -1809,31 +1828,6 @@ function getDifferenceClass(value: number | null) {
                     </p>
 
                     <div
-                        v-if="(activeSection === 'summary' || activeSection === 'charts') && sectionIsVisible('summary') && sectionIsVisible('charts')"
-                        class="report-dashboard-summary-view-switcher"
-                        aria-label="Modo de visualização do resumo"
-                    >
-                        <div class="report-dashboard-view-toggle report-dashboard-summary-view-toggle">
-                            <button
-                                type="button"
-                                :class="{ 'is-active': activeSection === 'summary' }"
-                                :aria-pressed="activeSection === 'summary'"
-                                @click="activeSection = 'summary'"
-                            >
-                                Lista
-                            </button>
-                            <button
-                                type="button"
-                                :class="{ 'is-active': activeSection === 'charts' }"
-                                :aria-pressed="activeSection === 'charts'"
-                                @click="activeSection = 'charts'"
-                            >
-                                Gráfico
-                            </button>
-                        </div>
-                    </div>
-
-                    <div
                         v-if="activeSection === 'summary'"
                         class="contacto-live-dashboard"
                     >
@@ -1843,18 +1837,26 @@ function getDifferenceClass(value: number | null) {
                                 <button
                                     type="button"
                                     :class="{ 'is-active': localFilters.bar_group === '' }"
-                                    @click="applyBarGroupFilter(localFilters.bar_group)"
+                                    @click="applyBarGroupFilter('')"
                                 >
                                     Todas
                                 </button>
                                 <button
-                                    v-for="option in props.filterOptions.barGroups"
+                                    v-for="option in quickZoneOptions"
                                     :key="`quick-${option.value}`"
                                     type="button"
                                     :class="{ 'is-active': localFilters.bar_group === option.value }"
                                     @click="applyBarGroupFilter(option.value)"
                                 >
                                     {{ option.label }}
+                                </button>
+                                <button
+                                    v-if="hiddenQuickZoneCount > 0"
+                                    type="button"
+                                    class="contacto-zone-more"
+                                    @click="filtersOpen = true"
+                                >
+                                    +{{ hiddenQuickZoneCount }} zonas
                                 </button>
                                 <div class="contacto-zone-filter-actions">
                                     <button
@@ -2109,6 +2111,87 @@ function getDifferenceClass(value: number | null) {
                                 <strong>{{ card.value }}</strong>
                                 <small>{{ card.helper }}</small>
                             </button>
+                        </section>
+
+                        <section class="contacto-event-bests" aria-labelledby="contacto-event-bests-title">
+                            <header>
+                                <span class="contacto-label" id="contacto-event-bests-title">Os melhores do evento</span>
+                                <small>Produto · zona · hora · pagamento</small>
+                            </header>
+                            <div>
+                                <article>
+                                    <span>Melhor produto</span>
+                                    <strong>{{ bestProductBySales?.label || 'Sem dados' }}</strong>
+                                    <b>{{ bestProductBySales ? formatMoney(bestProductBySales.sales_total) : formatMoney(0) }}</b>
+                                    <small>Maior faturação por produto</small>
+                                </article>
+                                <article>
+                                    <span>Mais servido</span>
+                                    <strong>{{ mostServedProduct?.label || 'Sem dados' }}</strong>
+                                    <b>{{ mostServedProduct ? `${formatNumber(mostServedProduct.quantity_total)} un` : '0 un' }}</b>
+                                    <small>Maior quantidade registada</small>
+                                </article>
+                                <article>
+                                    <span>Melhor zona</span>
+                                    <strong>{{ leadingZone?.label || 'Sem dados' }}</strong>
+                                    <b>{{ leadingZone ? formatMoney(leadingZone.sales_total) : formatMoney(0) }}</b>
+                                    <small>{{ leadingZoneShare.toFixed(1).replace('.', ',') }}% do total</small>
+                                </article>
+                                <article>
+                                    <span>Melhor hora</span>
+                                    <strong>{{ primaryHourlyPeak?.hour_label || 'Sem dados' }}</strong>
+                                    <b>{{ primaryHourlyPeak ? formatMoney(primaryHourlyPeak.sales_total) : formatMoney(0) }}</b>
+                                    <small>{{ primaryHourlyPeak ? `${formatNumber(primaryHourlyPeak.tickets_count)} transações` : 'Sem vendas horárias' }}</small>
+                                </article>
+                                <article>
+                                    <span>Melhor método</span>
+                                    <strong>{{ bestPaymentMethod?.label || 'Sem dados' }}</strong>
+                                    <b>{{ bestPaymentMethod ? formatMoney(bestPaymentMethod.value) : formatMoney(0) }}</b>
+                                    <small>{{ bestPaymentMethod ? `${bestPaymentMethod.percentage.toFixed(1).replace('.', ',')}% dos pagamentos` : 'Sem pagamentos' }}</small>
+                                </article>
+                                <article>
+                                    <span>Melhor dia</span>
+                                    <strong>{{ bestEventDay?.label || 'Sem dados' }}</strong>
+                                    <b>{{ bestEventDay ? formatMoney(bestEventDay.sales_total) : formatMoney(0) }}</b>
+                                    <small>{{ bestEventDay ? `${formatNumber(bestEventDay.tickets_count)} transações` : 'Sem vendas diárias' }}</small>
+                                </article>
+                            </div>
+                        </section>
+
+                        <section class="contacto-summary-details">
+                            <article class="contacto-panel contacto-top-products-summary">
+                                <header>
+                                    <span class="contacto-label">Produtos mais vendidos</span>
+                                    <small>Top 5 por faturação</small>
+                                </header>
+                                <div v-if="summaryTopProducts.length" class="contacto-top-products-table">
+                                    <div class="contacto-top-products-head" aria-hidden="true">
+                                        <span>Produto</span><span>Quantidade</span><span>Faturação</span><span>% total</span>
+                                    </div>
+                                    <article v-for="(product, index) in summaryTopProducts" :key="`summary-product-${product.code || product.label}`">
+                                        <span class="contacto-top-product-name"><em>{{ index + 1 }}</em><strong>{{ product.label }}</strong><small>{{ product.code }}</small></span>
+                                        <span data-label="Quantidade">{{ formatNumber(product.quantity_total) }}</span>
+                                        <strong data-label="Faturação">{{ formatMoney(product.sales_total) }}</strong>
+                                        <b data-label="% total">{{ props.summary.total_sales > 0 ? `${((product.sales_total / props.summary.total_sales) * 100).toFixed(1).replace('.', ',')}%` : '0,0%' }}</b>
+                                    </article>
+                                </div>
+                                <p v-else class="contacto-empty">Sem produtos sincronizados.</p>
+                            </article>
+
+                            <article class="contacto-panel contacto-event-sheet">
+                                <header>
+                                    <span class="contacto-label">Ficha do evento</span>
+                                    <small>Resumo</small>
+                                </header>
+                                <dl>
+                                    <div><dt>Evento</dt><dd>{{ props.event.title }}</dd></div>
+                                    <div><dt>Cliente</dt><dd>{{ props.event.client_business_name || props.event.client_name }}</dd></div>
+                                    <div><dt>Período</dt><dd>{{ eventPeriodLabel }}</dd></div>
+                                    <div><dt>Devices</dt><dd>{{ formatNumber(props.summary.machines_count) }}</dd></div>
+                                    <div><dt>Zonas</dt><dd>{{ formatNumber(props.summary.bar_groups_count) }}</dd></div>
+                                    <div><dt>Estado</dt><dd>{{ eventStatusLabel }}</dd></div>
+                                </dl>
+                            </article>
                         </section>
                     </div>
 
