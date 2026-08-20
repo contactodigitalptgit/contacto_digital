@@ -2,6 +2,7 @@
 import type { PageProps } from '@/types';
 import { computed } from 'vue';
 import ApplicationLogo from '@/Components/ApplicationLogo.vue';
+import AppSidebarIcon from '@/Components/AppSidebarIcon.vue';
 import Dropdown from '@/Components/Dropdown.vue';
 import { Link, usePage } from '@inertiajs/vue3';
 
@@ -69,59 +70,32 @@ const isActive = (item: NavItem) => {
             <aside class="app-sidebar">
                 <div class="app-sidebar-brand">
                     <Link :href="route('dashboard')" class="contacto-sidebar-brand-link">
-                        <img src="/images/logo2.png" alt="Contacto Digital" class="contacto-sidebar-logo" />
+                        <img src="/images/logo-contacto-digital.webp" alt="Contacto Digital" class="contacto-sidebar-logo" />
                     </Link>
                     <span v-if="isAdmin" class="contacto-sidebar-mode">Modo administrador</span>
                 </div>
 
                 <nav class="app-nav">
-                    <Link
-                        v-for="item in primaryNavigation"
-                        :key="item.key"
-                        :href="item.href"
-                        class="app-nav-link"
-                        :class="{ 'is-active': isActive(item) }"
-                    >
-                        <span class="app-nav-icon">
-                            <svg
-                                v-if="item.icon === 'dashboard'"
-                                class="h-5 w-5"
-                                viewBox="0 0 24 24"
-                                fill="none"
-                                stroke="currentColor"
-                                stroke-width="1.8"
-                            >
-                                <path d="M3 13h8V3H3zM13 21h8V11h-8zM13 3h8v6h-8zM3 21h8v-6H3z" />
-                            </svg>
-                            <svg
-                                v-if="item.icon === 'clients'"
-                                class="h-5 w-5"
-                                viewBox="0 0 24 24"
-                                fill="none"
-                                stroke="currentColor"
-                                stroke-width="1.8"
-                            >
-                                <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
-                                <circle cx="8.5" cy="7" r="4" />
-                                <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
-                                <path d="M16 3.13a4 4 0 0 1 0 7.75" />
-                            </svg>
-                            <svg
-                                v-if="item.icon === 'events'"
-                                class="h-5 w-5"
-                                viewBox="0 0 24 24"
-                                fill="none"
-                                stroke="currentColor"
-                                stroke-width="1.8"
-                            >
-                                <rect x="3" y="4" width="18" height="18" rx="2" />
-                                <path d="M16 2v4M8 2v4M3 10h18" />
-                            </svg>
-                        </span>
-                        <span>{{ item.label }}</span>
-                    </Link>
+                    <slot
+                        v-if="$slots['sidebar-navigation']"
+                        name="sidebar-navigation"
+                        :is-admin="isAdmin"
+                    />
 
-                    <slot name="sidebar-navigation" />
+                    <template v-else>
+                        <Link
+                            v-for="item in primaryNavigation"
+                            :key="item.key"
+                            :href="item.href"
+                            class="app-nav-link"
+                            :class="{ 'is-active': isActive(item) }"
+                        >
+                            <span class="app-nav-icon">
+                                <AppSidebarIcon :name="item.icon" class="h-5 w-5" />
+                            </span>
+                            <span>{{ item.label }}</span>
+                        </Link>
+                    </template>
                 </nav>
             </aside>
 
@@ -286,40 +260,7 @@ const isActive = (item: NavItem) => {
                         class="app-mobile-nav-link"
                         :class="{ 'is-active': isActive(item) }"
                     >
-                        <svg
-                            v-if="item.icon === 'dashboard'"
-                            class="mb-1 h-5 w-5"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            stroke-width="1.8"
-                        >
-                            <path d="M3 13h8V3H3zM13 21h8V11h-8zM13 3h8v6h-8zM3 21h8v-6H3z" />
-                        </svg>
-                        <svg
-                            v-if="item.icon === 'clients'"
-                            class="mb-1 h-5 w-5"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            stroke-width="1.8"
-                        >
-                            <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
-                            <circle cx="8.5" cy="7" r="4" />
-                            <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
-                            <path d="M16 3.13a4 4 0 0 1 0 7.75" />
-                        </svg>
-                        <svg
-                            v-if="item.icon === 'events'"
-                            class="mb-1 h-5 w-5"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            stroke-width="1.8"
-                        >
-                            <rect x="3" y="4" width="18" height="18" rx="2" />
-                            <path d="M16 2v4M8 2v4M3 10h18" />
-                        </svg>
+                        <AppSidebarIcon :name="item.icon" class="mb-1 h-5 w-5" />
                         <span>{{ item.label }}</span>
                     </Link>
                 </li>

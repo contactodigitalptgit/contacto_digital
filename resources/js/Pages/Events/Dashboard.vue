@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout.vue';
+import AppSidebarIcon from '@/Components/AppSidebarIcon.vue';
 import { showErrorToast, showSuccessToast } from '@/lib/swal';
 import type {
     DashboardConfiguration,
@@ -298,6 +299,12 @@ interface SummaryHourlyPoint extends HourlySale {
     is_peak: boolean;
 }
 
+interface SidebarSectionItem {
+    key: DashboardSection;
+    label: string;
+    icon: 'dashboard' | 'products' | 'payments' | 'zones' | 'performance' | 'compare';
+}
+
 interface ChartOperationalItem {
     label: string;
     value: number;
@@ -398,6 +405,30 @@ const dashboardSections = computed(() => activeDashboardConfiguration.value.sect
         helper: section.helper,
     })));
 
+const sidebarSectionDefinitions: SidebarSectionItem[] = [
+    { key: 'summary', label: 'Dashboard', icon: 'dashboard' },
+    { key: 'products', label: 'Produtos', icon: 'products' },
+    { key: 'reconciliation', label: 'Pagamentos', icon: 'payments' },
+    { key: 'zones', label: 'Zonas', icon: 'zones' },
+    { key: 'highlights', label: 'Performance', icon: 'performance' },
+    { key: 'comparison', label: 'Comparar edições', icon: 'compare' },
+];
+
+const sidebarSections = computed<SidebarSectionItem[]>(() => sidebarSectionDefinitions
+    .filter((definition) => dashboardSections.value.some((section) => section.key === definition.key))
+    .map((definition) => {
+        const configuredSection = dashboardSections.value.find((section) => section.key === definition.key);
+
+        return {
+            ...definition,
+            label: dashboardUsesCustomLayout.value
+                ? configuredSection?.label || definition.label
+                : definition.label,
+        };
+    }));
+const mainSidebarSections = computed(() => sidebarSections.value.filter((section) => section.key !== 'comparison'));
+const comparisonSidebarSection = computed(() => sidebarSections.value.find((section) => section.key === 'comparison') ?? null);
+
 watch(dashboardSections, (sections) => {
     if (!sections.some((section) => section.key === activeSection.value)) {
         activeSection.value = sections[0]?.key ?? 'summary';
@@ -456,6 +487,14 @@ function metricLabel(key: string, fallback: string): string {
 
 function sectionIsVisible(key: DashboardSection): boolean {
     return dashboardSections.value.some((section) => section.key === key);
+}
+
+function sidebarSectionIsActive(key: DashboardSection): boolean {
+    if (key === 'summary') {
+        return activeSection.value === 'summary' || activeSection.value === 'charts';
+    }
+
+    return activeSection.value === key;
 }
 
 const metricGridClasses: Record<number, string> = {
@@ -1476,68 +1515,71 @@ function getDifferenceClass(value: number | null) {
     <Head :title="`Evento - ${props.event.title}`" />
 
     <AuthenticatedLayout>
-        <template #sidebar-navigation>
-            <section class="app-report-navigation" aria-label="Menu do relatório">
-                <header class="app-report-navigation-header">
-                    <span>Reporting</span>
-                    <strong>{{ props.event.title }}</strong>
-                </header>
-
-                <div class="app-report-navigation-list">
-                    <Link
-                        v-if="props.dashboardEditor?.enabled"
-                        :href="props.dashboardEditor.edit_url"
-                        class="app-report-navigation-item app-report-navigation-edit"
+        <template #sidebar-navigation="{ isAdmin }">
+            <section class="contacto-sidebar-navigation" aria-label="Navegação principal">
+                <div class="contacto-sidebar-menu">
+                    <button
+                        v-for="section in mainSidebarSections"
+                        :key="section.key"
+                        type="button"
+                        class="contacto-sidebar-menu-item"
+                        :class="{
+                            'is-active': sidebarSectionIsActive(section.key),
+                            'is-dashboard': section.key === 'summary',
+                        }"
+                        @click="activeSection = section.key"
                     >
-                        <span class="app-report-navigation-number">
-                            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                                <path d="m4 16-.8 4.8L8 20l10.4-10.4a2.1 2.1 0 0 0-3-3L5 17Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" />
-                                <path d="m13.8 8.2 3 3" stroke="currentColor" stroke-width="1.8" />
-                            </svg>
-                        </span>
-                        <span>
-                            <strong>Editar página</strong>
-                            <small>Personalizar relatório</small>
-                        </span>
+                        <AppSidebarIcon :name="section.icon" />
+                        <span>{{ section.label }}</span>
+                    </button>
+
+                    <Link
+                        v-if="isAdmin"
+                        :href="route('admin.events.index')"
+                        class="contacto-sidebar-menu-item"
+                    >
+                        <AppSidebarIcon name="events" />
+                        <span>Eventos</span>
+                    </Link>
+
+                    <Link
+                        v-if="isAdmin"
+                        :href="route('admin.clients.index')"
+                        class="contacto-sidebar-menu-item"
+                    >
+                        <AppSidebarIcon name="clients" />
+                        <span>Clientes</span>
                     </Link>
 
                     <button
-                        v-for="section in dashboardSections"
-                        :key="section.key"
+                        v-if="comparisonSidebarSection"
                         type="button"
-                        class="app-report-navigation-item"
-                        :class="{ 'is-active': activeSection === section.key }"
-                        @click="activeSection = section.key"
+                        class="contacto-sidebar-menu-item"
+                        :class="{ 'is-active': sidebarSectionIsActive(comparisonSidebarSection.key) }"
+                        @click="activeSection = comparisonSidebarSection.key"
                     >
-                        <span class="app-report-navigation-number">{{ section.number }}</span>
-                        <span>
-                            <strong>{{ section.label }}</strong>
-                            <small>{{ section.helper }}</small>
-                        </span>
+                        <AppSidebarIcon :name="comparisonSidebarSection.icon" />
+                        <span>{{ comparisonSidebarSection.label }}</span>
                     </button>
+
+                    <Link
+                        v-if="props.dashboardEditor?.enabled"
+                        :href="props.dashboardEditor.edit_url"
+                        class="contacto-sidebar-menu-item contacto-sidebar-editor-link"
+                    >
+                        <AppSidebarIcon name="edit" />
+                        <span>Editar página</span>
+                    </Link>
                 </div>
 
-                <div class="app-report-navigation-status">
-                    <span :class="{ 'is-syncing': hasProcessingSync, 'is-failed': props.syncStatus.is_stale }" />
+                <div class="contacto-sidebar-sync">
                     <div>
+                        <span :class="{ 'is-syncing': hasProcessingSync, 'is-failed': props.syncStatus.is_stale }" />
                         <strong>{{ autoSyncStatusLabel }}</strong>
-                        <small v-if="props.autoSync.enabled">Próxima em {{ autoSyncCountdown }}</small>
                     </div>
+                    <small>Última atualização: {{ formatDateTime(props.summary.last_synced_at) }}</small>
+                    <em>Cashless by Contacto Digital</em>
                 </div>
-
-                <a
-                    :href="whatsappSupportUrl"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    class="app-report-help"
-                >
-                    <span class="app-report-help-icon">?</span>
-                    <span>
-                        <strong>Precisas de ajuda?</strong>
-                        <small>Fala connosco sobre o relatório.</small>
-                    </span>
-                    <em>WhatsApp</em>
-                </a>
             </section>
         </template>
 
@@ -1657,18 +1699,17 @@ function getDifferenceClass(value: number | null) {
 
                     <nav class="report-dashboard-navigation-list">
                         <button
-                            v-for="section in dashboardSections"
+                            v-for="section in sidebarSections"
                             :key="section.key"
                             type="button"
                             class="report-dashboard-navigation-item"
-                            :class="{ 'is-active': activeSection === section.key }"
+                            :class="{ 'is-active': sidebarSectionIsActive(section.key) }"
                             @click="activeSection = section.key"
                         >
-                            <span class="report-dashboard-navigation-number">{{ section.number }}</span>
-                            <span>
-                                <strong>{{ section.label }}</strong>
-                                <small>{{ section.helper }}</small>
+                            <span class="report-dashboard-navigation-number">
+                                <AppSidebarIcon :name="section.icon" />
                             </span>
+                            <strong>{{ section.label }}</strong>
                         </button>
                     </nav>
 
