@@ -90,6 +90,732 @@
     }
 }
 
+@layer components {
+    .contacto-report-filterbar {
+        display: grid;
+        gap: 0;
+        overflow: hidden;
+        border: 1px solid rgba(126, 157, 184, 0.2);
+        border-radius: 1.75rem;
+        background: rgba(5, 31, 51, 0.72);
+        box-shadow: 0 18px 50px rgba(0, 12, 25, 0.14);
+    }
+
+    .contacto-report-filterbar-zones,
+    .contacto-report-filterbar-period {
+        display: flex;
+        min-width: 0;
+        align-items: center;
+        gap: 0.75rem;
+        padding: 1.15rem 1.5rem;
+    }
+
+    .contacto-report-filterbar-zones {
+        overflow-x: auto;
+        border-bottom: 1px solid rgba(126, 157, 184, 0.16);
+        scrollbar-width: thin;
+    }
+
+    .contacto-report-filterbar-zones button,
+    .contacto-report-more {
+        flex: 0 0 auto;
+        min-height: 2.45rem;
+        border: 1px solid rgba(126, 157, 184, 0.24);
+        border-radius: 999px;
+        padding: 0.5rem 1rem;
+        color: #91a6ba;
+        font-size: 0.875rem;
+        transition: border-color 160ms ease, color 160ms ease, background-color 160ms ease;
+    }
+
+    .contacto-report-filterbar-zones button:hover,
+    .contacto-report-filterbar-zones button.is-active {
+        border-color: #dcff2f;
+        color: #efff74;
+        background: rgba(220, 255, 47, 0.08);
+    }
+
+    .contacto-report-filterbar-period {
+        flex-wrap: wrap;
+        color: #8499ad;
+        font-size: 0.875rem;
+    }
+
+    .contacto-report-select {
+        min-height: 2.55rem;
+        border: 1px solid rgba(126, 157, 184, 0.24);
+        border-radius: 0.75rem;
+        padding: 0.5rem 0.8rem;
+        color: #dce7ef;
+        background: rgba(11, 42, 66, 0.78);
+        color-scheme: dark;
+    }
+
+    .contacto-report-hour-label {
+        margin-left: 0.75rem;
+    }
+
+    .contacto-report-refine,
+    .contacto-report-clear {
+        margin-left: auto;
+        color: #cdd8e2;
+        font-size: 0.82rem;
+        text-decoration: underline;
+        text-underline-offset: 0.25rem;
+    }
+
+    .contacto-report-clear {
+        margin-left: 0;
+        color: #8295a8;
+    }
+
+    .contacto-menu-page {
+        display: grid;
+        gap: 1.5rem;
+        animation: contacto-menu-reveal 320ms ease both;
+    }
+
+    .contacto-menu-toolbar {
+        display: flex;
+        min-height: 3.75rem;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem;
+    }
+
+    .contacto-menu-toolbar > div {
+        display: flex;
+        align-items: center;
+        gap: 0.8rem;
+    }
+
+    .contacto-menu-toolbar > div > strong {
+        color: #edf3f7;
+        font-size: 1rem;
+        font-weight: 600;
+    }
+
+    .contacto-menu-kpis {
+        display: grid;
+        gap: 1rem;
+    }
+
+    .contacto-menu-kpis.is-four {
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+
+    .contacto-menu-kpis.is-three {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .contacto-menu-kpis > article,
+    .contacto-zone-kpis > article,
+    .contacto-payment-kpis > article {
+        display: flex;
+        min-width: 0;
+        min-height: 9rem;
+        flex-direction: column;
+        justify-content: center;
+        gap: 0.6rem;
+        border: 1px solid rgba(126, 157, 184, 0.2);
+        border-radius: 1.5rem;
+        padding: 1.45rem;
+        background: rgba(8, 35, 58, 0.7);
+    }
+
+    .contacto-menu-kpis > article:nth-child(odd) {
+        border-left-color: #dcff2f;
+    }
+
+    .contacto-menu-kpis > article:nth-child(even) {
+        border-left-color: #3158ca;
+    }
+
+    .contacto-menu-kpis article > span,
+    .contacto-zone-overview article > span,
+    .contacto-payment-overview article > span {
+        color: #8ea4b8;
+        font-size: 0.75rem;
+        font-weight: 650;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+    }
+
+    .contacto-menu-kpis article > strong,
+    .contacto-zone-kpis article > strong,
+    .contacto-payment-kpis article > strong {
+        overflow: hidden;
+        color: #edf4f8;
+        font-size: clamp(1.45rem, 2vw, 2.35rem);
+        font-weight: 600;
+        line-height: 1.05;
+        text-overflow: ellipsis;
+    }
+
+    .contacto-menu-kpis article > small,
+    .contacto-zone-overview article > small,
+    .contacto-payment-overview article > small {
+        color: #879caf;
+        font-size: 0.8rem;
+    }
+
+    .contacto-menu-kpis article.is-accent,
+    .contacto-zone-kpis article.is-accent,
+    .contacto-payment-kpis article.is-accent {
+        border-color: rgba(49, 88, 202, 0.8);
+        background: linear-gradient(145deg, rgba(20, 56, 98, 0.92), rgba(6, 43, 78, 0.9));
+    }
+
+    .contacto-menu-kpis article.is-accent > strong,
+    .contacto-zone-kpis article.is-accent > strong,
+    .contacto-payment-kpis article.is-accent > strong {
+        color: #dcff2f;
+    }
+
+    .contacto-menu-panel,
+    .contacto-performance-chart {
+        min-width: 0;
+        overflow: hidden;
+        border: 1px solid rgba(126, 157, 184, 0.2);
+        border-radius: 1.75rem;
+        background: rgba(7, 32, 53, 0.72);
+        box-shadow: 0 18px 48px rgba(0, 12, 25, 0.12);
+    }
+
+    .contacto-menu-panel > header,
+    .contacto-performance-chart > header {
+        display: flex;
+        min-height: 4.5rem;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem;
+        padding: 1.3rem 1.55rem;
+    }
+
+    .contacto-menu-panel > header > div,
+    .contacto-performance-chart > header > div {
+        display: grid;
+        gap: 0.3rem;
+    }
+
+    .contacto-menu-panel > header span,
+    .contacto-performance-chart > header span {
+        color: #9bb0c3;
+        font-size: 0.78rem;
+        font-weight: 650;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+    }
+
+    .contacto-menu-panel > header small,
+    .contacto-performance-chart > header small {
+        color: #72899e;
+        font-size: 0.78rem;
+    }
+
+    .contacto-menu-panel > header button,
+    .contacto-menu-panel > header > strong,
+    .contacto-performance-chart > header > strong {
+        flex: 0 0 auto;
+        border: 1px solid rgba(220, 255, 47, 0.55);
+        border-radius: 999px;
+        padding: 0.55rem 0.9rem;
+        color: #dcff2f;
+        font-size: 0.72rem;
+        font-weight: 650;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+    }
+
+    .contacto-menu-table-wrap {
+        overflow-x: auto;
+        padding: 0 1.55rem 1.2rem;
+    }
+
+    .contacto-menu-table {
+        width: 100%;
+        min-width: 50rem;
+        border-collapse: collapse;
+        color: #dce6ed;
+    }
+
+    .contacto-menu-table th {
+        border-bottom: 1px solid rgba(126, 157, 184, 0.22);
+        padding: 0.9rem 0.75rem;
+        color: #8197aa;
+        font-size: 0.68rem;
+        font-weight: 600;
+        letter-spacing: 0.14em;
+        text-align: left;
+        text-transform: uppercase;
+        white-space: nowrap;
+    }
+
+    .contacto-menu-table td {
+        border-bottom: 1px solid rgba(126, 157, 184, 0.12);
+        padding: 0.95rem 0.75rem;
+        color: #b7c7d5;
+        font-size: 0.86rem;
+        vertical-align: middle;
+        white-space: nowrap;
+    }
+
+    .contacto-menu-table tbody tr:last-child td {
+        border-bottom: 0;
+    }
+
+    .contacto-menu-table tbody tr.is-clickable {
+        cursor: pointer;
+        transition: background-color 150ms ease;
+    }
+
+    .contacto-menu-table tbody tr.is-clickable:hover {
+        background: rgba(220, 255, 47, 0.045);
+    }
+
+    .contacto-menu-table td strong {
+        display: block;
+        color: #edf3f7;
+        font-weight: 550;
+    }
+
+    .contacto-menu-table td small {
+        display: block;
+        margin-top: 0.2rem;
+        color: #71889c;
+        font-size: 0.7rem;
+    }
+
+    .contacto-menu-table .contacto-menu-accent {
+        color: #dcff2f;
+        font-weight: 650;
+    }
+
+    .contacto-product-bars {
+        padding-bottom: 1.4rem;
+    }
+
+    .contacto-product-bars-grid,
+    .contacto-performance-bars {
+        display: grid;
+        min-width: 50rem;
+        grid-template-columns: repeat(8, minmax(4.5rem, 1fr));
+        align-items: end;
+        gap: 1rem;
+        overflow-x: auto;
+        padding: 1rem 1.55rem 0;
+    }
+
+    .contacto-product-bars-grid article,
+    .contacto-performance-bars article {
+        display: grid;
+        min-width: 0;
+        gap: 0.5rem;
+        text-align: center;
+    }
+
+    .contacto-product-bars-grid article > div,
+    .contacto-performance-bars article > div {
+        display: flex;
+        height: 11rem;
+        align-items: end;
+        justify-content: center;
+        gap: 0.2rem;
+        border-bottom: 1px solid rgba(126, 157, 184, 0.2);
+        background-image: linear-gradient(to top, rgba(126, 157, 184, 0.1) 1px, transparent 1px);
+        background-size: 100% 25%;
+    }
+
+    .contacto-product-bars-grid i,
+    .contacto-performance-bars i {
+        width: 38%;
+        min-height: 0.25rem;
+        border-radius: 0.25rem 0.25rem 0 0;
+        transform-origin: bottom;
+        animation: contacto-menu-bars 440ms ease both;
+    }
+
+    .contacto-product-bars-grid i.is-sold,
+    .contacto-performance-bars i.is-sold {
+        background: #dcff2f;
+    }
+
+    .contacto-product-bars-grid i.is-offered,
+    .contacto-performance-bars i.is-offered {
+        background: #3158ca;
+    }
+
+    .contacto-product-bars-grid strong,
+    .contacto-performance-bars strong {
+        overflow: hidden;
+        color: #cdd9e2;
+        font-size: 0.75rem;
+        font-weight: 500;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .contacto-product-bars-grid small,
+    .contacto-performance-bars small {
+        color: #748ba0;
+        font-size: 0.68rem;
+    }
+
+    .contacto-zone-overview,
+    .contacto-payment-overview {
+        display: grid;
+        grid-template-columns: minmax(20rem, 1.2fr) minmax(0, 2fr);
+        gap: 1.25rem;
+    }
+
+    .contacto-menu-zone-total,
+    .contacto-payment-total {
+        position: relative;
+        display: flex;
+        min-height: 18rem;
+        overflow: hidden;
+        flex-direction: column;
+        justify-content: center;
+        gap: 1rem;
+        border: 1px solid rgba(44, 88, 190, 0.7);
+        border-radius: 2.25rem;
+        padding: 2.5rem;
+        background: linear-gradient(145deg, rgba(0, 43, 69, 0.98), rgba(7, 34, 58, 0.94));
+    }
+
+    .contacto-menu-zone-total::after,
+    .contacto-payment-total::after {
+        position: absolute;
+        top: -7rem;
+        right: -5rem;
+        width: 16rem;
+        height: 16rem;
+        border-radius: 50%;
+        background: rgba(220, 255, 47, 0.08);
+        content: '';
+    }
+
+    .contacto-menu-zone-total > strong,
+    .contacto-payment-total > strong {
+        position: relative;
+        z-index: 1;
+        color: #dcff2f;
+        font-size: clamp(2.25rem, 4vw, 4.6rem);
+        font-weight: 650;
+        line-height: 1;
+        letter-spacing: -0.045em;
+    }
+
+    .contacto-zone-kpis,
+    .contacto-payment-kpis {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 1rem;
+    }
+
+    .contacto-zone-kpis > article,
+    .contacto-payment-kpis > article {
+        min-height: 8.5rem;
+    }
+
+    .contacto-zone-leader {
+        display: flex;
+        min-height: 6.75rem;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1.5rem;
+        border-radius: 999px;
+        padding: 1.3rem 2rem;
+        color: #041a2b;
+        background: #eef1f2;
+    }
+
+    .contacto-zone-leader > div {
+        display: grid;
+        align-items: center;
+        gap: 0.2rem 1rem;
+    }
+
+    .contacto-zone-leader > div:first-child {
+        grid-template-columns: auto 1fr;
+    }
+
+    .contacto-zone-leader i {
+        grid-row: 1 / 3;
+        width: 3.6rem;
+        height: 3.6rem;
+        border-radius: 1rem;
+        background: #001a2c;
+        box-shadow: inset 0 0 0 1rem #001a2c;
+    }
+
+    .contacto-zone-leader i::after {
+        display: block;
+        width: 0.65rem;
+        height: 0.65rem;
+        margin: 1.48rem auto;
+        border-radius: 50%;
+        background: #dcff2f;
+        content: '';
+    }
+
+    .contacto-zone-leader span,
+    .contacto-zone-leader small {
+        color: #667786;
+        font-size: 0.72rem;
+        font-weight: 650;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+    }
+
+    .contacto-zone-leader strong {
+        color: #001a2c;
+        font-size: 1.35rem;
+        font-weight: 700;
+    }
+
+    .contacto-zone-leader > div:last-child {
+        text-align: right;
+    }
+
+    .contacto-zone-leader > div:last-child strong {
+        font-size: 2rem;
+    }
+
+    .contacto-zone-devices {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 1rem;
+    }
+
+    .contacto-zone-devices > article {
+        overflow: hidden;
+        border: 1px solid rgba(126, 157, 184, 0.2);
+        border-radius: 1.5rem;
+        background: rgba(7, 32, 53, 0.7);
+    }
+
+    .contacto-zone-devices header,
+    .contacto-zone-devices article > div {
+        display: flex;
+        justify-content: space-between;
+        gap: 0.75rem;
+        padding: 1rem 1.2rem;
+    }
+
+    .contacto-zone-devices header {
+        border-bottom: 1px solid rgba(126, 157, 184, 0.16);
+        color: #edf3f7;
+    }
+
+    .contacto-zone-devices header span,
+    .contacto-zone-devices article > div {
+        color: #8298ab;
+        font-size: 0.78rem;
+    }
+
+    .contacto-zone-devices article > div strong {
+        color: #dbe6ee;
+        font-weight: 550;
+    }
+
+    .contacto-payment-methods > article {
+        min-height: 8rem;
+    }
+
+    .contacto-performance-chart {
+        padding-bottom: 1.4rem;
+    }
+
+    .contacto-performance-chart > footer {
+        display: flex;
+        justify-content: center;
+        gap: 1.5rem;
+        padding-top: 1.2rem;
+        color: #8298ac;
+        font-size: 0.75rem;
+    }
+
+    .contacto-performance-chart > footer span {
+        display: flex;
+        align-items: center;
+        gap: 0.45rem;
+    }
+
+    .contacto-performance-chart > footer i {
+        width: 0.7rem;
+        height: 0.7rem;
+        border-radius: 0.12rem;
+    }
+
+    .contacto-performance-chart > footer i.is-sold {
+        background: #dcff2f;
+    }
+
+    .contacto-performance-chart > footer i.is-offered {
+        background: #3158ca;
+    }
+
+    @keyframes contacto-menu-reveal {
+        from { opacity: 0; transform: translateY(8px); }
+        to { opacity: 1; transform: translateY(0); }
+    }
+
+    @keyframes contacto-menu-bars {
+        from { transform: scaleY(0); }
+        to { transform: scaleY(1); }
+    }
+
+    @media (max-width: 1280px) {
+        .contacto-menu-kpis.is-four {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .contacto-zone-overview,
+        .contacto-payment-overview {
+            grid-template-columns: minmax(17rem, 0.9fr) minmax(0, 1.5fr);
+        }
+
+        .contacto-zone-devices {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+    }
+
+    @media (max-width: 900px) {
+        .contacto-report-filterbar-period,
+        .contacto-menu-toolbar {
+            align-items: stretch;
+        }
+
+        .contacto-report-filterbar-period {
+            display: grid;
+            grid-template-columns: auto minmax(8rem, 1fr) auto minmax(8rem, 1fr);
+        }
+
+        .contacto-report-hour-label {
+            margin-left: 0;
+        }
+
+        .contacto-report-refine {
+            margin-left: 0;
+        }
+
+        .contacto-menu-toolbar {
+            flex-direction: column;
+        }
+
+        .contacto-menu-toolbar .report-dashboard-search {
+            width: 100%;
+            max-width: none;
+        }
+
+        .contacto-zone-overview,
+        .contacto-payment-overview {
+            grid-template-columns: 1fr;
+        }
+
+        .contacto-menu-zone-total,
+        .contacto-payment-total {
+            min-height: 14rem;
+        }
+    }
+
+    @media (max-width: 640px) {
+        .contacto-report-filterbar {
+            border-radius: 1.25rem;
+        }
+
+        .contacto-report-filterbar-zones,
+        .contacto-report-filterbar-period {
+            padding: 0.9rem 1rem;
+        }
+
+        .contacto-report-filterbar-period {
+            grid-template-columns: 1fr 1fr;
+        }
+
+        .contacto-report-filterbar-period > span:not(.contacto-label) {
+            display: none;
+        }
+
+        .contacto-report-filterbar-period .contacto-label {
+            grid-column: 1 / -1;
+        }
+
+        .contacto-report-refine,
+        .contacto-report-clear {
+            justify-self: start;
+        }
+
+        .contacto-menu-page {
+            gap: 1rem;
+        }
+
+        .contacto-menu-kpis.is-four,
+        .contacto-menu-kpis.is-three,
+        .contacto-zone-kpis,
+        .contacto-payment-kpis,
+        .contacto-zone-devices {
+            grid-template-columns: 1fr;
+        }
+
+        .contacto-menu-kpis > article,
+        .contacto-zone-kpis > article,
+        .contacto-payment-kpis > article {
+            min-height: 7.5rem;
+            border-radius: 1.15rem;
+            padding: 1.15rem;
+        }
+
+        .contacto-menu-panel,
+        .contacto-performance-chart {
+            border-radius: 1.25rem;
+        }
+
+        .contacto-menu-panel > header,
+        .contacto-performance-chart > header {
+            align-items: flex-start;
+            padding: 1rem;
+        }
+
+        .contacto-menu-panel > header > button,
+        .contacto-menu-panel > header > strong,
+        .contacto-performance-chart > header > strong {
+            max-width: 48%;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .contacto-menu-table-wrap {
+            padding: 0 1rem 1rem;
+        }
+
+        .contacto-menu-zone-total,
+        .contacto-payment-total {
+            min-height: 12.5rem;
+            border-radius: 1.5rem;
+            padding: 1.5rem;
+        }
+
+        .contacto-menu-zone-total > strong,
+        .contacto-payment-total > strong {
+            font-size: clamp(2rem, 12vw, 3.25rem);
+        }
+
+        .contacto-zone-leader {
+            min-height: 0;
+            align-items: flex-start;
+            border-radius: 1.5rem;
+            padding: 1.2rem;
+        }
+
+        .contacto-zone-leader > div:last-child strong {
+            font-size: 1.45rem;
+        }
+    }
+}
+
 @media print {
     @page {
         size: A4 landscape;

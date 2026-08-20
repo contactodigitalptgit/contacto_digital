@@ -1416,7 +1416,7 @@ class EventDashboardController extends Controller
     }
 
     /**
-     * @return array{bar_group: string, store: string, product: string, date_from: string, date_to: string, total_min: string, total_max: string}
+     * @return array{bar_group: string, store: string, product: string, date_from: string, date_to: string, hour_from: string, hour_to: string, total_min: string, total_max: string}
      */
     private function emptyFilters(): array
     {
@@ -1426,6 +1426,8 @@ class EventDashboardController extends Controller
             'product' => '',
             'date_from' => '',
             'date_to' => '',
+            'hour_from' => '',
+            'hour_to' => '',
             'total_min' => '',
             'total_max' => '',
         ];
@@ -1444,7 +1446,7 @@ class EventDashboardController extends Controller
      * Stream normalized payment documents without hydrating the complete event payload.
      *
      * @param  array<string, mixed>  $legacySummary
-     * @param  array{bar_group: string, store: string, product: string, date_from: string, date_to: string, total_min: string, total_max: string}  $filters
+     * @param  array{bar_group: string, store: string, product: string, date_from: string, date_to: string, hour_from: string, hour_to: string, total_min: string, total_max: string}  $filters
      * @return \Generator<int, array<string, mixed>>
      */
     private function paymentDocuments(
@@ -1502,7 +1504,7 @@ class EventDashboardController extends Controller
     }
 
     /**
-     * @param  array{bar_group: string, store: string, product: string, date_from: string, date_to: string, total_min: string, total_max: string}  $filters
+     * @param  array{bar_group: string, store: string, product: string, date_from: string, date_to: string, hour_from: string, hour_to: string, total_min: string, total_max: string}  $filters
      */
     private function applyPaymentDocumentFilters(Builder $query, array $filters): Builder
     {

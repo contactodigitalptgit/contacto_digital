@@ -126,6 +126,56 @@ class EventDashboardTest extends TestCase
                 )), ['pagination', 'documentTypes', 'rows']));
     }
 
+    public function test_event_report_menus_open_the_expected_section_for_clients_and_admins(): void
+    {
+        [$admin, $clientUser, $event] = $this->makeDashboardContext();
+
+        $sections = [
+            'products' => 'products',
+            'payments' => 'reconciliation',
+            'zones' => 'zones',
+            'performance' => 'highlights',
+            'comparison' => 'comparison',
+        ];
+
+        foreach ($sections as $routeSuffix => $expectedSection) {
+            $this->actingAs($clientUser)
+                ->get(route("events.{$routeSuffix}", $event))
+                ->assertOk()
+                ->assertInertia(fn (AssertableInertia $page) => $page
+                    ->component('Events/Dashboard')
+                    ->where('initialSection', $expectedSection)
+                    ->where('previewMode', false));
+
+            $this->actingAs($admin)
+                ->get(route("admin.events.{$routeSuffix}", $event))
+                ->assertOk()
+                ->assertInertia(fn (AssertableInertia $page) => $page
+                    ->component('Events/Dashboard')
+                    ->where('initialSection', $expectedSection)
+                    ->where('previewMode', true));
+        }
+    }
+
+    public function test_event_report_hour_filter_uses_sale_datetime_for_sales_and_payments(): void
+    {
+        [$admin, $clientUser, $event] = $this->makeDashboardContext();
+        $this->seedSyncedRows($event, $admin);
+
+        $this->actingAs($clientUser)
+            ->get(route('events.payments', $event).'?hour_from=0&hour_to=0')
+            ->assertOk()
+            ->assertInertia(fn (AssertableInertia $page) => $page
+                ->where('initialSection', 'reconciliation')
+                ->where('filters.hour_from', '0')
+                ->where('filters.hour_to', '0')
+                ->where('summary.total_sales', 0)
+                ->where('summary.tickets_count', 0)
+                ->where('paymentSummary.cash', 0)
+                ->where('paymentSummary.multibanco', 1)
+                ->where('paymentSummary.zticket', 0));
+    }
+
     public function test_event_dashboard_exposes_client_events_for_switcher(): void
     {
         [$admin, , $event] = $this->makeDashboardContext();

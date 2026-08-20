@@ -456,14 +456,15 @@ watch(() => props.initialSection, (section) => {
 });
 
 function sidebarSectionUrl(section: DashboardSection): string | null {
-    const routeSuffix = {
+    const routeSuffixes: Partial<Record<DashboardSection, string>> = {
         summary: 'dashboard',
         products: 'products',
         reconciliation: 'payments',
         zones: 'zones',
         highlights: 'performance',
         comparison: 'comparison',
-    }[section];
+    };
+    const routeSuffix = routeSuffixes[section];
 
     if (!routeSuffix) {
         return null;
@@ -472,13 +473,17 @@ function sidebarSectionUrl(section: DashboardSection): string | null {
     return route(`${props.previewMode ? 'admin.events' : 'events'}.${routeSuffix}`, props.event.id);
 }
 
-const reportSectionTitle = computed(() => ({
-    products: 'Produtos',
-    reconciliation: 'Pagamentos',
-    zones: 'Zonas',
-    highlights: 'Performance',
-    comparison: 'Comparar edições',
-}[activeSection.value] ?? 'Dashboard'));
+const reportSectionTitle = computed(() => {
+    const sectionTitles: Partial<Record<DashboardSection, string>> = {
+        products: 'Produtos',
+        reconciliation: 'Pagamentos',
+        zones: 'Zonas',
+        highlights: 'Performance',
+        comparison: 'Comparar edições',
+    };
+
+    return sectionTitles[activeSection.value] ?? 'Dashboard';
+});
 
 function configuredBlock(key: string): DashboardConfigurationItem | undefined {
     return activeDashboardConfiguration.value.blocks.find((block) => block.key === key);
@@ -2869,7 +2874,7 @@ function getDifferenceClass(value: number | null) {
                         </div>
 
                         <section class="contacto-zone-overview">
-                            <article class="contacto-zone-total">
+                            <article class="contacto-menu-zone-total">
                                 <span>Faturação da seleção</span>
                                 <strong>{{ formatMoney(props.summary.total_sales) }}</strong>
                                 <small>{{ selectedZoneShare.toFixed(1).replace('.', ',') }}% do total do evento</small>
@@ -2997,7 +3002,7 @@ function getDifferenceClass(value: number | null) {
                             </div>
                         </section>
 
-                        <section class="contacto-menu-kpis contacto-payment-methods" :class="showZtCard ? 'is-four' : 'is-three'">
+                        <section v-if="showZtCard" class="contacto-menu-kpis contacto-payment-methods is-four">
                             <article v-if="metricIsVisible('multibanco')">
                                 <span>{{ metricLabel('multibanco', 'Multibanco') }}</span>
                                 <strong>{{ formatMoney(props.paymentSummary.multibanco) }}</strong>
