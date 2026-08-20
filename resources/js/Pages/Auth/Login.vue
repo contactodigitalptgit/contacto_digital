@@ -32,10 +32,10 @@ const submit = () => {
         <Head title="Entrar" />
 
         <div class="auth-header">
-            <p class="auth-eyebrow">Acesso seguro</p>
-            <h1 class="auth-title">Entrar na plataforma</h1>
+            <p class="auth-eyebrow">Área reservada</p>
+            <h1 class="auth-title">Bem-vindo de volta</h1>
             <p class="auth-subtitle">
-                Use o seu email e senha para continuar no Contacto Digital.
+                Entre com os seus dados para aceder ao Contacto Digital.
             </p>
         </div>
 
@@ -98,7 +98,10 @@ const submit = () => {
                     :class="{ 'opacity-25': form.processing }"
                     :disabled="form.processing"
                 >
-                    Entrar
+                    <span>Entrar</span>
+                    <svg aria-hidden="true" viewBox="0 0 20 20" fill="none">
+                        <path d="M4 10h11m-4-4 4 4-4 4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" />
+                    </svg>
                 </PrimaryButton>
             </div>
         </form>

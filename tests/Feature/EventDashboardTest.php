@@ -176,6 +176,36 @@ class EventDashboardTest extends TestCase
                 ->where('paymentSummary.zticket', 0));
     }
 
+    public function test_admin_performance_filters_zone_operational_date_and_hour_together(): void
+    {
+        [$admin, , $event] = $this->makeDashboardContext();
+        $this->seedSyncedRows($event, $admin);
+
+        $this->actingAs($admin)
+            ->get(route('admin.events.performance', $event).'?bar_group=Bar%201&date_from=2026-03-14&date_to=2026-03-14&hour_from=12&hour_to=12')
+            ->assertOk()
+            ->assertInertia(fn (AssertableInertia $page) => $page
+                ->component('Events/Dashboard')
+                ->where('initialSection', 'highlights')
+                ->where('previewMode', true)
+                ->where('filters.bar_group', 'Bar 1')
+                ->where('filters.date_from', '2026-03-14')
+                ->where('filters.date_to', '2026-03-14')
+                ->where('filters.hour_from', '12')
+                ->where('filters.hour_to', '12')
+                ->where('summary.total_sales', 8.25)
+                ->where('summary.filtered_rows', 2)
+                ->where('summary.tickets_count', 2)
+                ->where('summary.bar_groups_count', 1)
+                ->loadDeferredProps('dashboard-details', fn (AssertableInertia $details) => $details
+                    ->where('barGroups', fn ($groups): bool => collect($groups)->count() === 1
+                        && collect($groups)->first()['label'] === 'Bar 1'
+                        && collect($groups)->first()['tickets_count'] === 2)
+                    ->where('hourlySales', fn ($hours): bool => collect($hours)->count() === 1
+                        && collect($hours)->first()['hour'] === 12
+                        && (float) collect($hours)->first()['sales_total'] === 8.25)));
+    }
+
     public function test_event_dashboard_exposes_client_events_for_switcher(): void
     {
         [$admin, , $event] = $this->makeDashboardContext();

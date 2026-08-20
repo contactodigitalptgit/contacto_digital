@@ -8,7 +8,10 @@ import { createApp, DefineComponent, h } from 'vue';
 import { registerSW } from 'virtual:pwa-register';
 import { ZiggyVue } from '../../vendor/tightenco/ziggy';
 
-const appName = import.meta.env.VITE_APP_NAME || 'Laravel';
+const configuredAppName = import.meta.env.VITE_APP_NAME;
+const appName = !configuredAppName || configuredAppName === 'Laravel'
+    ? 'Contacto Digital'
+    : configuredAppName;
 const legacySwCleanupKey = 'contacto-legacy-sw-cleanup';
 
 async function cleanupLegacyServiceWorkers(): Promise<void> {
