@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { PageProps } from '@/types';
-import { computed, onMounted, ref } from 'vue';
+import { computed } from 'vue';
 import ApplicationLogo from '@/Components/ApplicationLogo.vue';
 import Dropdown from '@/Components/Dropdown.vue';
 import { Link, usePage } from '@inertiajs/vue3';
@@ -13,12 +13,8 @@ interface NavItem {
     icon: 'dashboard' | 'clients' | 'events';
 }
 
-type ThemeMode = 'light' | 'dark';
-
 const page = usePage<PageProps>();
 const isAdmin = computed(() => page.props.auth.user.role === 'admin');
-const theme = ref<ThemeMode>('light');
-const isDarkTheme = computed(() => theme.value === 'dark');
 
 const primaryNavigation = computed<NavItem[]>(() => {
     const items: NavItem[] = [
@@ -59,33 +55,6 @@ const isActive = (item: NavItem) =>
     route().current(item.pattern)
     || (item.key === 'dashboard' && route().current('events.dashboard'));
 
-const applyTheme = (value: ThemeMode) => {
-    if (typeof document === 'undefined') {
-        return;
-    }
-
-    theme.value = value;
-    document.documentElement.setAttribute('data-theme', value);
-    window.localStorage.setItem('contacto-theme', value);
-};
-
-const toggleTheme = () => {
-    applyTheme(theme.value === 'dark' ? 'light' : 'dark');
-};
-
-onMounted(() => {
-    const savedTheme = window.localStorage.getItem('contacto-theme');
-
-    if (savedTheme === 'light' || savedTheme === 'dark') {
-        applyTheme(savedTheme);
-    } else {
-        const prefersDark = window.matchMedia(
-            '(prefers-color-scheme: dark)',
-        ).matches;
-
-        applyTheme(prefersDark ? 'dark' : 'light');
-    }
-});
 </script>
 
 <template>
@@ -93,11 +62,10 @@ onMounted(() => {
         <div class="app-layout">
             <aside class="app-sidebar">
                 <div class="app-sidebar-brand">
-                    <Link :href="route('dashboard')" class="w-full inline-flex items-center justify-center gap-3">
-                        <ApplicationLogo class=" w-36 fill-current text-white" />
-                        <div>
-                        </div>
+                    <Link :href="route('dashboard')" class="contacto-sidebar-brand-link">
+                        <img src="/images/logo2.png" alt="Contacto Digital" class="contacto-sidebar-logo" />
                     </Link>
+                    <span v-if="isAdmin" class="contacto-sidebar-mode">Modo administrador</span>
                 </div>
 
                 <nav class="app-nav">
@@ -196,35 +164,6 @@ onMounted(() => {
                                         </p>
                                     </div>
 
-                                    <button
-                                        type="button"
-                                        class="app-header-dropdown-item"
-                                        @click="toggleTheme"
-                                    >
-                                        <svg
-                                            v-if="isDarkTheme"
-                                            class="h-4 w-4"
-                                            viewBox="0 0 24 24"
-                                            fill="none"
-                                            stroke="currentColor"
-                                            stroke-width="1.8"
-                                        >
-                                            <circle cx="12" cy="12" r="4" />
-                                            <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" />
-                                        </svg>
-                                        <svg
-                                            v-else
-                                            class="h-4 w-4"
-                                            viewBox="0 0 24 24"
-                                            fill="none"
-                                            stroke="currentColor"
-                                            stroke-width="1.8"
-                                        >
-                                            <path d="M21 12.79A9 9 0 1 1 11.21 3a7 7 0 0 0 9.79 9.79z" />
-                                        </svg>
-                                        <span>{{ isDarkTheme ? 'Tema claro' : 'Tema escuro' }}</span>
-                                    </button>
-
                                     <Link
                                         v-if="isAdmin"
                                         :href="route('profile.edit')"
@@ -293,35 +232,6 @@ onMounted(() => {
                                                 {{ $page.props.auth.user.email }}
                                             </p>
                                         </div>
-
-                                        <button
-                                            type="button"
-                                            class="app-header-dropdown-item"
-                                            @click="toggleTheme"
-                                        >
-                                            <svg
-                                                v-if="isDarkTheme"
-                                                class="h-4 w-4"
-                                                viewBox="0 0 24 24"
-                                                fill="none"
-                                                stroke="currentColor"
-                                                stroke-width="1.8"
-                                            >
-                                                <circle cx="12" cy="12" r="4" />
-                                                <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" />
-                                            </svg>
-                                            <svg
-                                                v-else
-                                                class="h-4 w-4"
-                                                viewBox="0 0 24 24"
-                                                fill="none"
-                                                stroke="currentColor"
-                                                stroke-width="1.8"
-                                            >
-                                                <path d="M21 12.79A9 9 0 1 1 11.21 3a7 7 0 0 0 9.79 9.79z" />
-                                            </svg>
-                                            <span>{{ isDarkTheme ? 'Tema claro' : 'Tema escuro' }}</span>
-                                        </button>
 
                                         <Link
                                             v-if="isAdmin"

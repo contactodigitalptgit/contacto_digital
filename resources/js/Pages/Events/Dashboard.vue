@@ -668,6 +668,9 @@ const zonePerformanceRows = computed<ZonePerformanceRow[]>(() =>
         performanceWidth: getRatioWidth(group.sales_total, maxZoneSales.value),
     })),
 );
+const leadingZoneRows = computed(() => [...zonePerformanceRows.value]
+    .sort((left, right) => right.totalSales - left.totalSales)
+    .slice(0, 6));
 const visibleZonePerformanceRows = computed(() => {
     const search = zoneSearch.value.trim().toLocaleLowerCase('pt-PT');
 
@@ -819,10 +822,27 @@ const hourlyPeakItems = computed(() => [...selectedHourlySales.value]
     .filter((sale) => sale.sales_total > 0)
     .sort((left, right) => right.sales_total - left.sales_total)
     .slice(0, 3));
+const primaryHourlyPeak = computed(() => hourlyPeakItems.value[0] ?? null);
 const hourlySelectedTotal = computed(() => selectedHourlySales.value.reduce(
     (total, sale) => total + sale.sales_total,
     0,
 ));
+const activeOperatingHours = computed(() => hourlySeries.value.filter((sale) => sale.sales_total > 0).length);
+const averageSalesPerHour = computed(() => activeOperatingHours.value > 0
+    ? hourlySelectedTotal.value / activeOperatingHours.value
+    : 0);
+const leadingZone = computed(() => [...props.barGroups]
+    .sort((left, right) => right.sales_total - left.sales_total)[0] ?? null);
+const leadingZoneShare = computed(() => {
+    if (!leadingZone.value || props.summary.total_sales <= 0) {
+        return 0;
+    }
+
+    return Math.min(100, Math.max(0, (leadingZone.value.sales_total / props.summary.total_sales) * 100));
+});
+const eventStatusLabel = computed(() => hasProcessingSync.value || props.autoSync.enabled
+    ? 'Em curso'
+    : 'Concluído');
 const hourlyChartAriaLabel = computed(() => hourlyPeakItems.value
     .map((sale) => `${sale.label}, ${sale.hour_label}: ${formatMoney(sale.sales_total)}`)
     .join(', '));
@@ -1276,6 +1296,10 @@ function getDeviceLabel(item: BreakdownItem) {
     return item.code ? `${item.code} - ${item.label}` : item.label;
 }
 
+function getZoneFilterValue(label: string) {
+    return props.filterOptions.barGroups.find((option) => option.label === label)?.value ?? label;
+}
+
 function getDifferenceClass(value: number | null) {
     if (value === null || Math.abs(value) < 0.01) {
         return 'is-neutral';
@@ -1355,14 +1379,47 @@ function getDifferenceClass(value: number | null) {
         </template>
 
         <template #header>
-            <div class="report-dashboard-toolbar">
-                <p class="report-dashboard-toolbar-tagline">Relatórios inteligentes para decisões com impacto.</p>
+            <div class="contacto-dashboard-header">
+                <div class="contacto-dashboard-event" :class="{ 'is-open': eventSwitcherOpen }">
+                    <span>{{ props.event.client_business_name || props.event.client_name }}</span>
+                    <button
+                        type="button"
+                        class="contacto-dashboard-event-trigger"
+                        :disabled="!hasEventOptions"
+                        :aria-expanded="eventSwitcherOpen"
+                        @click="eventSwitcherOpen = !eventSwitcherOpen"
+                    >
+                        <strong>{{ eventSwitcherTitle }}</strong>
+                        <em>{{ eventStatusLabel }}</em>
+                        <svg v-if="hasEventOptions" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                            <path d="m5 7.5 5 5 5-5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+                        </svg>
+                    </button>
 
-                <div class="report-dashboard-toolbar-actions">
+                    <div v-if="eventSwitcherOpen && hasEventOptions" class="report-dashboard-event-menu contacto-dashboard-event-menu">
+                        <Link
+                            v-for="eventOption in props.eventOptions"
+                            :key="eventOption.id"
+                            :href="eventOption.url"
+                            class="report-dashboard-event-option"
+                            :class="{ 'is-current': eventOption.is_current }"
+                            preserve-scroll
+                            @click="closeEventSwitcher"
+                        >
+                            <span>{{ eventOption.title }}</span>
+                            <small>{{ formatDate(eventOption.event_date) }}</small>
+                            <svg v-if="eventOption.is_current" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                                <path d="m4 10 4 4 8-8" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+                            </svg>
+                        </Link>
+                    </div>
+                </div>
+
+                <div class="contacto-dashboard-actions">
                     <button
                         v-if="props.previewMode"
                         type="button"
-                        class="dash-action-button dash-action-button-inline justify-center"
+                        class="contacto-header-button is-primary"
                         :class="{ 'cursor-not-allowed opacity-70': isSyncingReport || hasProcessingSync }"
                         :disabled="isSyncingReport || hasProcessingSync"
                         @click="submitReportSync"
@@ -1376,48 +1433,6 @@ function getDifferenceClass(value: number | null) {
                         }}
                     </button>
 
-                    <div class="report-dashboard-event-switcher" :class="{ 'is-open': eventSwitcherOpen }">
-                        <div class="report-dashboard-event-pill">
-                            <span class="report-dashboard-event-kicker">
-                                <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                                    <path d="M7 3v4M17 3v4M4 9h16M6 5h12a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
-                                </svg>
-                                Evento:
-                            </span>
-                            <strong>{{ eventSwitcherTitle }}</strong>
-                            <button
-                                type="button"
-                                class="report-dashboard-event-toggle"
-                                :disabled="!hasEventOptions"
-                                :aria-expanded="eventSwitcherOpen"
-                                @click="eventSwitcherOpen = !eventSwitcherOpen"
-                            >
-                                Trocar
-                                <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
-                                    <path d="m5 7.5 5 5 5-5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
-                                </svg>
-                            </button>
-                        </div>
-
-                        <div v-if="eventSwitcherOpen && hasEventOptions" class="report-dashboard-event-menu">
-                            <Link
-                                v-for="eventOption in props.eventOptions"
-                                :key="eventOption.id"
-                                :href="eventOption.url"
-                                class="report-dashboard-event-option"
-                                :class="{ 'is-current': eventOption.is_current }"
-                                preserve-scroll
-                                @click="closeEventSwitcher"
-                            >
-                                <span>{{ eventOption.title }}</span>
-                                <small>{{ formatDate(eventOption.event_date) }}</small>
-                                <svg v-if="eventOption.is_current" viewBox="0 0 20 20" fill="none" aria-hidden="true">
-                                    <path d="m4 10 4 4 8-8" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
-                                </svg>
-                            </Link>
-                        </div>
-                    </div>
-
                     <div v-if="props.autoSync.enabled || hasProcessingSync" class="report-dashboard-sync-countdown report-dashboard-header-sync">
                         <span>{{ hasProcessingSync ? 'Sincronização em curso' : 'Próxima sincronização' }}</span>
                         <strong>{{ autoSyncCountdown }}</strong>
@@ -1425,7 +1440,7 @@ function getDifferenceClass(value: number | null) {
 
                     <button
                         type="button"
-                        class="report-dashboard-header-action"
+                        class="contacto-header-button"
                         :class="{ 'is-active': filtersOpen || activeFilterCount > 0 }"
                         @click="filtersOpen = !filtersOpen"
                     >
@@ -1440,7 +1455,7 @@ function getDifferenceClass(value: number | null) {
                         :href="whatsappSupportUrl"
                         target="_blank"
                         rel="noopener noreferrer"
-                        class="report-dashboard-header-action is-primary"
+                        class="contacto-header-button"
                     >
                         <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
                             <path d="m21 3-8.2 18-2.4-7.4L3 11.2 21 3Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" />
@@ -1616,130 +1631,189 @@ function getDifferenceClass(value: number | null) {
 
                     <div
                         v-if="activeSection === 'summary'"
-                        class="report-dashboard-view"
-                        :class="{ 'report-dashboard-summary-stack': dashboardUsesCustomLayout }"
+                        class="contacto-live-dashboard"
                     >
-                        <button
-                            v-if="isBlockVisible('overview')"
-                            type="button"
-                            class="report-dashboard-overview-hero"
-                            :style="blockStyle('overview')"
-                            @click="openDetailModal('payments')"
-                        >
-                            <div class="report-dashboard-overview-copy">
-                                <span>{{ blockLabel('overview', showZtCard ? 'Total sem ZT' : 'Total faturado') }}</span>
+                        <section class="contacto-zone-filter" aria-label="Filtrar por zona">
+                            <div class="contacto-zone-filter-row">
+                                <span class="contacto-label">Zonas</span>
+                                <button
+                                    type="button"
+                                    :class="{ 'is-active': localFilters.bar_group === '' }"
+                                    @click="localFilters.bar_group !== '' ? applyBarGroupFilter(localFilters.bar_group) : undefined"
+                                >
+                                    Todas
+                                </button>
+                                <button
+                                    v-for="option in props.filterOptions.barGroups"
+                                    :key="`quick-${option.value}`"
+                                    type="button"
+                                    :class="{ 'is-active': localFilters.bar_group === option.value }"
+                                    @click="applyBarGroupFilter(option.value)"
+                                >
+                                    {{ option.label }}
+                                </button>
+                            </div>
+                            <div class="contacto-zone-total">
+                                <span>{{ localFilters.bar_group || 'Todas as zonas' }}</span>
+                                <strong>{{ formatMoney(props.summary.total_sales) }}</strong>
+                            </div>
+                            <div class="contacto-zone-period">
+                                <span class="contacto-label">Período</span>
+                                <strong>{{ props.dailySales[0]?.label || formatDate(props.event.event_date) }}</strong>
+                                <span v-if="props.dailySales.length > 1">até {{ props.dailySales[props.dailySales.length - 1]?.label }}</span>
+                                <button type="button" @click="filtersOpen = true">Ajustar filtros</button>
+                            </div>
+                        </section>
+
+                        <section class="contacto-stream-bar">
+                            <div>
+                                <span :class="{ 'is-processing': hasProcessingSync, 'is-failed': props.syncStatus.is_stale }" />
+                                <strong>{{ hasProcessingSync ? 'Sincronização em curso' : 'Dados atualizados' }}</strong>
+                                <small>Última atualização: {{ formatDateTime(props.summary.last_synced_at) }}</small>
+                            </div>
+                            <em>{{ formatNumber(props.summary.filtered_rows) }} linhas analisadas</em>
+                        </section>
+
+                        <section class="contacto-kpi-mesh">
+                            <button
+                                v-if="isBlockVisible('overview')"
+                                type="button"
+                                class="contacto-kpi contacto-kpi-hero"
+                                @click="openDetailModal('payments')"
+                            >
+                                <span>{{ blockLabel('overview', showZtCard ? 'Total sem ZT' : 'Faturação do evento') }}</span>
                                 <strong>{{ formatMoney(props.paymentSummary.total_without_zt) }}</strong>
-                                <div class="report-dashboard-day-list">
-                                    <span v-for="day in props.dailySales" :key="day.date">
-                                        {{ day.label }}
-                                        <strong>{{ formatMoney(day.sales_total) }}</strong>
-                                    </span>
+                                <small>Total do evento · dados reais sincronizados</small>
+                            </button>
+
+                            <button type="button" class="contacto-kpi contacto-kpi-ticket" @click="openDetailModal('ticket')">
+                                <span>{{ metricLabel('average_ticket', 'Ticket médio') }}</span>
+                                <strong>{{ formatMoney(props.summary.average_ticket) }}</strong>
+                                <i><b :style="{ width: `${Math.min(100, Math.max(8, props.summary.average_ticket * 4))}%` }" /></i>
+                                <small>Por transação</small>
+                            </button>
+
+                            <article class="contacto-kpi contacto-kpi-transactions">
+                                <span>Transações</span>
+                                <strong>{{ formatNumber(props.summary.tickets_count) }}</strong>
+                                <small>{{ formatNumber(props.summary.total_quantity) }} unidades registadas</small>
+                            </article>
+
+                            <article class="contacto-leader-banner">
+                                <div>
+                                    <span class="contacto-leader-mark" />
+                                    <p>
+                                        <small>Zona líder</small>
+                                        <strong>{{ leadingZone?.label || 'Sem dados' }}</strong>
+                                    </p>
                                 </div>
-                            </div>
-
-                            <div class="report-dashboard-overview-chart" aria-label="Evolução da faturação por dia">
-                                <svg viewBox="0 0 100 100" preserveAspectRatio="none" role="img">
-                                    <defs>
-                                        <linearGradient id="dashboard-chart-area" x1="0" y1="0" x2="0" y2="1">
-                                            <stop offset="0%" stop-color="currentColor" stop-opacity="0.34" />
-                                            <stop offset="100%" stop-color="currentColor" stop-opacity="0" />
-                                        </linearGradient>
-                                    </defs>
-                                    <polyline v-if="summaryChartPoints" :points="summaryChartPoints" class="report-dashboard-chart-line" />
-                                    <polygon v-if="summaryChartPoints" :points="`0,100 ${summaryChartPoints} 100,100`" class="report-dashboard-chart-area" />
-                                </svg>
-                            </div>
-
-                            <div class="report-dashboard-overview-meta">
-                                <span>Última sincronização</span>
-                                <strong>{{ formatDateTime(props.summary.last_synced_at) }}</strong>
-                                <small>{{ formatNumber(props.summary.filtered_rows) }} linhas analisadas</small>
-                            </div>
-                        </button>
-
-                        <section v-if="isBlockVisible('movement')" :style="blockStyle('movement')">
-                            <div class="report-dashboard-section-heading">
-                                <span>{{ blockHelper('movement', 'Leitura financeira') }}</span>
-                                <h3>{{ blockLabel('movement', showZtCard ? 'Vendas e carregamentos ZT' : 'Vendas do evento') }}</h3>
-                            </div>
-                            <div class="report-dashboard-grid" :class="movementGridClass">
-                                <button
-                                    v-for="card in movementCards"
-                                    :key="card.key"
-                                    type="button"
-                                    class="report-dashboard-movement-card"
-                                    :class="{ 'is-total': card.key === 'total_with_zt' }"
-                                    @click="openDetailModal(card.key === 'top_up_count' || card.key === 'top_up_value' ? 'topup' : 'payments')"
-                                >
-                                    <span>{{ card.label }}</span>
-                                    <strong>{{ card.value }}</strong>
-                                    <small>{{ card.helper }}</small>
-                                </button>
-                            </div>
+                                <p>
+                                    <strong>{{ leadingZoneShare.toFixed(1).replace('.', ',') }}%</strong>
+                                    <small>{{ leadingZone ? formatMoney(leadingZone.sales_total) : formatMoney(0) }} do total</small>
+                                </p>
+                            </article>
                         </section>
 
-                        <section v-if="isBlockVisible('payments')" :style="blockStyle('payments')">
-                            <div class="report-dashboard-section-heading">
-                                <span>{{ blockHelper('payments', 'Formas de pagamento') }}</span>
-                                <h3>{{ blockLabel('payments', 'Pagamentos das vendas') }}</h3>
-                            </div>
-                            <div class="report-dashboard-grid" :class="paymentGridClass">
-                                <button
-                                    v-for="(card, index) in paymentCards"
-                                    :key="card.key"
-                                    type="button"
-                                    class="report-dashboard-metric-card"
-                                    :class="{ 'is-featured': index === 0 }"
-                                    @click="openDetailModal('payments')"
-                                >
-                                    <span>{{ card.label }}</span>
-                                    <strong>{{ card.value }}</strong>
-                                    <small>{{ card.helper }}</small>
-                                </button>
-                            </div>
+                        <section class="contacto-mini-stats">
+                            <article>
+                                <span>Total servido</span>
+                                <strong>{{ formatNumber(props.summary.total_quantity) }} <small>un</small></strong>
+                                <p>{{ formatNumber(props.summary.products_count) }} referências vendidas</p>
+                            </article>
+                            <article>
+                                <span>Pico horário</span>
+                                <strong>{{ primaryHourlyPeak?.hour_label || '—' }}</strong>
+                                <p>{{ primaryHourlyPeak ? formatMoney(primaryHourlyPeak.sales_total) : 'Sem dados horários' }}</p>
+                            </article>
+                            <article>
+                                <span>Média por hora</span>
+                                <strong>{{ formatMoney(averageSalesPerHour) }}</strong>
+                                <p>{{ formatNumber(activeOperatingHours) }} horas com vendas</p>
+                            </article>
+                            <article class="is-lime">
+                                <span>{{ metricLabel('devices', 'Máquinas sincronizadas') }}</span>
+                                <strong>{{ formatNumber(props.summary.machines_count) }}</strong>
+                                <p>{{ formatNumber(props.summary.bar_groups_count) }} zonas operacionais</p>
+                            </article>
                         </section>
 
-                        <section
-                            v-if="showZtCard && isBlockVisible('top_up')"
-                            class="report-dashboard-topup"
-                            :style="blockStyle('top_up')"
-                        >
-                            <div class="report-dashboard-section-heading">
-                                <span>{{ blockHelper('top_up', 'Fluxo de cartões') }}</span>
-                                <h3>{{ blockLabel('top_up', 'Top-Up ZT - Card') }}</h3>
-                            </div>
-                            <div class="report-dashboard-topup-flow">
-                                <button v-for="(card, index) in topUpCards" :key="card.key" type="button" @click="openDetailModal('topup')">
-                                    <span>{{ String(index + 1).padStart(2, '0') }}</span>
+                        <section class="contacto-analysis-grid">
+                            <article class="contacto-panel contacto-hourly-panel">
+                                <header>
                                     <div>
-                                        <small>{{ card.label }}</small>
-                                        <strong>{{ card.value }}</strong>
-                                        <p>{{ card.helper }}</p>
+                                        <span class="contacto-label">Vendas por hora</span>
+                                        <strong>Faturação e transações</strong>
                                     </div>
+                                    <label v-if="hourlyDateOptions.length > 1">
+                                        <span class="sr-only">Dia do evento</span>
+                                        <select v-model="selectedHourlyDate">
+                                            <option value="all">Todos os dias</option>
+                                            <option v-for="option in hourlyDateOptions" :key="`summary-${option.date}`" :value="option.date">
+                                                {{ option.label }}
+                                            </option>
+                                        </select>
+                                    </label>
+                                </header>
+                                <div v-if="props.hourlySales.length" class="contacto-hourly-chart" role="img" :aria-label="hourlyChartAriaLabel">
+                                    <svg viewBox="0 0 100 100" preserveAspectRatio="none">
+                                        <defs>
+                                            <linearGradient id="contacto-hourly-area" x1="0" y1="0" x2="0" y2="1">
+                                                <stop offset="0%" stop-color="#00419b" stop-opacity="0.46" />
+                                                <stop offset="100%" stop-color="#00419b" stop-opacity="0.03" />
+                                            </linearGradient>
+                                        </defs>
+                                        <polygon :points="hourlyChartAreaPoints" fill="url(#contacto-hourly-area)" />
+                                        <polyline :points="hourlyChartLinePoints" />
+                                        <circle
+                                            v-if="primaryHourlyPeak"
+                                            :cx="hourlyChartPoints.find((point) => point.hour === primaryHourlyPeak?.hour)?.x"
+                                            :cy="hourlyChartPoints.find((point) => point.hour === primaryHourlyPeak?.hour)?.y"
+                                            r="1.5"
+                                        />
+                                    </svg>
+                                    <div class="contacto-hourly-axis" aria-hidden="true">
+                                        <span v-for="hour in hourlyAxisLabels" :key="`summary-hour-${hour.hour}`">{{ hour.hour_label }}</span>
+                                    </div>
+                                </div>
+                                <p v-else class="contacto-empty">Sem dados horários disponíveis.</p>
+                            </article>
+
+                            <article class="contacto-panel contacto-zone-ranking">
+                                <header>
+                                    <div>
+                                        <span class="contacto-label">Desempenho por zona</span>
+                                        <strong>Clique para filtrar</strong>
+                                    </div>
+                                </header>
+                                <div class="contacto-zone-ranking-head" aria-hidden="true">
+                                    <span>Zona</span><span>Faturação</span><span>Devices</span><span>% total</span>
+                                </div>
+                                <button
+                                    v-for="(zone, index) in leadingZoneRows"
+                                    :key="`leader-${zone.label}`"
+                                    type="button"
+                                    class="contacto-zone-ranking-row"
+                                    :class="{ 'is-active': localFilters.bar_group === getZoneFilterValue(zone.label) }"
+                                    @click="applyBarGroupFilter(getZoneFilterValue(zone.label))"
+                                >
+                                    <span><em>{{ index + 1 }}</em><i />{{ zone.label }}</span>
+                                    <strong>{{ formatMoney(zone.totalSales) }}</strong>
+                                    <span>{{ formatNumber(zone.devicesCount) }}</span>
+                                    <b>{{ props.summary.total_sales > 0 ? `${((zone.totalSales / props.summary.total_sales) * 100).toFixed(1).replace('.', ',')}%` : '0,0%' }}</b>
                                 </button>
-                            </div>
+                            </article>
                         </section>
 
-                        <section v-if="isBlockVisible('operations')" :style="blockStyle('operations')">
-                            <div class="report-dashboard-section-heading">
-                                <span>{{ blockHelper('operations', 'Operação') }}</span>
-                                <h3>{{ blockLabel('operations', 'Indicadores operacionais') }}</h3>
-                            </div>
-                            <div class="report-dashboard-grid" :class="metricGridClass(summaryCards.length)">
-                                <button
-                                    v-for="card in summaryCards"
-                                    :key="card.key"
-                                    type="button"
-                                    class="report-dashboard-summary-card"
-                                    :class="{ 'is-clickable': card.key === 'average_ticket' }"
-                                    :disabled="card.key !== 'average_ticket'"
-                                    @click="openDetailModal('ticket')"
-                                >
-                                    <span>{{ card.label }}</span>
-                                    <strong>{{ card.value }}</strong>
-                                    <small>{{ card.helper }}</small>
-                                </button>
-                            </div>
+                        <section v-if="isBlockVisible('payments')" class="contacto-payment-summary">
+                            <header>
+                                <span>{{ blockHelper('payments', 'Formas de pagamento') }}</span>
+                                <strong>{{ blockLabel('payments', 'Pagamentos das vendas') }}</strong>
+                            </header>
+                            <button v-for="card in paymentCards" :key="`compact-${card.key}`" type="button" @click="openDetailModal('payments')">
+                                <span>{{ card.label }}</span>
+                                <strong>{{ card.value }}</strong>
+                                <small>{{ card.helper }}</small>
+                            </button>
                         </section>
                     </div>
 

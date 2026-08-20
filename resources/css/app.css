@@ -90,6 +90,1345 @@
     }
 }
 
+/* Lovable Contacto Digital visual system. Keep both theme values aligned so
+   persisted preferences cannot reintroduce the previous palette. */
+:root,
+:root[data-theme='light'],
+:root[data-theme='dark'] {
+    --cd-dark-blue: #03182b;
+    --cd-blue: #00419b;
+    --cd-lime: #e7ff49;
+    --cd-black: #1d1d1b;
+    --cd-gray: #ededed;
+    --app-bg: #03182b;
+    --body-grad-start: #03182b;
+    --body-grad-end: #03182b;
+    --sidebar-start: #03182b;
+    --sidebar-end: #03182b;
+    --sidebar-border: rgba(237, 237, 237, 0.08);
+    --sidebar-link: #8ea3b8;
+    --card-bg: #061f36;
+    --card-border: rgba(237, 237, 237, 0.1);
+    --card-shadow: none;
+    --text-main: #ededed;
+    --text-soft: #c6d1dc;
+    --text-muted: #8ea3b8;
+    --line-color: rgba(237, 237, 237, 0.1);
+    --accent: #00419b;
+    --accent-strong: #00419b;
+    --success: #e7ff49;
+    --mobile-header-bg: rgba(3, 24, 43, 0.98);
+    --header-bg: rgba(3, 24, 43, 0.96);
+    --mobile-nav-bg: rgba(3, 24, 43, 0.98);
+    --input-bg: #082742;
+    --input-text: #ededed;
+    --pill-bg: #061f36;
+    --pill-text: #ededed;
+    --chart-bg-start: #061f36;
+    --chart-bg-end: #061f36;
+    --table-head-bg: #082742;
+    --table-row-bg: #061f36;
+    --theme-toggle-bg: #082742;
+    --theme-toggle-hover: #0a3152;
+    --theme-toggle-text: #ededed;
+    --modal-overlay: rgba(1, 10, 19, 0.78);
+    --modal-bg: #061f36;
+    --modal-border: rgba(237, 237, 237, 0.1);
+    --modal-shadow: 0 24px 60px rgba(0, 0, 0, 0.36);
+    color-scheme: dark;
+}
+
+html,
+body,
+#app {
+    min-height: 100%;
+    background: #03182b;
+}
+
+body {
+    color: var(--text-main);
+    background: #03182b;
+    font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    font-variant-numeric: tabular-nums;
+}
+
+*:focus-visible {
+    outline: 2px solid #e7ff49;
+    outline-offset: 2px;
+}
+
+.app-shell,
+.app-layout,
+.app-main {
+    background: #03182b;
+}
+
+.app-sidebar {
+    width: 15rem;
+    min-width: 15rem;
+    background: #03182b;
+    border-right: 1px solid rgba(237, 237, 237, 0.08);
+    box-shadow: none;
+}
+
+.app-sidebar-brand {
+    display: flex;
+    min-height: 6.75rem;
+    flex-direction: column;
+    align-items: flex-start;
+    justify-content: center;
+    gap: 0.5rem;
+    padding: 1rem 1.25rem;
+    border-color: rgba(237, 237, 237, 0.08);
+}
+
+.contacto-sidebar-brand-link {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.contacto-sidebar-logo {
+    width: 2.65rem;
+    height: 2.65rem;
+    object-fit: contain;
+    filter: grayscale(1) brightness(4.5);
+}
+
+.contacto-sidebar-mode {
+    display: inline-flex;
+    border-radius: 999px;
+    padding: 0.2rem 0.55rem;
+    color: #8ea3b8;
+    background: #082742;
+    font-size: 0.625rem;
+    line-height: 1;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+}
+
+.app-nav {
+    padding: 1rem 0.75rem;
+}
+
+.app-nav-link,
+.app-report-navigation-item {
+    min-height: 2.55rem;
+    border-radius: 0.5rem;
+    padding: 0.65rem 0.75rem;
+    color: #8ea3b8;
+    background: transparent;
+    box-shadow: none;
+    font-size: 0.875rem;
+    font-weight: 400;
+}
+
+.app-nav-link:hover,
+.app-report-navigation-item:hover {
+    color: #ededed;
+    background: #082742;
+}
+
+.app-nav-link.is-active,
+.app-report-navigation-item.is-active {
+    color: #ffffff;
+    background: #00419b;
+    box-shadow: none;
+    font-weight: 500;
+}
+
+.app-nav-icon {
+    width: 1.2rem;
+    height: 1.2rem;
+    border-radius: 0;
+    color: currentColor;
+    background: transparent;
+}
+
+.app-nav-link.is-active .app-nav-icon {
+    background: transparent;
+}
+
+.app-report-navigation {
+    margin-top: 0.85rem;
+    padding-top: 0.85rem;
+    border-color: rgba(237, 237, 237, 0.08);
+}
+
+.app-report-navigation-header {
+    display: none;
+}
+
+.app-report-navigation-list {
+    margin-top: 0;
+    gap: 0.125rem;
+}
+
+.app-report-navigation-item {
+    gap: 0.65rem;
+}
+
+.app-report-navigation-number {
+    min-width: 1rem;
+    color: #6d92c4;
+    font-size: 0.625rem;
+}
+
+.app-report-navigation-item.is-active .app-report-navigation-number {
+    color: #e7ff49;
+}
+
+.app-report-navigation-item strong {
+    font-size: 0.8125rem;
+    font-weight: 500;
+}
+
+.app-report-navigation-item small {
+    display: none;
+}
+
+.app-report-navigation-edit {
+    border: 0;
+    background: transparent;
+}
+
+.app-report-navigation-status {
+    margin-top: 1rem;
+    border-radius: 0.5rem;
+    padding: 0.7rem 0.75rem;
+    background: #061f36;
+}
+
+.app-report-navigation-status > span {
+    width: 0.4rem;
+    height: 0.4rem;
+    background: #e7ff49;
+    box-shadow: none;
+}
+
+.app-report-navigation-status strong {
+    color: #ededed;
+    font-size: 0.6875rem;
+    font-weight: 500;
+}
+
+.app-report-navigation-status small {
+    color: #8ea3b8;
+}
+
+.app-report-help {
+    display: none;
+}
+
+.app-page-header {
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    min-height: 4.8rem;
+    background: rgba(3, 24, 43, 0.96);
+    border-color: rgba(237, 237, 237, 0.08);
+    backdrop-filter: blur(14px);
+}
+
+.app-page-header-inner {
+    max-width: none;
+    padding: 0.9rem 1.5rem;
+}
+
+.app-header-row {
+    gap: 1rem;
+}
+
+.app-header-user-trigger {
+    min-height: 2.5rem;
+    border-radius: 0.5rem;
+    border-color: rgba(237, 237, 237, 0.1);
+    background: transparent;
+    color: #ededed;
+    font-size: 0.75rem;
+    font-weight: 400;
+}
+
+.app-header-user-trigger .dash-user-dot {
+    width: 0.4rem;
+    height: 0.4rem;
+    background: #e7ff49;
+    box-shadow: none;
+}
+
+.app-header-dropdown {
+    border-radius: 0.5rem;
+    background: #061f36;
+    border-color: rgba(237, 237, 237, 0.1);
+}
+
+.app-content {
+    padding-bottom: 2rem;
+}
+
+.dash-page {
+    width: 100%;
+    max-width: 120rem;
+    padding: 1.5rem 2rem 2rem;
+}
+
+.dash-card,
+.admin-clients-mobile-card,
+.admin-events-mobile-card,
+.dash-modal,
+.app-modal-panel {
+    border-color: rgba(237, 237, 237, 0.1);
+    background: #061f36;
+    box-shadow: none;
+}
+
+.dash-card {
+    border-radius: 0.75rem;
+}
+
+.dash-action-button,
+.app-primary-button {
+    border-radius: 0.5rem;
+    color: #ffffff;
+    background: #00419b;
+    box-shadow: none;
+}
+
+.dash-action-button:hover,
+.app-primary-button:hover {
+    background: #0a55b9;
+    transform: none;
+}
+
+.dash-link-button,
+.dash-modal-cancel,
+.app-secondary-button {
+    border-radius: 0.5rem;
+    border-color: rgba(237, 237, 237, 0.12);
+    color: #ededed;
+    background: transparent;
+}
+
+.dash-table thead th,
+.admin-clients-table thead th,
+.admin-events-table thead th {
+    color: #8ea3b8;
+    background: #082742;
+    border-color: rgba(237, 237, 237, 0.08);
+    font-size: 0.6875rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+}
+
+.dash-table tbody td,
+.admin-clients-table tbody td,
+.admin-events-table tbody td {
+    color: #c6d1dc;
+    background: #061f36;
+    border-color: rgba(237, 237, 237, 0.08);
+}
+
+.dash-table tbody tr:hover td,
+.admin-clients-table tbody tr:hover td,
+.admin-events-table tbody tr:hover td {
+    background: #082742;
+}
+
+.dash-page-title,
+.dash-modal-title,
+.admin-clients-name,
+.admin-events-title {
+    color: #ededed;
+}
+
+.dash-modal-input,
+.dash-input,
+.app-text-input {
+    border-radius: 0.5rem;
+    border-color: rgba(237, 237, 237, 0.14);
+    color: #ededed;
+    background: #082742;
+}
+
+.status-pill.success {
+    color: #03182b;
+    background: #e7ff49;
+    border-color: #e7ff49;
+}
+
+.contacto-dashboard-header {
+    display: flex;
+    min-width: 0;
+    flex: 1;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+}
+
+.contacto-dashboard-event {
+    position: relative;
+    min-width: 0;
+}
+
+.contacto-dashboard-event > span {
+    display: block;
+    overflow: hidden;
+    color: #8ea3b8;
+    font-size: 0.6875rem;
+    line-height: 1rem;
+    letter-spacing: 0.14em;
+    text-overflow: ellipsis;
+    text-transform: uppercase;
+    white-space: nowrap;
+}
+
+.contacto-dashboard-event-trigger {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    gap: 0.55rem;
+    margin-top: 0.1rem;
+    color: #ededed;
+    text-align: left;
+}
+
+.contacto-dashboard-event-trigger strong {
+    max-width: 24rem;
+    overflow: hidden;
+    font-size: 1rem;
+    font-weight: 600;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.contacto-dashboard-event-trigger em {
+    flex: none;
+    border-radius: 0.35rem;
+    padding: 0.2rem 0.45rem;
+    color: #03182b;
+    background: #e7ff49;
+    font-size: 0.625rem;
+    font-style: normal;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.contacto-dashboard-event-trigger svg {
+    width: 0.85rem;
+    height: 0.85rem;
+    color: #8ea3b8;
+}
+
+.contacto-dashboard-event-menu {
+    right: auto;
+    left: 0;
+}
+
+.contacto-dashboard-actions {
+    display: flex;
+    flex: none;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.contacto-header-button {
+    display: inline-flex;
+    min-height: 2.5rem;
+    align-items: center;
+    justify-content: center;
+    gap: 0.45rem;
+    border: 1px solid rgba(237, 237, 237, 0.1);
+    border-radius: 0.5rem;
+    padding: 0.55rem 0.8rem;
+    color: #ededed;
+    background: transparent;
+    font-size: 0.75rem;
+    font-weight: 500;
+    transition: border-color 160ms ease, background-color 160ms ease;
+}
+
+.contacto-header-button:hover,
+.contacto-header-button.is-active {
+    border-color: rgba(231, 255, 73, 0.45);
+    background: #082742;
+}
+
+.contacto-header-button.is-primary {
+    border-color: #00419b;
+    color: #ffffff;
+    background: #00419b;
+}
+
+.contacto-header-button svg {
+    width: 1rem;
+    height: 1rem;
+}
+
+.report-dashboard-header-sync {
+    min-width: 7.8rem;
+    border-radius: 0.5rem;
+    border-color: rgba(237, 237, 237, 0.1);
+    padding: 0.4rem 0.65rem;
+    background: transparent;
+}
+
+.report-dashboard-header-sync span {
+    font-size: 0.5rem;
+    letter-spacing: 0.12em;
+}
+
+.report-dashboard-header-sync strong {
+    color: #e7ff49;
+    font-size: 0.75rem;
+}
+
+.report-dashboard-summary-view-switcher {
+    margin-bottom: 0.9rem;
+}
+
+.report-dashboard-summary-view-toggle {
+    border-radius: 0.5rem;
+    border-color: rgba(237, 237, 237, 0.1);
+    background: #061f36;
+}
+
+.report-dashboard-summary-view-toggle button {
+    min-height: 2rem;
+    border-radius: 0.4rem;
+    padding: 0.35rem 0.8rem;
+    color: #8ea3b8;
+    font-size: 0.6875rem;
+}
+
+.report-dashboard-summary-view-toggle button.is-active {
+    color: #ffffff;
+    background: #00419b;
+}
+
+.contacto-live-dashboard {
+    display: grid;
+    gap: 1.25rem;
+    animation: contacto-dashboard-reveal 260ms ease-out both;
+}
+
+.contacto-label {
+    color: #8ea3b8;
+    font-size: 0.6875rem;
+    line-height: 1rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+}
+
+.contacto-zone-filter {
+    overflow: hidden;
+    border: 1px solid rgba(237, 237, 237, 0.1);
+    border-radius: 1.75rem;
+    background: #061f36;
+}
+
+.contacto-zone-filter-row,
+.contacto-zone-total,
+.contacto-zone-period {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    gap: 0.55rem;
+    padding: 0.75rem 1rem;
+}
+
+.contacto-zone-filter-row {
+    overflow-x: auto;
+    border-bottom: 1px solid rgba(237, 237, 237, 0.08);
+}
+
+.contacto-zone-filter-row .contacto-label {
+    margin-right: 0.4rem;
+}
+
+.contacto-zone-filter-row button {
+    flex: none;
+    border: 1px solid rgba(237, 237, 237, 0.1);
+    border-radius: 999px;
+    padding: 0.35rem 0.75rem;
+    color: #8ea3b8;
+    background: transparent;
+    font-size: 0.6875rem;
+    transition: color 160ms ease, border-color 160ms ease, background-color 160ms ease;
+}
+
+.contacto-zone-filter-row button:hover {
+    color: #ededed;
+    border-color: rgba(237, 237, 237, 0.22);
+}
+
+.contacto-zone-filter-row button.is-active {
+    color: #03182b;
+    border-color: #e7ff49;
+    background: #e7ff49;
+}
+
+.contacto-zone-total {
+    border-bottom: 1px solid rgba(237, 237, 237, 0.08);
+}
+
+.contacto-zone-total span {
+    color: #8ea3b8;
+    font-size: 0.6875rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+}
+
+.contacto-zone-total strong {
+    color: #ededed;
+    font-size: 0.875rem;
+    font-weight: 500;
+}
+
+.contacto-zone-period strong,
+.contacto-zone-period > span:not(.contacto-label) {
+    color: #c6d1dc;
+    font-size: 0.75rem;
+    font-weight: 400;
+}
+
+.contacto-zone-period button {
+    margin-left: auto;
+    color: #8ea3b8;
+    font-size: 0.6875rem;
+    text-decoration: underline;
+    text-underline-offset: 0.2rem;
+}
+
+.contacto-stream-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    border: 1px solid rgba(237, 237, 237, 0.08);
+    border-radius: 999px;
+    padding: 0.75rem 1rem;
+    background: #061f36;
+}
+
+.contacto-stream-bar > div {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    gap: 0.55rem;
+}
+
+.contacto-stream-bar > div > span {
+    width: 0.45rem;
+    height: 0.45rem;
+    flex: none;
+    border-radius: 999px;
+    background: #e7ff49;
+}
+
+.contacto-stream-bar > div > span.is-processing {
+    animation: report-dashboard-pulse 1.4s ease-in-out infinite;
+}
+
+.contacto-stream-bar > div > span.is-failed {
+    background: #d64545;
+}
+
+.contacto-stream-bar strong {
+    color: #ededed;
+    font-size: 0.75rem;
+    font-weight: 500;
+}
+
+.contacto-stream-bar small,
+.contacto-stream-bar em {
+    color: #8ea3b8;
+    font-size: 0.6875rem;
+    font-style: normal;
+}
+
+.contacto-kpi-mesh {
+    display: grid;
+    grid-template-columns: minmax(0, 1.45fr) minmax(13rem, 1fr) minmax(13rem, 1fr);
+    gap: 1rem;
+}
+
+.contacto-kpi,
+.contacto-leader-banner,
+.contacto-panel,
+.contacto-payment-summary {
+    border: 1px solid rgba(237, 237, 237, 0.1);
+    background: #061f36;
+}
+
+.contacto-kpi {
+    min-height: 9.9rem;
+    border-radius: 1.75rem;
+    padding: 1.65rem;
+    text-align: left;
+}
+
+.contacto-kpi > span,
+.contacto-mini-stats article > span,
+.contacto-payment-summary > header span,
+.contacto-payment-summary button > span {
+    display: block;
+    color: #8ea3b8;
+    font-size: 0.6875rem;
+    line-height: 1rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+}
+
+.contacto-kpi > strong {
+    display: block;
+    margin-top: 0.7rem;
+    color: #ededed;
+    font-size: 2rem;
+    line-height: 1.1;
+    font-weight: 600;
+    letter-spacing: -0.03em;
+}
+
+.contacto-kpi > small {
+    display: block;
+    margin-top: 1rem;
+    color: #8ea3b8;
+    font-size: 0.6875rem;
+}
+
+.contacto-kpi-hero {
+    position: relative;
+    grid-row: span 2;
+    min-height: 12.8rem;
+    overflow: hidden;
+    border-color: rgba(0, 65, 155, 0.72);
+    background: #062442;
+}
+
+.contacto-kpi-hero::after {
+    position: absolute;
+    top: -4.5rem;
+    right: -3.2rem;
+    width: 11rem;
+    height: 11rem;
+    border-radius: 999px;
+    background: rgba(231, 255, 73, 0.07);
+    content: '';
+}
+
+.contacto-kpi-hero > strong {
+    color: #e7ff49;
+    font-size: clamp(2.4rem, 4vw, 3.35rem);
+}
+
+.contacto-kpi-ticket i {
+    display: block;
+    height: 0.25rem;
+    overflow: hidden;
+    margin-top: 1.15rem;
+    border-radius: 999px;
+    background: #14334f;
+}
+
+.contacto-kpi-ticket i b {
+    display: block;
+    height: 100%;
+    border-radius: inherit;
+    background: #e7ff49;
+}
+
+.contacto-kpi-transactions {
+    border-color: rgba(0, 65, 155, 0.75);
+    background: #052a50;
+}
+
+.contacto-kpi-transactions > strong {
+    color: #e7ff49;
+}
+
+.contacto-leader-banner {
+    display: flex;
+    grid-column: 2 / 4;
+    min-height: 6rem;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    border: 0;
+    border-radius: 2.25rem;
+    padding: 1.1rem 1.5rem;
+    color: #03182b;
+    background: #ededed;
+}
+
+.contacto-leader-banner > div {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    gap: 0.8rem;
+}
+
+.contacto-leader-mark {
+    width: 3rem;
+    height: 3rem;
+    flex: none;
+    border-radius: 0.75rem;
+    background: #03182b;
+}
+
+.contacto-leader-mark::after {
+    display: block;
+    width: 0.65rem;
+    height: 0.65rem;
+    margin: 1.175rem;
+    border-radius: 999px;
+    background: #e7ff49;
+    content: '';
+}
+
+.contacto-leader-banner p {
+    min-width: 0;
+}
+
+.contacto-leader-banner small,
+.contacto-leader-banner strong {
+    display: block;
+}
+
+.contacto-leader-banner small {
+    color: #6c7b88;
+    font-size: 0.625rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+}
+
+.contacto-leader-banner strong {
+    overflow: hidden;
+    color: #03182b;
+    font-size: 1rem;
+    font-weight: 700;
+    text-overflow: ellipsis;
+    text-transform: uppercase;
+    white-space: nowrap;
+}
+
+.contacto-leader-banner > p {
+    flex: none;
+    text-align: right;
+}
+
+.contacto-leader-banner > p strong {
+    font-size: 1.5rem;
+}
+
+.contacto-mini-stats {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 1rem;
+}
+
+.contacto-mini-stats article {
+    position: relative;
+    min-height: 6.8rem;
+    border-left: 2px solid #00419b;
+    border-radius: 0 0.75rem 0.75rem 0;
+    padding: 1.25rem 1.35rem;
+    background: #061f36;
+}
+
+.contacto-mini-stats article:nth-child(odd) {
+    border-left-color: #e7ff49;
+}
+
+.contacto-mini-stats article.is-lime {
+    border: 0;
+    border-radius: 1rem;
+    color: #03182b;
+    background: #e7ff49;
+}
+
+.contacto-mini-stats article.is-lime > span,
+.contacto-mini-stats article.is-lime p {
+    color: rgba(3, 24, 43, 0.74);
+}
+
+.contacto-mini-stats article.is-lime strong {
+    color: #03182b;
+}
+
+.contacto-mini-stats strong {
+    display: block;
+    margin-top: 0.5rem;
+    color: #ededed;
+    font-size: 1.45rem;
+    line-height: 1.1;
+    font-weight: 400;
+}
+
+.contacto-mini-stats strong small {
+    color: #e7ff49;
+    font-size: 0.65rem;
+    font-weight: 700;
+}
+
+.contacto-mini-stats p {
+    margin-top: 0.45rem;
+    color: #8ea3b8;
+    font-size: 0.625rem;
+}
+
+.contacto-analysis-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1.35fr) minmax(24rem, 1fr);
+    gap: 1rem;
+}
+
+.contacto-panel {
+    min-width: 0;
+    border-radius: 1.75rem;
+    padding: 1.25rem;
+}
+
+.contacto-panel > header,
+.contacto-payment-summary > header {
+    display: flex;
+    min-height: 2.2rem;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 1rem;
+}
+
+.contacto-panel > header strong,
+.contacto-payment-summary > header strong {
+    display: block;
+    margin-top: 0.2rem;
+    color: #8ea3b8;
+    font-size: 0.625rem;
+    font-weight: 400;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+}
+
+.contacto-panel select {
+    border: 1px solid rgba(237, 237, 237, 0.1);
+    border-radius: 0.5rem;
+    padding: 0.35rem 1.8rem 0.35rem 0.55rem;
+    color: #c6d1dc;
+    background-color: #082742;
+    font-size: 0.6875rem;
+}
+
+.contacto-hourly-chart {
+    position: relative;
+    height: 16rem;
+    margin-top: 1rem;
+    border-left: 1px solid rgba(237, 237, 237, 0.08);
+    border-bottom: 1px solid rgba(237, 237, 237, 0.08);
+    background-image:
+        linear-gradient(rgba(237, 237, 237, 0.05) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(237, 237, 237, 0.05) 1px, transparent 1px);
+    background-size: 25% 25%;
+}
+
+.contacto-hourly-chart svg {
+    width: 100%;
+    height: calc(100% - 1.8rem);
+    overflow: visible;
+}
+
+.contacto-hourly-chart polyline {
+    fill: none;
+    stroke: #2f6fd0;
+    stroke-width: 1.15;
+    vector-effect: non-scaling-stroke;
+}
+
+.contacto-hourly-chart circle {
+    fill: #e7ff49;
+    stroke: #03182b;
+    stroke-width: 0.6;
+    vector-effect: non-scaling-stroke;
+}
+
+.contacto-hourly-axis {
+    display: flex;
+    justify-content: space-between;
+    padding-top: 0.55rem;
+    color: #8ea3b8;
+    font-size: 0.625rem;
+}
+
+.contacto-zone-ranking {
+    overflow: hidden;
+}
+
+.contacto-zone-ranking-head,
+.contacto-zone-ranking-row {
+    display: grid;
+    grid-template-columns: minmax(9rem, 1.2fr) minmax(7rem, 0.8fr) 4rem 4.2rem;
+    align-items: center;
+    gap: 0.7rem;
+}
+
+.contacto-zone-ranking-head {
+    margin-top: 0.85rem;
+    padding: 0.55rem 0;
+    color: #8ea3b8;
+    font-size: 0.625rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+}
+
+.contacto-zone-ranking-row {
+    width: 100%;
+    min-height: 2.55rem;
+    border-top: 1px solid rgba(237, 237, 237, 0.08);
+    color: #c6d1dc;
+    text-align: left;
+    font-size: 0.6875rem;
+}
+
+.contacto-zone-ranking-row:hover,
+.contacto-zone-ranking-row.is-active {
+    background: rgba(8, 39, 66, 0.72);
+}
+
+.contacto-zone-ranking-row > span:first-child {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    gap: 0.45rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.contacto-zone-ranking-row em {
+    width: 0.8rem;
+    flex: none;
+    color: #8ea3b8;
+    font-style: normal;
+}
+
+.contacto-zone-ranking-row i {
+    width: 0.42rem;
+    height: 0.42rem;
+    flex: none;
+    border-radius: 999px;
+    background: #2f6fd0;
+}
+
+.contacto-zone-ranking-row:first-of-type i,
+.contacto-zone-ranking-row b {
+    background: #e7ff49;
+}
+
+.contacto-zone-ranking-row strong {
+    color: #ededed;
+    font-weight: 500;
+}
+
+.contacto-zone-ranking-row b {
+    color: #e7ff49;
+    background: transparent;
+    font-weight: 500;
+    text-align: right;
+}
+
+.contacto-payment-summary {
+    display: grid;
+    grid-template-columns: minmax(12rem, 1.2fr) repeat(4, minmax(10rem, 1fr));
+    gap: 0;
+    overflow-x: auto;
+    border-radius: 1.25rem;
+}
+
+.contacto-payment-summary > header,
+.contacto-payment-summary > button {
+    min-width: 10rem;
+    padding: 1.15rem 1.25rem;
+}
+
+.contacto-payment-summary > header {
+    flex-direction: column;
+    justify-content: center;
+}
+
+.contacto-payment-summary > header strong {
+    color: #ededed;
+    font-size: 0.875rem;
+    font-weight: 500;
+    letter-spacing: 0;
+    text-transform: none;
+}
+
+.contacto-payment-summary > button {
+    border-left: 1px solid rgba(237, 237, 237, 0.08);
+    text-align: left;
+}
+
+.contacto-payment-summary > button:hover {
+    background: #082742;
+}
+
+.contacto-payment-summary > button strong {
+    display: block;
+    margin-top: 0.55rem;
+    color: #ededed;
+    font-size: 1.15rem;
+    font-weight: 500;
+}
+
+.contacto-payment-summary > button small {
+    display: block;
+    margin-top: 0.35rem;
+    color: #8ea3b8;
+    font-size: 0.625rem;
+}
+
+.contacto-empty {
+    display: grid;
+    min-height: 12rem;
+    place-items: center;
+    color: #8ea3b8;
+    font-size: 0.75rem;
+}
+
+.report-dashboard-filter-panel {
+    border-radius: 1.25rem;
+    border-color: rgba(237, 237, 237, 0.1);
+    background: #061f36;
+    box-shadow: 0 24px 60px rgba(0, 0, 0, 0.28);
+}
+
+.report-dashboard-filter-bar-options button.is-active,
+.report-dashboard-filter-button.is-active {
+    border-color: #e7ff49;
+    color: #03182b;
+    background: #e7ff49;
+}
+
+.report-dashboard-analytics-card,
+.report-dashboard-products-panel,
+.report-dashboard-table-shell,
+.report-dashboard-highlights-panel,
+.report-dashboard-comparison-chart {
+    border-radius: 1.25rem;
+    border-color: rgba(237, 237, 237, 0.1);
+    background: #061f36;
+    box-shadow: none;
+}
+
+.report-dashboard-analytics-card header span,
+.report-dashboard-view-header span,
+.report-dashboard-section-heading span {
+    color: #6d92c4;
+}
+
+.report-dashboard-analytics-donut {
+    box-shadow: none;
+}
+
+@keyframes contacto-dashboard-reveal {
+    from {
+        opacity: 0;
+        transform: translateY(8px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@media (max-width: 1500px) {
+    .contacto-dashboard-actions .report-dashboard-header-sync {
+        display: none;
+    }
+
+    .contacto-kpi-mesh {
+        grid-template-columns: minmax(0, 1.2fr) repeat(2, minmax(11rem, 1fr));
+    }
+
+    .contacto-analysis-grid {
+        grid-template-columns: minmax(0, 1.1fr) minmax(22rem, 0.9fr);
+    }
+}
+
+@media (max-width: 1220px) {
+    .contacto-dashboard-actions .contacto-header-button:not(.is-primary) {
+        padding-inline: 0.65rem;
+        font-size: 0;
+    }
+
+    .contacto-dashboard-actions .contacto-header-button svg {
+        margin: 0;
+    }
+
+    .contacto-kpi-mesh {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .contacto-kpi-hero {
+        grid-row: auto;
+    }
+
+    .contacto-leader-banner {
+        grid-column: 1 / -1;
+    }
+
+    .contacto-mini-stats {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .contacto-analysis-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (max-width: 1023px) {
+    .app-sidebar {
+        width: auto;
+        min-width: 0;
+    }
+
+    .app-mobile-header {
+        background: rgba(3, 24, 43, 0.98);
+        border-color: rgba(237, 237, 237, 0.08);
+        box-shadow: none;
+    }
+
+    .app-mobile-logo {
+        filter: none;
+    }
+
+    .app-page-header {
+        position: static;
+    }
+
+    .app-page-header-inner,
+    .dash-page {
+        padding-inline: 1rem;
+    }
+
+    .app-header-actions {
+        display: none;
+    }
+
+    .contacto-dashboard-header {
+        align-items: flex-start;
+    }
+
+    .contacto-dashboard-actions {
+        flex-wrap: wrap;
+        justify-content: flex-end;
+    }
+
+    .app-mobile-nav {
+        background: rgba(3, 24, 43, 0.98);
+        border-color: rgba(237, 237, 237, 0.08);
+        box-shadow: none;
+    }
+
+    .app-mobile-nav-link.is-active {
+        color: #ffffff;
+        background: #00419b;
+    }
+}
+
+@media (max-width: 767px) {
+    .contacto-dashboard-header {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .contacto-dashboard-actions {
+        justify-content: stretch;
+    }
+
+    .contacto-dashboard-actions .contacto-header-button {
+        flex: 1;
+        font-size: 0.6875rem;
+    }
+
+    .contacto-dashboard-event-trigger strong {
+        max-width: 15rem;
+    }
+
+    .contacto-zone-filter {
+        border-radius: 1.2rem;
+    }
+
+    .contacto-zone-total,
+    .contacto-zone-period {
+        flex-wrap: wrap;
+    }
+
+    .contacto-zone-period button {
+        width: 100%;
+        margin-left: 0;
+        text-align: left;
+    }
+
+    .contacto-stream-bar {
+        align-items: flex-start;
+        border-radius: 1.2rem;
+    }
+
+    .contacto-stream-bar > div {
+        flex-wrap: wrap;
+    }
+
+    .contacto-stream-bar em {
+        display: none;
+    }
+
+    .contacto-kpi-mesh,
+    .contacto-mini-stats {
+        grid-template-columns: 1fr;
+    }
+
+    .contacto-leader-banner {
+        grid-column: auto;
+        border-radius: 1.25rem;
+    }
+
+    .contacto-kpi {
+        min-height: 0;
+        border-radius: 1.25rem;
+        padding: 1.25rem;
+    }
+
+    .contacto-kpi-hero {
+        min-height: 10rem;
+    }
+
+    .contacto-kpi-hero > strong {
+        font-size: 2.25rem;
+    }
+
+    .contacto-panel {
+        border-radius: 1.25rem;
+        padding: 1rem;
+    }
+
+    .contacto-zone-ranking {
+        overflow-x: auto;
+    }
+
+    .contacto-zone-ranking-head,
+    .contacto-zone-ranking-row {
+        min-width: 37rem;
+    }
+
+    .contacto-hourly-chart {
+        height: 13rem;
+    }
+
+    .contacto-payment-summary {
+        grid-template-columns: repeat(5, minmax(10rem, 1fr));
+    }
+}
+
 @layer components {
     .guest-shell {
         --card-bg: rgba(7, 15, 31, 0.84);
