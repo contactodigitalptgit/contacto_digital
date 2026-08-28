@@ -25,6 +25,8 @@ class ZoneSoftApiClient
         string $entityName,
         array $entityPayload,
         bool $retryUnauthorized = false,
+        ?int $requestTimeoutSeconds = null,
+        ?int $requestRetryAttempts = null,
     ): array {
         $body = $this->encodeBody($entityName, $entityPayload);
 
@@ -32,7 +34,12 @@ class ZoneSoftApiClient
 
         while (true) {
             try {
-                $response = $this->pendingRequest($application, $zsClientId, $body)
+                $response = $this->pendingRequest(
+                    $application,
+                    $zsClientId,
+                    $body,
+                    requestTimeoutSeconds: $requestTimeoutSeconds,
+                )
                     ->send('POST', $this->resolveEndpoint($application, $interface, $action));
             } catch (ConnectionException $connectionException) {
                 $exception = new ZoneSoftApiException(
@@ -41,7 +48,12 @@ class ZoneSoftApiClient
                     $connectionException,
                 );
 
-                if ($this->shouldRetryRequest($exception, $retryAttempt, $retryUnauthorized)) {
+                if ($this->shouldRetryRequest(
+                    $exception,
+                    $retryAttempt,
+                    $retryUnauthorized,
+                    $requestRetryAttempts,
+                )) {
                     $this->pauseForRetry($retryAttempt);
                     $retryAttempt++;
 
@@ -54,7 +66,12 @@ class ZoneSoftApiClient
             try {
                 return $this->normalizeResponse($response);
             } catch (ZoneSoftApiException $exception) {
-                if ($this->shouldRetryRequest($exception, $retryAttempt, $retryUnauthorized)) {
+                if ($this->shouldRetryRequest(
+                    $exception,
+                    $retryAttempt,
+                    $retryUnauthorized,
+                    $requestRetryAttempts,
+                )) {
                     $this->pauseForRetry($retryAttempt, $response);
                     $retryAttempt++;
 
@@ -192,13 +209,14 @@ class ZoneSoftApiClient
         ZoneSoftApiException $exception,
         int $retryAttempt,
         bool $retryUnauthorized,
+        ?int $requestRetryAttempts = null,
     ): bool {
         if ($retryUnauthorized && $exception->statusCode() === 401) {
             return $retryAttempt < 2;
         }
 
         return $exception->isTransient()
-            && $retryAttempt < count(self::REQUEST_RETRY_DELAYS_MS);
+            && $retryAttempt < $this->requestRetryAttempts($requestRetryAttempts);
     }
 
     private function pauseForRetry(int $retryAttempt, ?Response $response = null): void
@@ -236,6 +254,7 @@ class ZoneSoftApiClient
         string $zsClientId,
         string $body,
         ?PendingRequest $request = null,
+        ?int $requestTimeoutSeconds = null,
     ): PendingRequest {
         return ($request ?? Http::withHeaders([]))
             ->withHeaders([
@@ -244,9 +263,35 @@ class ZoneSoftApiClient
                 'X-ZS-CLIENT-ID' => $zsClientId,
                 'X-ZS-SIGNATURE' => hash_hmac('sha256', $body, $application->app_secret),
             ])
-            ->connectTimeout(15)
-            ->timeout(120)
+            ->connectTimeout($this->connectTimeoutSeconds())
+            ->timeout($this->requestTimeoutSeconds($requestTimeoutSeconds))
             ->withBody($body, 'application/json');
+    }
+
+    private function connectTimeoutSeconds(): int
+    {
+        return max(1, min(
+            60,
+            (int) config('event-reports.zonesoft.connect_timeout_seconds', 5),
+        ));
+    }
+
+    private function requestTimeoutSeconds(?int $requestTimeoutSeconds = null): int
+    {
+        return max(5, min(
+            120,
+            $requestTimeoutSeconds
+                ?? (int) config('event-reports.zonesoft.request_timeout_seconds', 30),
+        ));
+    }
+
+    private function requestRetryAttempts(?int $requestRetryAttempts = null): int
+    {
+        return max(0, min(
+            count(self::REQUEST_RETRY_DELAYS_MS),
+            $requestRetryAttempts
+                ?? (int) config('event-reports.zonesoft.request_retry_attempts', 1),
+        ));
     }
 
     /**

@@ -14,7 +14,6 @@ use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
 use Illuminate\Console\Application as ConsoleApplication;
 use Illuminate\Process\Factory as ProcessFactory;
-use Illuminate\Process\Pool as ProcessPool;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Concurrency;
@@ -341,7 +340,7 @@ class EventReportSyncService
      *     document_fetch_mode:string,
      *     machine_document_cursors:array<string, array<string, mixed>>,
      *     last_full_document_sync_at:string,
-     *     metrics:array{documents_count:int,api_requests_count:int,machine_duration_ms:int}
+     *     metrics:array{documents_count:int,api_requests_count:int,machine_duration_ms:int,machine_timings:list<array<string, int|string|null>>}
      * }
      */
     private function fetchRows(
@@ -368,6 +367,7 @@ class EventReportSyncService
             'documents_count' => 0,
             'api_requests_count' => 0,
             'machine_duration_ms' => 0,
+            'machine_timings' => [],
         ];
         $statusTimestamp = $timestamp;
         $machinesById = $machines->keyBy('id');
@@ -381,140 +381,150 @@ class EventReportSyncService
             'end' => $historicalData['fetch_range']['end']->toIso8601String(),
             'sync_import_id' => $syncLog->id,
             'machine_document_cursors' => $historicalData['machine_document_cursors'],
+            'machine_sync_concurrency' => $historicalData['document_fetch_mode'] === 'incremental'
+                ? (int) config('event-reports.zonesoft.incremental_machine_sync_concurrency', 4)
+                : (int) config('event-reports.zonesoft.full_machine_sync_concurrency', 10),
         ];
 
-        foreach (array_chunk($machines->modelKeys(), $this->machineSyncConcurrency()) as $machineIdChunk) {
-            $descriptors = $this->fetchMachineResultDescriptors($machineIdChunk, $rangePayload);
+        $machineIds = $machines->modelKeys();
+        $descriptors = $this->fetchMachineResultDescriptors($machineIds, $rangePayload);
 
-            foreach ($machineIdChunk as $machineId) {
-                $machine = $machinesById->get($machineId);
+        foreach ($machineIds as $machineId) {
+            $machine = $machinesById->get($machineId);
 
-                if (! $machine instanceof ClientZoneSoftMachine) {
-                    continue;
-                }
-
-                $result = isset($descriptors[$machineId])
-                    ? $this->readMachinePayloadResult($descriptors[$machineId])
-                    : $this->missingMachineResult();
-                unset($descriptors[$machineId]);
-
-                $result = $this->retryRateLimitedMachineResult(
-                    $machineId,
-                    $result,
-                    $rangePayload,
-                );
-                $resultMetrics = is_array($result['metrics'] ?? null) ? $result['metrics'] : [];
-                $metrics['documents_count'] += (int) ($resultMetrics['documents_count'] ?? 0);
-                $metrics['api_requests_count'] += (int) ($resultMetrics['api_requests_count'] ?? 0);
-                $metrics['machine_duration_ms'] += (int) ($resultMetrics['duration_ms'] ?? 0);
-                $documentsCount += (int) ($resultMetrics['documents_count'] ?? 0);
-                $apiRequestsCount += (int) ($resultMetrics['api_requests_count'] ?? 0);
-
-                if (is_string($result['failure_message'] ?? null) && $result['failure_message'] !== '') {
-                    $failedMachines[] = $this->persistMachineFailure(
-                        $machine,
-                        $result['failure_message'],
-                        $statusTimestamp,
-                    );
-                    unset($result);
-
-                    continue;
-                }
-
-                $documentKeys = is_array($result['document_keys'] ?? null)
-                    ? array_values(array_filter($result['document_keys'], 'is_array'))
-                    : [];
-
-                if ($historicalData['document_fetch_mode'] === 'incremental' && $documentKeys !== []) {
-                    $removed = $this->removeStagedDocuments(
-                        $syncLog,
-                        $machine,
-                        $documentKeys,
-                    );
-                    $historicalData['reused_rows_count'] = max(
-                        0,
-                        $historicalData['reused_rows_count'] - $removed['rows_count'],
-                    );
-                    $historicalData['reused_payment_documents_count'] = max(
-                        0,
-                        $historicalData['reused_payment_documents_count'] - $removed['payment_documents_count'],
-                    );
-                }
-
-                $rowDedupe = [];
-                $rows = [];
-
-                foreach ($result['rows'] ?? [] as $normalizedRow) {
-                    $dedupeKey = $this->buildRowDedupeKey($machine, $normalizedRow);
-
-                    if (isset($rowDedupe[$dedupeKey])) {
-                        continue;
-                    }
-
-                    $rowDedupe[$dedupeKey] = true;
-                    $normalizedRow['source_row_number'] = ++$sourceRowNumber;
-                    $rows[] = $normalizedRow;
-                }
-
-                $this->stageRowsChunk($event, $syncLog, $rows, $timestamp);
-                unset($rows, $rowDedupe);
-
-                $paymentDocumentDedupe = [];
-                $paymentDocuments = [];
-
-                foreach ($result['payment_documents'] ?? [] as $paymentDocument) {
-                    $dedupeKey = $this->buildPaymentDocumentKey($machine, $paymentDocument);
-
-                    if (isset($paymentDocumentDedupe[$dedupeKey])) {
-                        continue;
-                    }
-
-                    $paymentDocumentDedupe[$dedupeKey] = true;
-                    $paymentDocuments[] = $paymentDocument;
-                }
-
-                $this->stagePaymentDocumentsChunk(
-                    $event,
-                    $syncLog,
-                    $paymentDocuments,
-                    $timestamp,
-                );
-                unset($paymentDocuments, $paymentDocumentDedupe);
-
-                $successfulMachinesCount++;
-                $documentCursor = is_array($result['document_cursor'] ?? null)
-                    ? $result['document_cursor']
-                    : null;
-
-                if ($documentCursor !== null) {
-                    $machineDocumentCursors[(string) $machine->id] = $documentCursor;
-                }
-                $warningMessage = $result['warning_message'] ?? null;
-                $this->persistMachineStatus($machine, $warningMessage, $statusTimestamp);
-
-                if (is_string($warningMessage) && $warningMessage !== '') {
-                    $machineWarnings[] = [
-                        'machine_id' => $machine->id,
-                        'zs_client_id' => $machine->zs_client_id,
-                        'store_id' => $machine->store_id,
-                        'message' => $warningMessage,
-                    ];
-                }
-
-                unset($result);
+            if (! $machine instanceof ClientZoneSoftMachine) {
+                continue;
             }
 
-            $processedMachines += count($machineIdChunk);
-            $this->updateSyncProgress($syncLog->id, [
-                'stage' => 'fetching',
-                'machines_total' => $totalMachines,
-                'machines_processed' => $processedMachines,
-                'documents_processed' => $documentsCount,
-                'api_requests_count' => $apiRequestsCount,
-                'rows_count' => $sourceRowNumber,
-            ]);
-            gc_collect_cycles();
+            $result = isset($descriptors[$machineId])
+                ? $this->readMachinePayloadResult($descriptors[$machineId])
+                : $this->missingMachineResult();
+            unset($descriptors[$machineId]);
+
+            $result = $this->retryRateLimitedMachineResult(
+                $machineId,
+                $result,
+                $rangePayload,
+            );
+            $resultMetrics = is_array($result['metrics'] ?? null) ? $result['metrics'] : [];
+            $metrics['documents_count'] += (int) ($resultMetrics['documents_count'] ?? 0);
+            $metrics['api_requests_count'] += (int) ($resultMetrics['api_requests_count'] ?? 0);
+            $metrics['machine_duration_ms'] += (int) ($resultMetrics['duration_ms'] ?? 0);
+            $metrics['machine_timings'][] = [
+                'machine_id' => $machine->id,
+                'store_id' => $machine->store_id,
+                'store_label' => $machine->store_label,
+                'duration_ms' => (int) ($resultMetrics['duration_ms'] ?? 0),
+                'documents_count' => (int) ($resultMetrics['documents_count'] ?? 0),
+                'api_requests_count' => (int) ($resultMetrics['api_requests_count'] ?? 0),
+            ];
+            $documentsCount += (int) ($resultMetrics['documents_count'] ?? 0);
+            $apiRequestsCount += (int) ($resultMetrics['api_requests_count'] ?? 0);
+
+            if (is_string($result['failure_message'] ?? null) && $result['failure_message'] !== '') {
+                $failedMachines[] = $this->persistMachineFailure(
+                    $machine,
+                    $result['failure_message'],
+                    $statusTimestamp,
+                );
+                unset($result);
+
+                continue;
+            }
+
+            $documentKeys = is_array($result['document_keys'] ?? null)
+                ? array_values(array_filter($result['document_keys'], 'is_array'))
+                : [];
+
+            if ($historicalData['document_fetch_mode'] === 'incremental' && $documentKeys !== []) {
+                $removed = $this->removeStagedDocuments(
+                    $syncLog,
+                    $machine,
+                    $documentKeys,
+                );
+                $historicalData['reused_rows_count'] = max(
+                    0,
+                    $historicalData['reused_rows_count'] - $removed['rows_count'],
+                );
+                $historicalData['reused_payment_documents_count'] = max(
+                    0,
+                    $historicalData['reused_payment_documents_count'] - $removed['payment_documents_count'],
+                );
+            }
+
+            $rowDedupe = [];
+            $rows = [];
+
+            foreach ($result['rows'] ?? [] as $normalizedRow) {
+                $dedupeKey = $this->buildRowDedupeKey($machine, $normalizedRow);
+
+                if (isset($rowDedupe[$dedupeKey])) {
+                    continue;
+                }
+
+                $rowDedupe[$dedupeKey] = true;
+                $normalizedRow['source_row_number'] = ++$sourceRowNumber;
+                $rows[] = $normalizedRow;
+            }
+
+            $this->stageRowsChunk($event, $syncLog, $rows, $timestamp);
+            unset($rows, $rowDedupe);
+
+            $paymentDocumentDedupe = [];
+            $paymentDocuments = [];
+
+            foreach ($result['payment_documents'] ?? [] as $paymentDocument) {
+                $dedupeKey = $this->buildPaymentDocumentKey($machine, $paymentDocument);
+
+                if (isset($paymentDocumentDedupe[$dedupeKey])) {
+                    continue;
+                }
+
+                $paymentDocumentDedupe[$dedupeKey] = true;
+                $paymentDocuments[] = $paymentDocument;
+            }
+
+            $this->stagePaymentDocumentsChunk(
+                $event,
+                $syncLog,
+                $paymentDocuments,
+                $timestamp,
+            );
+            unset($paymentDocuments, $paymentDocumentDedupe);
+
+            $successfulMachinesCount++;
+            $documentCursor = is_array($result['document_cursor'] ?? null)
+                ? $result['document_cursor']
+                : null;
+
+            if ($documentCursor !== null) {
+                $machineDocumentCursors[(string) $machine->id] = $documentCursor;
+            }
+            $warningMessage = $result['warning_message'] ?? null;
+            $this->persistMachineStatus($machine, $warningMessage, $statusTimestamp);
+
+            if (is_string($warningMessage) && $warningMessage !== '') {
+                $machineWarnings[] = [
+                    'machine_id' => $machine->id,
+                    'zs_client_id' => $machine->zs_client_id,
+                    'store_id' => $machine->store_id,
+                    'message' => $warningMessage,
+                ];
+            }
+
+            unset($result);
         }
+
+        $processedMachines = count($machineIds);
+        $this->updateSyncProgress($syncLog->id, [
+            'stage' => 'fetching',
+            'machines_total' => $totalMachines,
+            'machines_processed' => $processedMachines,
+            'documents_processed' => $documentsCount,
+            'api_requests_count' => $apiRequestsCount,
+            'rows_count' => $sourceRowNumber,
+        ]);
+        gc_collect_cycles();
 
         return [
             'successful_machines_count' => $successfulMachinesCount,
@@ -756,22 +766,41 @@ class EventReportSyncService
         }
 
         /** @var array<int, array{path:string}> $descriptors */
-        $descriptors = $this->runConcurrentMachineTasks($tasks);
+        $descriptors = $this->runConcurrentMachineTasks(
+            $tasks,
+            isset($rangePayload['machine_sync_concurrency'])
+                ? (int) $rangePayload['machine_sync_concurrency']
+                : null,
+        );
 
         return $descriptors;
     }
 
-    private function machineSyncConcurrency(): int
+    private function machineSyncConcurrency(?int $configuredConcurrency = null): int
     {
-        return max(1, min(20, (int) config('event-reports.zonesoft.machine_sync_concurrency', 10)));
+        return max(1, min(
+            20,
+            $configuredConcurrency
+                ?? (int) config('event-reports.zonesoft.machine_sync_concurrency', 4),
+        ));
+    }
+
+    private function machineWorkerTimeoutSeconds(): int
+    {
+        return max(60, min(
+            900,
+            (int) config('event-reports.zonesoft.machine_worker_timeout_seconds', 240),
+        ));
     }
 
     /**
      * @param  array<int, \Closure(): array<string, mixed>>  $tasks
      * @return array<int, array<string, mixed>>
      */
-    private function runConcurrentMachineTasks(array $tasks): array
-    {
+    private function runConcurrentMachineTasks(
+        array $tasks,
+        ?int $configuredConcurrency = null,
+    ): array {
         if (count($tasks) === 1) {
             $key = array_key_first($tasks);
 
@@ -800,48 +829,132 @@ class EventReportSyncService
         }
 
         $command = ConsoleApplication::formatCommandString('invoke-serialized-closure');
-        $results = $this->processFactory
-            ->pool(function (ProcessPool $pool) use ($tasks, $command): void {
-                foreach ($tasks as $key => $task) {
-                    $pool->as((string) $key)
+        $pendingTasks = $tasks;
+        $runningProcesses = [];
+        $results = [];
+        $concurrency = $this->machineSyncConcurrency($configuredConcurrency);
+
+        try {
+            while ($pendingTasks !== [] || $runningProcesses !== []) {
+                while (
+                    $pendingTasks !== []
+                    && count($runningProcesses) < $concurrency
+                ) {
+                    $key = array_key_first($pendingTasks);
+
+                    if ($key === null) {
+                        break;
+                    }
+
+                    $task = $pendingTasks[$key];
+                    unset($pendingTasks[$key]);
+
+                    $runningProcesses[$key] = $this->processFactory
+                        ->newPendingProcess()
                         ->path(base_path())
-                        ->forever()
+                        ->timeout($this->machineWorkerTimeoutSeconds())
                         ->env([
                             'LARAVEL_INVOKABLE_CLOSURE' => base64_encode(
                                 serialize(new SerializableClosure($task))
                             ),
+                            'EVENT_REPORT_CONNECT_TIMEOUT_SECONDS' => (string) config(
+                                'event-reports.zonesoft.connect_timeout_seconds',
+                                5,
+                            ),
+                            'EVENT_REPORT_REQUEST_TIMEOUT_SECONDS' => (string) config(
+                                'event-reports.zonesoft.request_timeout_seconds',
+                                30,
+                            ),
+                            'EVENT_REPORT_FULL_REQUEST_TIMEOUT_SECONDS' => (string) config(
+                                'event-reports.zonesoft.full_request_timeout_seconds',
+                                30,
+                            ),
+                            'EVENT_REPORT_INCREMENTAL_REQUEST_TIMEOUT_SECONDS' => (string) config(
+                                'event-reports.zonesoft.incremental_request_timeout_seconds',
+                                10,
+                            ),
+                            'EVENT_REPORT_REQUEST_RETRY_ATTEMPTS' => (string) config(
+                                'event-reports.zonesoft.request_retry_attempts',
+                                1,
+                            ),
+                            'EVENT_REPORT_FULL_REQUEST_RETRY_ATTEMPTS' => (string) config(
+                                'event-reports.zonesoft.full_request_retry_attempts',
+                                3,
+                            ),
+                            'EVENT_REPORT_INCREMENTAL_REQUEST_RETRY_ATTEMPTS' => (string) config(
+                                'event-reports.zonesoft.incremental_request_retry_attempts',
+                                1,
+                            ),
                         ])
-                        ->command($command);
+                        ->command($command)
+                        ->start();
                 }
-            })
-            ->start()
-            ->wait();
 
-        return $results->collect()->mapWithKeys(function ($result, $key): array {
-            if ($result->failed()) {
-                throw new \RuntimeException(sprintf(
-                    'Concurrent process failed with exit code [%s]. Message: %s',
-                    $result->exitCode(),
-                    trim($result->errorOutput()) !== '' ? trim($result->errorOutput()) : trim($result->output()),
-                ));
+                $completedProcess = false;
+
+                foreach ($runningProcesses as $key => $process) {
+                    $process->ensureNotTimedOut();
+
+                    if ($process->running()) {
+                        continue;
+                    }
+
+                    $results[(int) $key] = $this->decodeConcurrentMachineResult(
+                        $process->wait(),
+                    );
+                    unset($runningProcesses[$key]);
+                    $completedProcess = true;
+                }
+
+                if (! $completedProcess && $runningProcesses !== []) {
+                    usleep(20_000);
+                }
             }
-
-            $payload = json_decode($result->output(), true);
-
-            if (! is_array($payload)) {
-                throw new \RuntimeException('Concurrent process returned an invalid payload.');
+        } finally {
+            foreach ($runningProcesses as $process) {
+                if ($process->running()) {
+                    $process->stop(1);
+                }
             }
+        }
 
-            if (! ($payload['successful'] ?? false)) {
-                $message = is_string($payload['message'] ?? null) && trim($payload['message']) !== ''
-                    ? $payload['message']
-                    : 'Concurrent process execution failed.';
+        return $results;
+    }
 
-                throw new \RuntimeException($message);
-            }
+    /**
+     * @return array<string, mixed>
+     */
+    private function decodeConcurrentMachineResult($result): array
+    {
+        if ($result->failed()) {
+            throw new \RuntimeException(sprintf(
+                'Concurrent process failed with exit code [%s]. Message: %s',
+                $result->exitCode(),
+                trim($result->errorOutput()) !== '' ? trim($result->errorOutput()) : trim($result->output()),
+            ));
+        }
 
-            return [(int) $key => unserialize($payload['result'])];
-        })->all();
+        $payload = json_decode($result->output(), true);
+
+        if (! is_array($payload)) {
+            throw new \RuntimeException('Concurrent process returned an invalid payload.');
+        }
+
+        if (! ($payload['successful'] ?? false)) {
+            $message = is_string($payload['message'] ?? null) && trim($payload['message']) !== ''
+                ? $payload['message']
+                : 'Concurrent process execution failed.';
+
+            throw new \RuntimeException($message);
+        }
+
+        $decoded = unserialize($payload['result']);
+
+        if (! is_array($decoded)) {
+            throw new \RuntimeException('Concurrent process returned an invalid result.');
+        }
+
+        return $decoded;
     }
 
     /**
@@ -1198,6 +1311,12 @@ class EventReportSyncService
         $offset = 0;
         $limit = 250;
         $requestCount = 0;
+        $requestTimeoutSeconds = $lastUpdatedAfter
+            ? (int) config('event-reports.zonesoft.incremental_request_timeout_seconds', 10)
+            : (int) config('event-reports.zonesoft.full_request_timeout_seconds', 30);
+        $requestRetryAttempts = $lastUpdatedAfter
+            ? (int) config('event-reports.zonesoft.incremental_request_retry_attempts', 1)
+            : (int) config('event-reports.zonesoft.full_request_retry_attempts', 3);
 
         do {
             $requestCount++;
@@ -1217,6 +1336,9 @@ class EventReportSyncService
                     'limit' => $limit,
                     'offset' => $offset,
                 ],
+                false,
+                $requestTimeoutSeconds,
+                $requestRetryAttempts,
             );
 
             /** @var list<array<string, mixed>> $batch */
@@ -1507,7 +1629,7 @@ class EventReportSyncService
     /**
      * @param  list<array{machine_id:int,zs_client_id:string,store_id:int,message:string}>  $failedMachines
      * @param  list<array{machine_id:int,zs_client_id:string,store_id:int,message:string}>  $machineWarnings
-     * @param  array{documents_count:int,api_requests_count:int,machine_duration_ms:int}  $metrics
+     * @param  array{documents_count:int,api_requests_count:int,machine_duration_ms:int,machine_timings:list<array<string, int|string|null>>}  $metrics
      * @return array<string, mixed>
      */
     private function buildSummaryFromStagedData(
@@ -1532,6 +1654,12 @@ class EventReportSyncService
         $paymentDocumentsCount = EventReportPaymentDocument::query()
             ->where('event_report_import_id', $syncLog->id)
             ->count();
+        $machineTimings = $metrics['machine_timings'];
+        usort(
+            $machineTimings,
+            fn (array $left, array $right): int => ((int) ($right['duration_ms'] ?? 0))
+                <=> ((int) ($left['duration_ms'] ?? 0)),
+        );
 
         return [
             'source' => 'zonesoft_api',
@@ -1555,6 +1683,7 @@ class EventReportSyncService
             'api_requests_count' => $metrics['api_requests_count'],
             'performance' => [
                 'machine_duration_ms' => $metrics['machine_duration_ms'],
+                'slowest_machines' => array_slice($machineTimings, 0, 10),
             ],
         ];
     }
