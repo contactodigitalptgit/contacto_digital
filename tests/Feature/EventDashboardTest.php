@@ -354,6 +354,50 @@ class EventDashboardTest extends TestCase
                     ))));
     }
 
+    public function test_products_filter_includes_store_names_starting_with_vip_in_bar_vip(): void
+    {
+        [$admin, , $event] = $this->makeDashboardContext();
+        $this->seedSyncedRows($event, $admin);
+        $activeImport = $event->activeReportImports()->firstOrFail();
+
+        EventReportRow::create([
+            'event_id' => $event->id,
+            'event_report_import_id' => $activeImport->id,
+            'source_sheet' => 'zonesoft:vip-filter-test',
+            'source_row_number' => 100,
+            'store_code' => '187',
+            'store_name' => 'VIP Maria S',
+            'sale_date' => '2026-03-14',
+            'sale_datetime' => '2026-03-14 14:00:00',
+            'doc_type' => 'FS',
+            'document_series' => 'VIP',
+            'document_number' => '1',
+            'value' => '10.0000',
+            'total' => '10.0000',
+            'discount' => '0.0000',
+            'quantity' => '2.0000',
+            'product_code' => 'VIP-PRODUCT',
+            'description' => 'Produto VIP',
+            'raw_row' => ['index' => 100],
+        ]);
+
+        $this
+            ->actingAs($admin)
+            ->get(route('admin.events.products', $event).'?bar_groups%5B0%5D=Bar%20Vip')
+            ->assertOk()
+            ->assertInertia(fn (AssertableInertia $page) => $page
+                ->component('Events/Dashboard')
+                ->where('initialSection', 'products')
+                ->where('filters.bar_groups', ['Bar Vip'])
+                ->where('summary.filtered_rows', 1)
+                ->loadDeferredProps('dashboard-products', fn (AssertableInertia $details) => $details
+                    ->where('productBreakdowns.total', fn ($products): bool => collect($products)->contains(
+                        fn (array $product): bool => $product['label'] === 'Produto VIP'
+                            && (float) $product['quantity_total'] === 2.0
+                            && (float) $product['sales_total'] === 10.0,
+                    ))));
+    }
+
     public function test_client_can_not_view_dashboard_of_other_client_event(): void
     {
         [, , $event] = $this->makeDashboardContext();

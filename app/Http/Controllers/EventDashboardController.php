@@ -1961,7 +1961,13 @@ class EventDashboardController extends Controller
         }
 
         if (Str::lower($normalizedBarGroup) === 'bar vip') {
-            $query->whereRaw('LOWER(COALESCE(store_name, \'\')) LIKE ?', ['%bar vip%']);
+            $query->where(function (Builder $builder): void {
+                $builder
+                    ->whereRaw('LOWER(COALESCE(store_name, \'\')) LIKE ?', ['%bar vip%'])
+                    ->orWhereRaw('LOWER(TRIM(COALESCE(store_name, \'\'))) = ?', ['vip'])
+                    ->orWhereRaw('LOWER(TRIM(COALESCE(store_name, \'\'))) LIKE ?', ['vip %'])
+                    ->orWhereRaw('LOWER(TRIM(COALESCE(store_name, \'\'))) LIKE ?', ['vip-%']);
+            });
 
             return;
         }
