@@ -634,6 +634,22 @@ const activeFilterCount = computed(
         Array.isArray(value) ? value.length > 0 : value !== ''
     )).length,
 );
+const hasPendingFilterChanges = computed(() => {
+    const current = props.filters;
+    const pending = localFilters.value;
+
+    return [
+        [...pending.bar_groups].sort().join('|') !== [...current.bar_groups].sort().join('|'),
+        pending.store !== current.store,
+        pending.product !== current.product,
+        pending.date_from !== current.date_from,
+        pending.date_to !== current.date_to,
+        pending.hour_from !== current.hour_from,
+        pending.hour_to !== current.hour_to,
+        pending.total_min !== current.total_min,
+        pending.total_max !== current.total_max,
+    ].some(Boolean);
+});
 const brandSubtitle = computed(() => {
     const parts = [props.event.client_name, formatDate(props.event.event_date)].filter(Boolean);
 
@@ -1448,7 +1464,6 @@ const applyFilters = () => submitFilters(true);
 const applyBarGroupFilter = (barGroup: string) => {
     if (barGroup === '') {
         localFilters.value.bar_groups = [];
-        submitFilters(false);
 
         return;
     }
@@ -1456,7 +1471,6 @@ const applyBarGroupFilter = (barGroup: string) => {
     localFilters.value.bar_groups = localFilters.value.bar_groups.includes(barGroup)
         ? localFilters.value.bar_groups.filter((group) => group !== barGroup)
         : [...localFilters.value.bar_groups, barGroup];
-    submitFilters(false);
 };
 
 const clearFilters = () => {
@@ -2027,6 +2041,7 @@ function getDifferenceClass(value: number | null) {
                                 <option v-for="option in hourOptions" :key="`inline-to-${option.value}`" :value="option.value">{{ option.label }}</option>
                             </select>
                             <button type="button" class="contacto-report-refine" @click="filtersOpen = true">Ajustar filtros</button>
+                            <button v-if="hasPendingFilterChanges" type="button" class="contacto-report-refine" @click="applyFilters">Aplicar filtros</button>
                             <button v-if="activeFilterCount > 0" type="button" class="contacto-report-clear" @click="clearFilters">Limpar</button>
                         </div>
                     </section>
@@ -2066,6 +2081,14 @@ function getDifferenceClass(value: number | null) {
                                 </button>
                                 <div class="contacto-zone-filter-actions">
                                     <button
+                                        v-if="hasPendingFilterChanges"
+                                        type="button"
+                                        class="contacto-zone-apply"
+                                        @click="applyFilters"
+                                    >
+                                        Aplicar filtros
+                                    </button>
+                                    <button
                                         v-if="sectionIsVisible('comparison')"
                                         type="button"
                                         @click="activeSection = 'comparison'"
@@ -2074,7 +2097,7 @@ function getDifferenceClass(value: number | null) {
                                     </button>
                                     <button
                                         type="button"
-                                        :disabled="activeFilterCount === 0"
+                                        :disabled="activeFilterCount === 0 && !hasPendingFilterChanges"
                                         @click="clearFilters"
                                     >
                                         Limpar

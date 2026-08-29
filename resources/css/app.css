@@ -1642,6 +1642,12 @@ body {
     border-radius: 0.5rem;
 }
 
+.contacto-zone-filter-actions button.contacto-zone-apply {
+    border-color: #e7ff49;
+    background: #e7ff49;
+    color: #03182b;
+}
+
 .contacto-zone-filter-actions button:disabled {
     cursor: not-allowed;
     opacity: 0.35;
