@@ -11,7 +11,7 @@ interface NavItem {
     label: string;
     href: string;
     pattern: string;
-    icon: 'dashboard' | 'clients' | 'events';
+    icon: 'dashboard' | 'clients' | 'events' | 'tpa';
 }
 
 const page = usePage<PageProps>();
@@ -43,6 +43,13 @@ const primaryNavigation = computed<NavItem[]>(() => {
                 href: route('admin.events.index'),
                 pattern: 'admin.events.*',
                 icon: 'events',
+            },
+            {
+                key: 'integrations',
+                label: 'Integrações',
+                href: route('admin.integrations.zonesoft.index'),
+                pattern: 'admin.integrations.*',
+                icon: 'tpa',
             },
         );
     }

@@ -31,34 +31,44 @@ class EventReportImportTest extends TestCase
         config(['event-reports.zonesoft.complete_documents' => false]);
     }
 
-    public function test_admin_can_save_zonesoft_application_and_machine(): void
+    public function test_admin_can_save_global_zonesoft_integration_and_assign_it_to_an_event(): void
     {
         [$admin, $client] = $this->makeAdminClientContext();
         $event = $this->makeEvent($client);
 
         $this
             ->actingAs($admin)
-            ->post(route('admin.events.integrations.application.save', $event), [
+            ->post(route('admin.integrations.zonesoft.application.save'), [
                 'name' => 'ZoneSoft Principal',
                 'base_url' => 'https://api.zonesoft.org/v3',
                 'app_key' => 'app-key-123',
                 'app_secret' => 'secret-123',
                 'is_active' => true,
             ])
-            ->assertRedirect(route('admin.events.integrations.show', $event));
+            ->assertRedirect(route('admin.integrations.zonesoft.index'));
 
         $application = ZoneSoftApplication::query()->firstOrFail();
 
         $this
             ->actingAs($admin)
-            ->post(route('admin.events.integrations.machines.store', $event), [
+            ->post(route('admin.integrations.zonesoft.machines.store'), [
+                'client_id' => $client->id,
                 'zs_client_id' => 'B3FC7C254EBDD7505C9CFA30468213B0',
                 'license' => 'Z11JSMZIYP',
                 'store_id' => 1,
                 'store_label' => 'Loja 1 (PT)',
                 'is_active' => true,
             ])
-            ->assertRedirect(route('admin.events.integrations.show', $event));
+            ->assertRedirect(route('admin.integrations.zonesoft.index'));
+
+        $machine = ClientZoneSoftMachine::query()->firstOrFail();
+
+        $this
+            ->actingAs($admin)
+            ->put(route('admin.events.tpas.sync', $event), [
+                'machine_ids' => [$machine->id],
+            ])
+            ->assertRedirect(route('admin.events.tpas.manage', $event));
 
         $this->assertDatabaseHas('zonesoft_applications', [
             'id' => $application->id,
@@ -69,7 +79,6 @@ class EventReportImportTest extends TestCase
 
         $this->assertDatabaseHas('client_zonesoft_machines', [
             'client_id' => $client->id,
-            'event_id' => $event->id,
             'zonesoft_application_id' => $application->id,
             'zs_client_id' => 'B3FC7C254EBDD7505C9CFA30468213B0',
             'license' => 'Z11JSMZIYP',
@@ -78,9 +87,47 @@ class EventReportImportTest extends TestCase
             'permissions' => 'API + All document interfaces',
             'is_active' => true,
         ]);
+        $this->assertDatabaseHas('event_zonesoft_machines', [
+            'event_id' => $event->id,
+            'client_zonesoft_machine_id' => $machine->id,
+        ]);
     }
 
-    public function test_each_event_has_its_own_zonesoft_integrations(): void
+    public function test_event_rejects_tpas_from_different_zonesoft_licenses(): void
+    {
+        [$admin, $client] = $this->makeAdminClientContext();
+        $application = $this->makeApplication();
+        $event = $this->makeEvent($client);
+        $firstMachine = ClientZoneSoftMachine::create([
+            'client_id' => $client->id,
+            'zonesoft_application_id' => $application->id,
+            'zs_client_id' => 'LICENSE-A-CLIENT',
+            'license' => 'LICENSE-A',
+            'store_id' => 1,
+            'is_active' => true,
+        ]);
+        $secondMachine = ClientZoneSoftMachine::create([
+            'client_id' => $client->id,
+            'zonesoft_application_id' => $application->id,
+            'zs_client_id' => 'LICENSE-B-CLIENT',
+            'license' => 'LICENSE-B',
+            'store_id' => 2,
+            'is_active' => true,
+        ]);
+
+        $this
+            ->actingAs($admin)
+            ->put(route('admin.events.tpas.sync', $event), [
+                'machine_ids' => [$firstMachine->id, $secondMachine->id],
+            ])
+            ->assertSessionHasErrors(['machine_ids']);
+
+        $this->assertDatabaseMissing('event_zonesoft_machines', [
+            'event_id' => $event->id,
+        ]);
+    }
+
+    public function test_events_can_reuse_the_same_global_zonesoft_integration(): void
     {
         [$admin, $client] = $this->makeAdminClientContext();
         $application = $this->makeApplication();
@@ -114,50 +161,43 @@ class EventReportImportTest extends TestCase
 
         $this->assertDatabaseHas('client_zonesoft_machines', [
             'client_id' => $client->id,
-            'event_id' => $firstEvent->id,
             'zonesoft_application_id' => $application->id,
             'zs_client_id' => 'SAME-CLIENT-ID',
             'store_id' => 1,
         ]);
-        $this->assertDatabaseHas('client_zonesoft_machines', [
-            'client_id' => $client->id,
-            'event_id' => $secondEvent->id,
-            'zonesoft_application_id' => $application->id,
-            'zs_client_id' => 'SAME-CLIENT-ID',
-            'store_id' => 1,
-        ]);
+        $this->assertDatabaseCount('client_zonesoft_machines', 1);
         $this->assertSame(1, $firstEvent->zonesoftMachines()->count());
         $this->assertSame(1, $secondEvent->zonesoftMachines()->count());
         $firstMachine = $firstEvent->zonesoftMachines()->firstOrFail();
+        $secondMachine = $secondEvent->zonesoftMachines()->firstOrFail();
+        $this->assertSame($firstMachine->id, $secondMachine->id);
 
         $this
             ->actingAs($admin)
-            ->put(route('admin.events.integrations.machines.update', [
+            ->delete(route('admin.events.integrations.machines.destroy', [
                 $secondEvent,
                 $firstMachine,
-            ]), [
-                'zs_client_id' => 'SAME-CLIENT-ID',
-                'license' => 'EVENT-LICENSE',
-                'store_id' => 1,
-                'store_label' => 'Tentativa cruzada',
-                'is_active' => true,
-            ])
-            ->assertNotFound();
+            ]))
+            ->assertRedirect(route('admin.events.integrations.show', $secondEvent));
+
+        $this->assertSame(1, $firstEvent->zonesoftMachines()->count());
+        $this->assertSame(0, $secondEvent->zonesoftMachines()->count());
+        $this->assertDatabaseHas('client_zonesoft_machines', ['id' => $firstMachine->id]);
 
         $this
             ->actingAs($admin)
             ->get(route('admin.events.integrations.show', $firstEvent))
             ->assertOk()
             ->assertInertia(fn (AssertableInertia $page) => $page
-                ->component('Admin/Events/Integrations')
+                ->component('Admin/Events/ManageTpas')
                 ->where('event.id', $firstEvent->id)
                 ->where('event.title', 'Primeiro evento')
                 ->where('client.id', $client->id)
                 ->has('machines', 1)
-                ->where('machines.0.store_label', 'Máquina '.$firstEvent->id));
+                ->where('machines.0.is_selected', true));
     }
 
-    public function test_admin_can_list_only_the_tpas_linked_to_an_event(): void
+    public function test_admin_can_list_global_tpas_and_see_which_are_linked_to_an_event(): void
     {
         [$admin, $client] = $this->makeAdminClientContext();
         $application = $this->makeApplication();
@@ -193,10 +233,12 @@ class EventReportImportTest extends TestCase
                 ->component('Admin/Events/ManageTpas')
                 ->where('event.id', $event->id)
                 ->where('event.title', $event->title)
-                ->has('machines', 1)
+                ->has('machines', 2)
                 ->where('machines.0.store_id', 15)
                 ->where('machines.0.store_label', 'Bar Principal - POS 1')
-                ->missing('machines.1'));
+                ->where('machines.0.is_selected', true)
+                ->where('machines.1.store_id', 16)
+                ->where('machines.1.is_selected', false));
     }
 
     public function test_admin_can_discover_stores_for_client_id(): void
@@ -250,18 +292,18 @@ class EventReportImportTest extends TestCase
 
         $this
             ->actingAs($admin)
-            ->get(route('admin.events.integrations.show', $event))
+            ->get(route('admin.integrations.zonesoft.index'))
             ->assertOk()
             ->assertInertia(fn (AssertableInertia $page) => $page
-                ->component('Admin/Events/Integrations')
+                ->component('Admin/Integrations/ZoneSoft')
                 ->where('application.has_secret', true)
                 ->where('application.has_usable_secret', false)
                 ->where('application.requires_secret_reconfiguration', true));
 
         $this
             ->actingAs($admin)
-            ->from(route('admin.events.integrations.show', $event))
-            ->post(route('admin.events.integrations.application.save', $event), [
+            ->from(route('admin.integrations.zonesoft.index'))
+            ->post(route('admin.integrations.zonesoft.application.save'), [
                 'name' => 'ZoneSoft Principal',
                 'base_url' => 'https://api.zonesoft.org/v3',
                 'app_key' => 'app-key-123',

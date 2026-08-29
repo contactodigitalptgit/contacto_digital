@@ -14,6 +14,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Crypt;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
 use Throwable;
@@ -26,72 +27,47 @@ class EventZoneSoftIntegrationController extends Controller
 
     public function show(Event $event): Response
     {
-        $event->load('client.user');
-        $application = ZoneSoftApplication::query()->latest('id')->first();
-
-        return Inertia::render('Admin/Events/Integrations', [
-            'event' => [
-                'id' => $event->id,
-                'title' => $event->title,
-                'event_date' => $event->event_date->toISOString(),
-            ],
-            'client' => [
-                'id' => $event->client->id,
-                'name' => $event->client->name,
-                'business_name' => $event->client->business_name,
-                'email' => $event->client->user?->email,
-            ],
-            'application' => $application ? [
-                'id' => $application->id,
-                'name' => $application->name,
-                'base_url' => $application->base_url,
-                'app_key' => $application->app_key,
-                'has_secret' => $application->hasStoredSecret(),
-                'has_usable_secret' => $application->hasReadableSecret(),
-                'requires_secret_reconfiguration' => $application->requiresSecretReconfiguration(),
-                'is_active' => $application->is_active,
-            ] : null,
-            'defaultMachinePermissions' => self::DEFAULT_MACHINE_PERMISSIONS,
-            'machines' => $event->zonesoftMachines()
-                ->orderBy('store_id')
-                ->get()
-                ->map(fn (ClientZoneSoftMachine $machine): array => [
-                    'id' => $machine->id,
-                    'zs_client_id' => $machine->zs_client_id,
-                    'license' => $machine->license,
-                    'store_id' => $machine->store_id,
-                    'store_label' => $machine->store_label,
-                    'permissions' => $machine->permissions ?: self::DEFAULT_MACHINE_PERMISSIONS,
-                    'is_active' => $machine->is_active,
-                    'last_validated_at' => $machine->last_validated_at?->toISOString(),
-                    'last_error' => $machine->last_error,
-                ])
-                ->values(),
-        ]);
+        return $this->renderTpaManager($event);
     }
 
     public function manageTpas(Event $event): Response
     {
-        return Inertia::render('Admin/Events/ManageTpas', [
-            'event' => [
-                'id' => $event->id,
-                'title' => $event->title,
-                'event_date' => $event->event_date->toISOString(),
-            ],
-            'machines' => $event->zonesoftMachines()
-                ->orderBy('store_id')
-                ->get()
-                ->map(fn (ClientZoneSoftMachine $machine): array => [
-                    'id' => $machine->id,
-                    'store_id' => $machine->store_id,
-                    'store_label' => $machine->store_label,
-                    'license' => $machine->license,
-                    'is_active' => $machine->is_active,
-                    'last_validated_at' => $machine->last_validated_at?->toISOString(),
-                    'last_error' => $machine->last_error,
-                ])
-                ->values(),
+        return $this->renderTpaManager($event);
+    }
+
+    public function syncMachines(Request $request, Event $event): RedirectResponse
+    {
+        $validated = $request->validate([
+            'machine_ids' => ['present', 'array', 'max:500'],
+            'machine_ids.*' => ['integer', 'distinct', 'exists:client_zonesoft_machines,id'],
         ]);
+        $machineIds = collect($validated['machine_ids'])->map(fn ($id): int => (int) $id)->values();
+        $validMachineIds = ClientZoneSoftMachine::query()
+            ->where('client_id', $event->client_id)
+            ->whereIn('id', $machineIds)
+            ->pluck('id');
+
+        if ($validMachineIds->count() !== $machineIds->count()) {
+            throw ValidationException::withMessages([
+                'machine_ids' => 'Só pode associar TPAs globais pertencentes ao cliente deste evento.',
+            ]);
+        }
+
+        $selectedLicenses = ClientZoneSoftMachine::query()
+            ->whereIn('id', $validMachineIds)
+            ->pluck('license')
+            ->filter(fn (?string $license): bool => filled($license))
+            ->unique();
+
+        if ($selectedLicenses->count() > 1) {
+            throw ValidationException::withMessages([
+                'machine_ids' => 'Todos os TPAs do evento devem usar a mesma licença ZoneSoft.',
+            ]);
+        }
+
+        $event->zonesoftMachines()->sync($validMachineIds->all());
+
+        return to_route('admin.events.tpas.manage', $event);
     }
 
     public function saveApplication(Request $request, Event $event): RedirectResponse
@@ -173,28 +149,25 @@ class EventZoneSoftIntegrationController extends Controller
         $validated = $request->validate([
             'zs_client_id' => ['required', 'string', 'max:64'],
             'license' => ['nullable', 'string', 'max:64'],
-            'store_id' => [
-                'required',
-                'integer',
-                'min:0',
-                Rule::unique('client_zonesoft_machines')->where(
-                    fn ($query) => $query
-                        ->where('event_id', $event->id)
-                        ->where('zs_client_id', $request->string('zs_client_id')->toString()),
-                ),
-            ],
+            'store_id' => ['required', 'integer', 'min:0'],
             'store_label' => ['nullable', 'string', 'max:255'],
             'is_active' => ['required', 'boolean'],
         ]);
 
-        $event->zonesoftMachines()->create([
-            ...$validated,
+        $machine = ClientZoneSoftMachine::query()->firstOrNew([
             'client_id' => $event->client_id,
             'zonesoft_application_id' => $application->id,
+            'zs_client_id' => $validated['zs_client_id'],
+            'store_id' => $validated['store_id'],
+        ]);
+        $machine->fill([
+            ...$validated,
             'permissions' => self::DEFAULT_MACHINE_PERMISSIONS,
             'last_validated_at' => now(),
             'last_error' => null,
         ]);
+        $machine->save();
+        $event->zonesoftMachines()->syncWithoutDetaching([$machine->id]);
 
         return to_route('admin.events.integrations.show', $event);
     }
@@ -204,7 +177,11 @@ class EventZoneSoftIntegrationController extends Controller
         Event $event,
         ClientZoneSoftMachine $machine,
     ): RedirectResponse {
-        abort_unless($machine->event_id === $event->id && $machine->client_id === $event->client_id, 404);
+        abort_unless(
+            $machine->client_id === $event->client_id
+            && $event->zonesoftMachines()->whereKey($machine->id)->exists(),
+            404,
+        );
 
         $validated = $request->validate([
             'zs_client_id' => ['required', 'string', 'max:64'],
@@ -217,7 +194,8 @@ class EventZoneSoftIntegrationController extends Controller
                     ->ignore($machine->id)
                     ->where(
                         fn ($query) => $query
-                            ->where('event_id', $event->id)
+                            ->where('client_id', $event->client_id)
+                            ->where('zonesoft_application_id', $machine->zonesoft_application_id)
                             ->where('zs_client_id', $request->string('zs_client_id')->toString()),
                     ),
             ],
@@ -237,9 +215,13 @@ class EventZoneSoftIntegrationController extends Controller
 
     public function destroyMachine(Event $event, ClientZoneSoftMachine $machine): RedirectResponse
     {
-        abort_unless($machine->event_id === $event->id && $machine->client_id === $event->client_id, 404);
+        abort_unless(
+            $machine->client_id === $event->client_id
+            && $event->zonesoftMachines()->whereKey($machine->id)->exists(),
+            404,
+        );
 
-        $machine->delete();
+        $event->zonesoftMachines()->detach($machine->id);
 
         return to_route('admin.events.integrations.show', $event);
     }
@@ -358,5 +340,39 @@ class EventZoneSoftIntegrationController extends Controller
         );
 
         return $application;
+    }
+
+    private function renderTpaManager(Event $event): Response
+    {
+        $event->load('client');
+        $selectedMachineIds = $event->zonesoftMachines()->pluck('client_zonesoft_machines.id');
+
+        return Inertia::render('Admin/Events/ManageTpas', [
+            'event' => [
+                'id' => $event->id,
+                'title' => $event->title,
+                'event_date' => $event->event_date->toISOString(),
+            ],
+            'client' => [
+                'id' => $event->client->id,
+                'name' => $event->client->name,
+            ],
+            'machines' => $event->client->zonesoftMachines()
+                ->orderBy('license')
+                ->orderBy('store_id')
+                ->get()
+                ->map(fn (ClientZoneSoftMachine $machine): array => [
+                    'id' => $machine->id,
+                    'zs_client_id' => $machine->zs_client_id,
+                    'store_id' => $machine->store_id,
+                    'store_label' => $machine->store_label,
+                    'license' => $machine->license,
+                    'is_active' => $machine->is_active,
+                    'last_validated_at' => $machine->last_validated_at?->toISOString(),
+                    'last_error' => $machine->last_error,
+                    'is_selected' => $selectedMachineIds->contains($machine->id),
+                ])
+                ->values(),
+        ]);
     }
 }

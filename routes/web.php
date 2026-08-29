@@ -4,6 +4,7 @@ use App\Http\Controllers\Admin\ClientController;
 use App\Http\Controllers\Admin\EventController;
 use App\Http\Controllers\Admin\EventDashboardConfigurationController;
 use App\Http\Controllers\Admin\EventZoneSoftIntegrationController;
+use App\Http\Controllers\Admin\ZoneSoftIntegrationController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\EventDashboardController;
 use App\Http\Controllers\ProfileController;
@@ -94,6 +95,8 @@ Route::middleware(['auth', 'active.client', 'admin'])
             ->name('events.dashboard-configuration.update');
         Route::get('events/{event}/gerir-tpa', [EventZoneSoftIntegrationController::class, 'manageTpas'])
             ->name('events.tpas.manage');
+        Route::put('events/{event}/gerir-tpa', [EventZoneSoftIntegrationController::class, 'syncMachines'])
+            ->name('events.tpas.sync');
         Route::post('events/{event}/reports', [EventController::class, 'storeReport'])
             ->name('events.reports.store');
         Route::get('events/{event}/integrations', [EventZoneSoftIntegrationController::class, 'show'])
@@ -110,6 +113,20 @@ Route::middleware(['auth', 'active.client', 'admin'])
             ->name('events.integrations.machines.update');
         Route::delete('events/{event}/integrations/machines/{machine}', [EventZoneSoftIntegrationController::class, 'destroyMachine'])
             ->name('events.integrations.machines.destroy');
+        Route::get('integrations/zonesoft', [ZoneSoftIntegrationController::class, 'index'])
+            ->name('integrations.zonesoft.index');
+        Route::post('integrations/zonesoft/application', [ZoneSoftIntegrationController::class, 'saveApplication'])
+            ->name('integrations.zonesoft.application.save');
+        Route::post('integrations/zonesoft/discover-stores', [ZoneSoftIntegrationController::class, 'discoverStores'])
+            ->name('integrations.zonesoft.discover-stores');
+        Route::post('integrations/zonesoft/machines/validate-stores', [ZoneSoftIntegrationController::class, 'validateAllMachines'])
+            ->name('integrations.zonesoft.machines.validate-all');
+        Route::post('integrations/zonesoft/machines', [ZoneSoftIntegrationController::class, 'storeMachine'])
+            ->name('integrations.zonesoft.machines.store');
+        Route::put('integrations/zonesoft/machines/{machine}', [ZoneSoftIntegrationController::class, 'updateMachine'])
+            ->name('integrations.zonesoft.machines.update');
+        Route::delete('integrations/zonesoft/machines/{machine}', [ZoneSoftIntegrationController::class, 'destroyMachine'])
+            ->name('integrations.zonesoft.machines.destroy');
         Route::resource('clients', ClientController::class);
         Route::resource('events', EventController::class);
     });

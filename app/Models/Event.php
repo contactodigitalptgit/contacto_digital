@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 
@@ -82,8 +83,13 @@ class Event extends Model
         return $this->hasMany(EventReportRow::class);
     }
 
-    public function zonesoftMachines(): HasMany
+    public function zonesoftMachines(): BelongsToMany
     {
-        return $this->hasMany(ClientZoneSoftMachine::class);
+        return $this->belongsToMany(
+            ClientZoneSoftMachine::class,
+            'event_zonesoft_machines',
+            'event_id',
+            'client_zonesoft_machine_id',
+        )->withTimestamps();
     }
 }

@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 
 class ClientZoneSoftMachine extends Model
 {
@@ -41,6 +42,31 @@ class ClientZoneSoftMachine extends Model
         ];
     }
 
+    private ?int $pendingEventId = null;
+
+    protected static function booted(): void
+    {
+        static::created(function (ClientZoneSoftMachine $machine): void {
+            if ($machine->pendingEventId !== null) {
+                $machine->events()->syncWithoutDetaching([$machine->pendingEventId]);
+            }
+        });
+    }
+
+    public function setEventIdAttribute(mixed $eventId): void
+    {
+        $this->pendingEventId = filled($eventId) ? (int) $eventId : null;
+    }
+
+    public function getEventIdAttribute(): ?int
+    {
+        if ($this->pendingEventId !== null) {
+            return $this->pendingEventId;
+        }
+
+        return $this->events()->value('events.id');
+    }
+
     public function client(): BelongsTo
     {
         return $this->belongsTo(Client::class);
@@ -51,8 +77,13 @@ class ClientZoneSoftMachine extends Model
         return $this->belongsTo(ZoneSoftApplication::class, 'zonesoft_application_id');
     }
 
-    public function event(): BelongsTo
+    public function events(): BelongsToMany
     {
-        return $this->belongsTo(Event::class);
+        return $this->belongsToMany(
+            Event::class,
+            'event_zonesoft_machines',
+            'client_zonesoft_machine_id',
+            'event_id',
+        )->withTimestamps();
     }
 }
