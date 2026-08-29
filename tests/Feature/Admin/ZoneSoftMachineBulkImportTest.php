@@ -4,6 +4,7 @@ namespace Tests\Feature\Admin;
 
 use App\Models\Client;
 use App\Models\ClientZoneSoftMachine;
+use App\Models\Event;
 use App\Models\User;
 use App\Models\ZoneSoftApplication;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -121,6 +122,7 @@ class ZoneSoftMachineBulkImportTest extends TestCase
     {
         [$admin, $client] = $this->context();
         $payload = $this->payload([$this->machine('CLIENT-151', 151)]);
+        $payload['application']['id'] = '9999';
         $payload['application']['name'] = 'Outra aplicação';
 
         $this
@@ -130,9 +132,78 @@ class ZoneSoftMachineBulkImportTest extends TestCase
                 'payload' => $payload,
             ])
             ->assertUnprocessable()
-            ->assertJsonValidationErrors(['payload.application.name']);
+            ->assertJsonValidationErrors(['payload.application']);
 
         $this->assertDatabaseCount('client_zonesoft_machines', 0);
+    }
+
+    public function test_admin_can_add_a_second_application_without_overwriting_the_existing_one(): void
+    {
+        [$admin, , $existingApplication] = $this->context();
+
+        $this
+            ->actingAs($admin)
+            ->post(route('admin.integrations.zonesoft.application.save'), [
+                'create_new' => true,
+                'name' => 'Aplicação secundária',
+                'external_id' => '2000',
+                'base_url' => 'https://api.zonesoft.org/v3',
+                'app_key' => 'secondary-key',
+                'app_secret' => 'secondary-secret',
+                'is_active' => true,
+            ])
+            ->assertRedirect(route('admin.integrations.zonesoft.index'));
+
+        $this->assertDatabaseHas('zonesoft_applications', [
+            'id' => $existingApplication->id,
+            'name' => 'Portal Contactodigital',
+            'app_key' => 'test-app-key',
+        ]);
+        $this->assertDatabaseHas('zonesoft_applications', [
+            'name' => 'Aplicação secundária',
+            'external_id' => '2000',
+            'app_key' => 'secondary-key',
+        ]);
+        $this->assertDatabaseCount('zonesoft_applications', 2);
+    }
+
+    public function test_event_rejects_machines_from_different_applications_even_with_the_same_license(): void
+    {
+        [$admin, $client, $application] = $this->context();
+        $otherApplication = ZoneSoftApplication::create([
+            'name' => 'Outra aplicação',
+            'external_id' => '2000',
+            'base_url' => 'https://api.zonesoft.org/v3',
+            'app_key' => 'other-key',
+            'app_secret' => 'other-secret',
+            'is_active' => true,
+        ]);
+        $event = Event::create([
+            'client_id' => $client->id,
+            'title' => 'Brunch Porto',
+            'event_date' => now(),
+            'report_ends_at' => now()->addDay(),
+            'is_active' => true,
+        ]);
+        $machines = collect([$application, $otherApplication])->map(
+            fn (ZoneSoftApplication $item, int $index) => ClientZoneSoftMachine::create([
+                'client_id' => $client->id,
+                'zonesoft_application_id' => $item->id,
+                'zs_client_id' => 'CLIENT-'.$index,
+                'license' => 'SAME-LICENSE',
+                'store_id' => 150 + $index,
+                'is_active' => true,
+            ]),
+        );
+
+        $this
+            ->actingAs($admin)
+            ->put(route('admin.events.tpas.sync', $event), [
+                'machine_ids' => $machines->pluck('id')->all(),
+            ])
+            ->assertSessionHasErrors(['machine_ids']);
+
+        $this->assertDatabaseMissing('event_zonesoft_machines', ['event_id' => $event->id]);
     }
 
     /**
@@ -152,6 +223,7 @@ class ZoneSoftMachineBulkImportTest extends TestCase
         ]);
         $application = ZoneSoftApplication::create([
             'name' => 'Portal Contactodigital',
+            'external_id' => '1450',
             'base_url' => 'https://api.zonesoft.org/v3',
             'app_key' => 'test-app-key',
             'app_secret' => 'test-app-secret',

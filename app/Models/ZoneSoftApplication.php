@@ -19,6 +19,7 @@ class ZoneSoftApplication extends Model
      */
     protected $fillable = [
         'name',
+        'external_id',
         'base_url',
         'app_key',
         'app_secret',

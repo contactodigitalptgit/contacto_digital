@@ -65,6 +65,17 @@ class EventZoneSoftIntegrationController extends Controller
             ]);
         }
 
+        $selectedApplications = ClientZoneSoftMachine::query()
+            ->whereIn('id', $validMachineIds)
+            ->pluck('zonesoft_application_id')
+            ->unique();
+
+        if ($selectedApplications->count() > 1) {
+            throw ValidationException::withMessages([
+                'machine_ids' => 'Todos os TPAs do evento devem usar a mesma aplicação ZoneSoft.',
+            ]);
+        }
+
         $event->zonesoftMachines()->sync($validMachineIds->all());
 
         return to_route('admin.events.tpas.manage', $event);
@@ -234,8 +245,10 @@ class EventZoneSoftIntegrationController extends Controller
         ZoneSoftDiscoveryService $discoveryService,
         string $emptyMessage,
     ): JsonResponse {
-        $application = $this->getReadableApplication();
-        $machinesByClientId = $machines->groupBy('zs_client_id');
+        $machines->loadMissing('application');
+        $machinesByClientId = $machines->groupBy(
+            fn (ClientZoneSoftMachine $machine): string => $machine->zonesoft_application_id.'|'.$machine->zs_client_id,
+        );
 
         abort_if($machinesByClientId->isEmpty(), 422, $emptyMessage);
         $validatedAt = now();
@@ -245,8 +258,15 @@ class EventZoneSoftIntegrationController extends Controller
         $clientIdGroupsCount = $machinesByClientId->count();
         $processedGroups = 0;
 
-        foreach ($machinesByClientId as $zsClientId => $machines) {
+        foreach ($machinesByClientId as $machines) {
+            $application = $machines->first()?->application;
+            $zsClientId = (string) $machines->first()?->zs_client_id;
+
             try {
+                if (! $application || ! $application->is_active || ! $application->hasReadableSecret()) {
+                    throw new \RuntimeException('A aplicação ZoneSoft deste Client ID não está disponível.');
+                }
+
                 $stores = collect(
                     $discoveryService->discoverStores($application, (string) $zsClientId),
                 )->keyBy('id');

@@ -27,8 +27,11 @@ class ZoneSoftMachineBulkImportService
         bool $lockExisting = false,
     ): array {
         $sourceApplication = trim((string) data_get($payload, 'application.name'));
+        $sourceApplicationId = trim((string) data_get($payload, 'application.id'));
+        $matchesExternalId = filled($application->external_id)
+            && $application->external_id === $sourceApplicationId;
 
-        if (mb_strtolower($sourceApplication) !== mb_strtolower(trim($application->name))) {
+        if (! $matchesExternalId && mb_strtolower($sourceApplication) !== mb_strtolower(trim($application->name))) {
             throw ValidationException::withMessages([
                 'payload.application.name' => sprintf(
                     'O lote pertence à aplicação "%s", mas a plataforma está configurada para "%s".',

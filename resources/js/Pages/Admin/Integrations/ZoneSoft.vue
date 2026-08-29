@@ -8,6 +8,7 @@ import { computed, ref } from 'vue';
 interface ApplicationData {
     id: number;
     name: string;
+    external_id: string | null;
     base_url: string;
     app_key: string;
     has_secret: boolean;
@@ -29,6 +30,8 @@ interface EventItem {
 
 interface MachineItem {
     id: number;
+    application_id: number;
+    application_name: string | null;
     client_id: number;
     client_name: string;
     zs_client_id: string;
@@ -74,6 +77,7 @@ interface ImportPreview {
 
 const props = defineProps<{
     application: ApplicationData | null;
+    applications: ApplicationData[];
     clients: ClientData[];
     defaultMachinePermissions: string;
     machines: MachineItem[];
@@ -92,7 +96,10 @@ const previewingImport = ref(false);
 const importingMachines = ref(false);
 
 const applicationForm = useForm({
+    application_id: props.application?.id ?? null as number | null,
+    create_new: false,
     name: props.application?.name ?? 'Portal Contactodigital',
+    external_id: props.application?.external_id ?? '',
     base_url: props.application?.base_url ?? 'https://api.zonesoft.org/v3',
     app_key: props.application?.app_key ?? '',
     app_secret: '',
@@ -100,6 +107,7 @@ const applicationForm = useForm({
 });
 
 const machineForm = useForm({
+    application_id: props.application?.id ?? null as number | null,
     client_id: '' as number | '',
     license: '',
     zs_client_id: '',
@@ -109,13 +117,12 @@ const machineForm = useForm({
 });
 
 const applicationNeedsSecret = computed(() => (
-    !props.application
-    || !props.application.has_secret
-    || props.application.requires_secret_reconfiguration
+    applicationForm.create_new
+    || !props.applications.find((application) => application.id === applicationForm.application_id)?.has_secret
+    || props.applications.find((application) => application.id === applicationForm.application_id)?.requires_secret_reconfiguration
 ));
 const hasConfiguredApplication = computed(() => (
-    props.application?.has_usable_secret
-    && props.application.is_active
+    props.applications.some((application) => application.has_usable_secret && application.is_active)
 ));
 const filteredMachines = computed(() => {
     const term = search.value.trim().toLocaleLowerCase('pt-PT');
@@ -131,6 +138,7 @@ const filteredMachines = computed(() => {
 
         return [
             machine.client_name,
+            machine.application_name,
             machine.license,
             machine.zs_client_id,
             String(machine.store_id),
@@ -264,9 +272,41 @@ const resetMachineForm = () => {
     storeValidationMessage.value = '';
 };
 
+const selectApplication = () => {
+    const selected = props.applications.find(
+        (application) => application.id === applicationForm.application_id,
+    );
+
+    if (!selected) {
+        return;
+    }
+
+    applicationForm.create_new = false;
+    applicationForm.name = selected.name;
+    applicationForm.external_id = selected.external_id ?? '';
+    applicationForm.base_url = selected.base_url;
+    applicationForm.app_key = selected.app_key;
+    applicationForm.app_secret = '';
+    applicationForm.is_active = selected.is_active;
+    applicationForm.clearErrors();
+};
+
+const createApplication = () => {
+    applicationForm.application_id = null;
+    applicationForm.create_new = true;
+    applicationForm.name = '';
+    applicationForm.external_id = '';
+    applicationForm.base_url = 'https://api.zonesoft.org/v3';
+    applicationForm.app_key = '';
+    applicationForm.app_secret = '';
+    applicationForm.is_active = true;
+    applicationForm.clearErrors();
+};
+
 const editMachine = (machine: MachineItem) => {
     editingMachineId.value = machine.id;
     machineForm.client_id = machine.client_id;
+    machineForm.application_id = machine.application_id;
     machineForm.license = machine.license ?? '';
     machineForm.zs_client_id = machine.zs_client_id;
     machineForm.store_id = machine.store_id;
@@ -282,6 +322,7 @@ const saveApplication = () => {
         preserveScroll: true,
         onSuccess: () => {
             applicationForm.app_secret = '';
+            applicationForm.create_new = false;
             void showSuccessToast('Aplicação ZoneSoft guardada com sucesso.');
         },
         onError: () => void showErrorToast('Não foi possível guardar a aplicação ZoneSoft.'),
@@ -301,6 +342,7 @@ const discoverStore = async () => {
 
     try {
         const response = await axios.post(integrationRoute('discover-stores'), {
+            application_id: machineForm.application_id,
             zs_client_id: machineForm.zs_client_id,
         });
         const stores = (response.data.stores ?? []) as StoreOption[];
@@ -421,15 +463,39 @@ const deleteMachine = async (machine: MachineItem) => {
             </section>
 
             <section class="dash-card space-y-5">
-                <div>
-                    <h3 class="dash-card-title mb-0">Aplicação ZoneSoft</h3>
-                    <p class="dash-recent-subtitle">Credenciais partilhadas por todo o catálogo.</p>
+                <div class="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+                    <div>
+                        <h3 class="dash-card-title mb-0">Aplicações ZoneSoft</h3>
+                        <p class="dash-recent-subtitle">Cada catálogo mantém as credenciais da aplicação que o originou.</p>
+                    </div>
+                    <button type="button" class="dash-link-button" @click="createApplication">Nova aplicação</button>
                 </div>
 
                 <form class="dash-modal-grid" @submit.prevent="saveApplication">
+                    <div v-if="props.applications.length && !applicationForm.create_new" class="dash-modal-field dash-modal-field-full">
+                        <label class="dash-modal-label" for="zs_application_select">Aplicação configurada</label>
+                        <select
+                            id="zs_application_select"
+                            v-model.number="applicationForm.application_id"
+                            class="dash-modal-input"
+                            @change="selectApplication"
+                        >
+                            <option v-for="application in props.applications" :key="application.id" :value="application.id">
+                                {{ application.name }}{{ application.external_id ? ` · ID ${application.external_id}` : '' }}
+                            </option>
+                        </select>
+                    </div>
+                    <p v-if="applicationForm.create_new" class="dash-modal-field-full rounded-xl border border-sky-500/25 bg-sky-500/5 p-4 text-sm font-medium text-sky-600">
+                        A criar uma nova aplicação. As aplicações e TPAs existentes não serão alterados.
+                    </p>
                     <div class="dash-modal-field">
                         <label class="dash-modal-label" for="zs_app_name">Nome</label>
                         <input id="zs_app_name" v-model="applicationForm.name" class="dash-modal-input" required />
+                    </div>
+                    <div class="dash-modal-field">
+                        <label class="dash-modal-label" for="zs_external_id">ID da aplicação no Developer Portal</label>
+                        <input id="zs_external_id" v-model="applicationForm.external_id" class="dash-modal-input" placeholder="Ex.: 1450" />
+                        <p class="admin-event-input-hint">Permite associar automaticamente os lotes exportados.</p>
                     </div>
                     <div class="dash-modal-field">
                         <label class="dash-modal-label" for="zs_base_url">URL base</label>
@@ -457,7 +523,7 @@ const deleteMachine = async (machine: MachineItem) => {
                     </label>
                     <div class="dash-modal-actions dash-modal-field-full">
                         <button class="dash-action-button dash-action-button-inline" :disabled="applicationForm.processing">
-                            Guardar aplicação
+                            {{ applicationForm.create_new ? 'Criar aplicação' : 'Guardar aplicação' }}
                         </button>
                     </div>
                 </form>
@@ -592,6 +658,15 @@ const deleteMachine = async (machine: MachineItem) => {
 
                 <form class="dash-modal-grid" @submit.prevent="submitMachine">
                     <div class="dash-modal-field">
+                        <label class="dash-modal-label" for="zs_machine_application">Aplicação</label>
+                        <select id="zs_machine_application" v-model.number="machineForm.application_id" class="dash-modal-input" required>
+                            <option :value="null" disabled>Selecione a aplicação</option>
+                            <option v-for="application in props.applications" :key="application.id" :value="application.id">
+                                {{ application.name }}
+                            </option>
+                        </select>
+                    </div>
+                    <div class="dash-modal-field">
                         <label class="dash-modal-label" for="zs_client_owner">Cliente</label>
                         <select id="zs_client_owner" v-model.number="machineForm.client_id" class="dash-modal-input" required>
                             <option value="" disabled>Selecione o cliente</option>
@@ -664,6 +739,7 @@ const deleteMachine = async (machine: MachineItem) => {
                         <thead>
                             <tr>
                                 <th>Cliente</th>
+                                <th>Aplicação</th>
                                 <th>Licença</th>
                                 <th>Store ID</th>
                                 <th>Loja</th>
@@ -677,6 +753,7 @@ const deleteMachine = async (machine: MachineItem) => {
                         <tbody>
                             <tr v-for="machine in filteredMachines" :key="machine.id">
                                 <td class="admin-clients-text font-semibold">{{ machine.client_name }}</td>
+                                <td class="admin-clients-text">{{ machine.application_name || 'Sem aplicação' }}</td>
                                 <td class="admin-clients-text">{{ machine.license }}</td>
                                 <td class="admin-clients-text">{{ machine.store_id }}</td>
                                 <td class="admin-clients-text">{{ machine.store_label || 'Sem nome' }}</td>
@@ -700,7 +777,7 @@ const deleteMachine = async (machine: MachineItem) => {
                                 </td>
                             </tr>
                             <tr v-if="!filteredMachines.length">
-                                <td colspan="9" class="py-8 text-center text-sm"><span class="dash-muted-text">Nenhuma integração encontrada.</span></td>
+                                <td colspan="10" class="py-8 text-center text-sm"><span class="dash-muted-text">Nenhuma integração encontrada.</span></td>
                             </tr>
                         </tbody>
                     </table>
