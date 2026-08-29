@@ -1,6 +1,10 @@
 <?php
 
 return [
+    'dashboard' => [
+        'cache_ttl_seconds' => (int) env('EVENT_REPORT_DASHBOARD_CACHE_TTL_SECONDS', 300),
+    ],
+
     'automatic_sync' => [
         'enabled' => (bool) env('EVENT_REPORT_AUTO_SYNC_ENABLED', true),
         'interval_minutes' => (int) env('EVENT_REPORT_SYNC_INTERVAL_MINUTES', 15),

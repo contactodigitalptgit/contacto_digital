@@ -96,7 +96,7 @@ class EventDashboardTest extends TestCase
             ->where('event.title', 'Evento Dashboard')
             ->where('integration.source', 'ZoneSoft API')
             ->where('integration.configured_client_ids_count', 2)
-            ->where('filters.bar_group', 'Bar 1')
+            ->where('filters.bar_groups', ['Bar 1'])
             ->where('filters.product', '730')
             ->where('summary.bar_groups_count', 1)
             ->where('summary.filtered_rows', $expectedCount)
@@ -104,7 +104,7 @@ class EventDashboardTest extends TestCase
             ->where('paymentSummary.source', 'documents_headers')
             ->where('paymentSummary.cash', 2.75)
             ->where('paymentSummary.zticket', 5.5)
-            ->loadDeferredProps('dashboard-details', fn (AssertableInertia $details) => $details
+            ->loadDeferredProps('dashboard-operational', fn (AssertableInertia $details) => $details
                 ->where('zoneDevices', fn ($zones): bool => collect($zones)->contains(
                     fn (array $zone): bool => $zone['label'] === 'Bar 1'
                         && count($zone['items']) === 2,
@@ -188,7 +188,7 @@ class EventDashboardTest extends TestCase
                 ->component('Events/Dashboard')
                 ->where('initialSection', 'highlights')
                 ->where('previewMode', true)
-                ->where('filters.bar_group', 'Bar 1')
+                ->where('filters.bar_groups', ['Bar 1'])
                 ->where('filters.date_from', '2026-03-14')
                 ->where('filters.date_to', '2026-03-14')
                 ->where('filters.hour_from', '12')
@@ -197,13 +197,80 @@ class EventDashboardTest extends TestCase
                 ->where('summary.filtered_rows', 2)
                 ->where('summary.tickets_count', 2)
                 ->where('summary.bar_groups_count', 1)
-                ->loadDeferredProps('dashboard-details', fn (AssertableInertia $details) => $details
+                ->loadDeferredProps(['dashboard-operational', 'dashboard-analytics'], fn (AssertableInertia $details) => $details
                     ->where('barGroups', fn ($groups): bool => collect($groups)->count() === 1
                         && collect($groups)->first()['label'] === 'Bar 1'
                         && collect($groups)->first()['tickets_count'] === 2)
                     ->where('hourlySales', fn ($hours): bool => collect($hours)->count() === 1
                         && collect($hours)->first()['hour'] === 12
                         && (float) collect($hours)->first()['sales_total'] === 8.25)));
+    }
+
+    public function test_admin_performance_can_filter_multiple_zones_together(): void
+    {
+        [$admin, , $event] = $this->makeDashboardContext();
+        $this->seedSyncedRows($event, $admin);
+
+        $query = http_build_query([
+            'bar_groups' => ['Bar 1', 'Top Up'],
+            'date_from' => '2026-03-14',
+            'date_to' => '2026-03-14',
+        ]);
+
+        $this->actingAs($admin)
+            ->get(route('admin.events.performance', $event).'?'.$query)
+            ->assertOk()
+            ->assertInertia(fn (AssertableInertia $page) => $page
+                ->component('Events/Dashboard')
+                ->where('initialSection', 'highlights')
+                ->where('filters.bar_groups', ['Bar 1', 'Top Up'])
+                ->where('summary.total_sales', 11.45)
+                ->where('summary.filtered_rows', 3)
+                ->where('summary.tickets_count', 3)
+                ->where('summary.bar_groups_count', 2)
+                ->where('paymentSummary.multibanco', 3.2)
+                ->where('paymentSummary.cash', 2.75)
+                ->where('paymentSummary.zticket', 5.5)
+                ->loadDeferredProps(['dashboard-operational', 'dashboard-analytics'], fn (AssertableInertia $details) => $details
+                    ->where('barGroups', fn ($groups): bool => collect($groups)->count() === 2
+                        && collect($groups)->pluck('label')->sort()->values()->all() === ['Bar 1', 'Top Up'])
+                    ->where('hourlySales', fn ($hours): bool => collect($hours)->count() === 1
+                        && collect($hours)->first()['hour'] === 12
+                        && (float) collect($hours)->first()['sales_total'] === 11.45)));
+    }
+
+    public function test_dashboard_reuses_cached_values_and_invalidates_when_the_active_import_changes(): void
+    {
+        [$admin, , $event] = $this->makeDashboardContext();
+        $this->seedSyncedRows($event, $admin);
+
+        $this->actingAs($admin)
+            ->get(route('admin.events.dashboard', $event))
+            ->assertOk()
+            ->assertInertia(fn (AssertableInertia $page) => $page
+                ->where('summary.total_sales', 15.75));
+
+        EventReportRow::query()
+            ->where('event_id', $event->id)
+            ->where('description', 'Snack')
+            ->update(['total' => 101.5]);
+
+        $this->actingAs($admin)
+            ->get(route('admin.events.dashboard', $event))
+            ->assertOk()
+            ->assertInertia(fn (AssertableInertia $page) => $page
+                ->where('summary.total_sales', 15.75));
+
+        EventReportImport::query()
+            ->where('event_id', $event->id)
+            ->where('is_active', true)
+            ->update(['updated_at' => now()->addMinute()]);
+
+        $this->actingAs($admin)
+            ->get(route('admin.events.dashboard', $event))
+            ->assertOk()
+            ->assertInertia(fn (AssertableInertia $page) => $page
+                ->where('summary.total_sales', 115.75));
     }
 
     public function test_event_dashboard_exposes_client_events_for_switcher(): void
@@ -274,7 +341,7 @@ class EventDashboardTest extends TestCase
             ->get(route('admin.events.dashboard', $event))
             ->assertOk()
             ->assertInertia(fn (AssertableInertia $page) => $page
-                ->loadDeferredProps('dashboard-details', fn (AssertableInertia $details) => $details
+                ->loadDeferredProps('dashboard-operational', fn (AssertableInertia $details) => $details
                     ->where('barGroups', fn ($groups): bool => collect($groups)->contains(
                         fn (array $group): bool => $group['label'] === 'Bar 1'
                             && in_array('Tpa 6 - Bar 1 Rodolfo - POS 1', $group['members'], true),
@@ -368,7 +435,7 @@ class EventDashboardTest extends TestCase
                     && (float) ($firstDay['total_with_zt'] ?? 0) === 17.0;
             })
             ->where('event.client_name', 'Cliente Dashboard')
-            ->loadDeferredProps('dashboard-details', fn (AssertableInertia $details) => $details
+            ->loadDeferredProps(['dashboard-operational', 'dashboard-analytics', 'dashboard-products', 'dashboard-finance'], fn (AssertableInertia $details) => $details
                 ->where('hourlySales', function ($hours): bool {
                     $firstDay = collect($hours)->first(fn (array $hour): bool => $hour['date'] === '2026-03-14'
                         && $hour['hour'] === 12);
@@ -577,7 +644,7 @@ class EventDashboardTest extends TestCase
             ->get(route('admin.events.dashboard', $event))
             ->assertOk()
             ->assertInertia(fn (AssertableInertia $page) => $page
-                ->loadDeferredProps('dashboard-details', fn (AssertableInertia $details) => $details
+                ->loadDeferredProps('dashboard-analytics', fn (AssertableInertia $details) => $details
                     ->where('hourlySales', fn ($hours): bool => collect($hours)->pluck('date')->unique()->count() === 11
                         && collect($hours)->contains(fn (array $hour): bool => $hour['date'] === '2026-03-24'
                             && $hour['hour'] === 18
@@ -600,7 +667,7 @@ class EventDashboardTest extends TestCase
             ->component('Events/Dashboard')
             ->where('event.show_zt_card', false)
             ->where('paymentSummary.top_up_loaded', 2.75)
-            ->loadDeferredProps('dashboard-details', fn (AssertableInertia $details) => $details
+            ->loadDeferredProps('dashboard-products', fn (AssertableInertia $details) => $details
                 ->where('productBreakdowns.total', fn ($products): bool => collect($products)->doesntContain(
                     fn (array $product): bool => $product['code'] === 'ZT-CARD',
                 ))
@@ -680,7 +747,7 @@ class EventDashboardTest extends TestCase
 
         $response->assertOk();
         $response->assertInertia(fn (AssertableInertia $page) => $page
-            ->loadDeferredProps('dashboard-details', fn (AssertableInertia $details) => $details
+            ->loadDeferredProps('dashboard-finance', fn (AssertableInertia $details) => $details
                 ->where('comparison.available', true)
                 ->where('comparison.current.title', 'Evento Dashboard')
                 ->where('comparison.current.total_sales', 15.75)

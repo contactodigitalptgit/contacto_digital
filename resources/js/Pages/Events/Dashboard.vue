@@ -225,7 +225,7 @@ interface ComparisonData {
 }
 
 interface DashboardFilters {
-    bar_group: string;
+    bar_groups: string[];
     store: string;
     product: string;
     date_from: string;
@@ -400,7 +400,10 @@ const autoSyncClockId = ref<number | null>(null);
 const currentTimestamp = ref(Date.now());
 const lastAutoSyncRefreshAt = ref(0);
 const isRefreshingAutoSync = ref(false);
-const localFilters = ref<DashboardFilters>({ ...props.filters });
+const localFilters = ref<DashboardFilters>({
+    ...props.filters,
+    bar_groups: [...props.filters.bar_groups],
+});
 const showZtCard = computed(() => props.event.show_zt_card);
 const whatsappSupportUrl = 'https://api.whatsapp.com/send/?phone=351910918377&text=Ol%C3%A1%2C+preciso+de+ajuda+com+o+relat%C3%B3rio+Contacto+Digital.&type=phone_number&app_absent=0';
 
@@ -627,7 +630,9 @@ const syncProgressLabel = computed(() => {
     return 'A preparar a leitura das máquinas';
 });
 const activeFilterCount = computed(
-    () => Object.values(props.filters).filter((value) => value !== '').length,
+    () => Object.entries(props.filters).filter(([, value]) => (
+        Array.isArray(value) ? value.length > 0 : value !== ''
+    )).length,
 );
 const brandSubtitle = computed(() => {
     const parts = [props.event.client_name, formatDate(props.event.event_date)].filter(Boolean);
@@ -786,7 +791,19 @@ const paymentMethodsTotal = computed(() => props.paymentSummary.multibanco
 const selectedZoneShare = computed(() => props.summary.event_total_sales > 0
     ? (props.summary.total_sales / props.summary.event_total_sales) * 100
     : 0);
-const selectedZoneLabel = computed(() => localFilters.value.bar_group || 'Todas as zonas');
+const selectedZoneLabel = computed(() => {
+    const groups = localFilters.value.bar_groups;
+
+    if (groups.length === 0) {
+        return 'Todas as zonas';
+    }
+
+    if (groups.length <= 2) {
+        return groups.join(' + ');
+    }
+
+    return `${groups.length} zonas selecionadas`;
+});
 const maxZoneSales = computed(() =>
     props.barGroups.reduce((max, group) => Math.max(max, group.sales_total), 0),
 );
@@ -1407,9 +1424,11 @@ const submitReportSync = () => {
     );
 };
 
-const applyFilters = () => {
+const submitFilters = (closePanel: boolean) => {
     const query = Object.fromEntries(
-        Object.entries(localFilters.value).filter(([, value]) => value !== ''),
+        Object.entries(localFilters.value).filter(([, value]) => (
+            Array.isArray(value) ? value.length > 0 : value !== ''
+        )),
     );
 
     router.get(getDashboardPath(), query, {
@@ -1417,19 +1436,32 @@ const applyFilters = () => {
         preserveScroll: true,
         replace: true,
         onSuccess: () => {
-            filtersOpen.value = false;
+            if (closePanel) {
+                filtersOpen.value = false;
+            }
         },
     });
 };
 
+const applyFilters = () => submitFilters(true);
+
 const applyBarGroupFilter = (barGroup: string) => {
-    localFilters.value.bar_group = localFilters.value.bar_group === barGroup ? '' : barGroup;
-    applyFilters();
+    if (barGroup === '') {
+        localFilters.value.bar_groups = [];
+        submitFilters(false);
+
+        return;
+    }
+
+    localFilters.value.bar_groups = localFilters.value.bar_groups.includes(barGroup)
+        ? localFilters.value.bar_groups.filter((group) => group !== barGroup)
+        : [...localFilters.value.bar_groups, barGroup];
+    submitFilters(false);
 };
 
 const clearFilters = () => {
     localFilters.value = {
-        bar_group: '',
+        bar_groups: [],
         store: '',
         product: '',
         date_from: '',
@@ -1636,6 +1668,10 @@ function getDeviceLabel(item: BreakdownItem) {
 
 function getZoneFilterValue(label: string) {
     return props.filterOptions.barGroups.find((option) => option.label === label)?.value ?? label;
+}
+
+function zoneIsSelected(barGroup: string) {
+    return localFilters.value.bar_groups.includes(barGroup);
 }
 
 function getDifferenceClass(value: number | null) {
@@ -1862,7 +1898,8 @@ function getDifferenceClass(value: number | null) {
                                 v-for="option in props.filterOptions.barGroups"
                                 :key="option.value"
                                 type="button"
-                                :class="{ 'is-active': localFilters.bar_group === option.value }"
+                                :class="{ 'is-active': zoneIsSelected(option.value) }"
+                                :aria-pressed="zoneIsSelected(option.value)"
                                 @click="applyBarGroupFilter(option.value)"
                             >
                                 <span>{{ option.label }}</span>
@@ -1871,15 +1908,11 @@ function getDifferenceClass(value: number | null) {
                         </div>
 
                         <div class="report-dashboard-filter-grid">
-                            <label>
-                                <span>Zona</span>
-                                <select v-model="localFilters.bar_group" class="dash-input">
-                                    <option value="">Todas</option>
-                                    <option v-for="option in props.filterOptions.barGroups" :key="option.value" :value="option.value">
-                                        {{ option.label }}
-                                    </option>
-                                </select>
-                            </label>
+                            <div class="report-dashboard-zone-selection" aria-live="polite">
+                                <span>Zonas selecionadas</span>
+                                <strong>{{ selectedZoneLabel }}</strong>
+                                <small>Clique nas zonas acima para adicionar ou remover.</small>
+                            </div>
                             <label>
                                 <span>Device</span>
                                 <select v-model="localFilters.store" class="dash-input">
@@ -1952,7 +1985,8 @@ function getDifferenceClass(value: number | null) {
                             <span class="contacto-label">Zona</span>
                             <button
                                 type="button"
-                                :class="{ 'is-active': localFilters.bar_group === '' }"
+                                :class="{ 'is-active': localFilters.bar_groups.length === 0 }"
+                                :aria-pressed="localFilters.bar_groups.length === 0"
                                 @click="applyBarGroupFilter('')"
                             >
                                 Todas
@@ -1961,7 +1995,8 @@ function getDifferenceClass(value: number | null) {
                                 v-for="option in quickZoneOptions"
                                 :key="`section-zone-${option.value}`"
                                 type="button"
-                                :class="{ 'is-active': localFilters.bar_group === option.value }"
+                                :class="{ 'is-active': zoneIsSelected(option.value) }"
+                                :aria-pressed="zoneIsSelected(option.value)"
                                 @click="applyBarGroupFilter(option.value)"
                             >
                                 {{ option.label }}
@@ -2005,7 +2040,8 @@ function getDifferenceClass(value: number | null) {
                                 <span class="contacto-label">Zonas</span>
                                 <button
                                     type="button"
-                                    :class="{ 'is-active': localFilters.bar_group === '' }"
+                                    :class="{ 'is-active': localFilters.bar_groups.length === 0 }"
+                                    :aria-pressed="localFilters.bar_groups.length === 0"
                                     @click="applyBarGroupFilter('')"
                                 >
                                     Todas
@@ -2014,7 +2050,8 @@ function getDifferenceClass(value: number | null) {
                                     v-for="option in quickZoneOptions"
                                     :key="`quick-${option.value}`"
                                     type="button"
-                                    :class="{ 'is-active': localFilters.bar_group === option.value }"
+                                    :class="{ 'is-active': zoneIsSelected(option.value) }"
+                                    :aria-pressed="zoneIsSelected(option.value)"
                                     @click="applyBarGroupFilter(option.value)"
                                 >
                                     {{ option.label }}
@@ -2045,7 +2082,7 @@ function getDifferenceClass(value: number | null) {
                                 </div>
                             </div>
                             <div class="contacto-zone-total">
-                                <span>{{ localFilters.bar_group || 'Todas as zonas' }}</span>
+                                <span>{{ selectedZoneLabel }}</span>
                                 <strong>{{ formatMoney(props.summary.total_sales) }}</strong>
                             </div>
                             <div class="contacto-zone-period">
@@ -2266,7 +2303,8 @@ function getDifferenceClass(value: number | null) {
                                     :key="`leader-${zone.label}`"
                                     type="button"
                                     class="contacto-zone-ranking-row"
-                                    :class="{ 'is-active': localFilters.bar_group === getZoneFilterValue(zone.label) }"
+                                    :class="{ 'is-active': zoneIsSelected(getZoneFilterValue(zone.label)) }"
+                                    :aria-pressed="zoneIsSelected(getZoneFilterValue(zone.label))"
                                     @click="applyBarGroupFilter(getZoneFilterValue(zone.label))"
                                 >
                                     <span class="contacto-zone-ranking-name"><em>{{ index + 1 }}</em><i />{{ zone.label }}</span>

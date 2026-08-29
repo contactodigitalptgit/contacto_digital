@@ -6039,6 +6039,33 @@ body {
         color: var(--text-muted);
     }
 
+    .report-dashboard-zone-selection {
+        @apply min-w-0 rounded-xl border px-3 py-2.5;
+        border-color: var(--card-border);
+        background: var(--input-bg);
+    }
+
+    .report-dashboard-zone-selection > span,
+    .report-dashboard-zone-selection > strong,
+    .report-dashboard-zone-selection > small {
+        @apply block;
+    }
+
+    .report-dashboard-zone-selection > span {
+        @apply text-[10px] font-bold uppercase tracking-[0.09em];
+        color: var(--text-muted);
+    }
+
+    .report-dashboard-zone-selection > strong {
+        @apply mt-1 truncate text-sm;
+        color: var(--text-main);
+    }
+
+    .report-dashboard-zone-selection > small {
+        @apply mt-1 text-[10px];
+        color: var(--text-muted);
+    }
+
     .report-dashboard-filter-actions {
         @apply mt-5 justify-end;
     }

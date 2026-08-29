@@ -13,6 +13,7 @@ use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Str;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -146,6 +147,18 @@ class EventDashboardController extends Controller
         $dashboardConfiguration = $this->dashboardConfiguration->resolve($event);
 
         $filters = $this->normalizeFilters($request);
+        $dashboardCacheVersion = $this->dashboardCacheVersion($event);
+        $rememberDashboardValue = fn (
+            string $fragment,
+            callable $resolver,
+            bool $includeFilters = true,
+        ): mixed => $this->rememberDashboardValue(
+            $event,
+            $dashboardCacheVersion,
+            $includeFilters ? $filters : [],
+            $fragment,
+            $resolver,
+        );
         $makeBaseRowsQuery = fn (): Builder => $this->applySalesDocumentScope(
             EventReportRow::query()
                 ->where('event_id', $event->id)
@@ -162,9 +175,16 @@ class EventDashboardController extends Controller
 
         /** @var array<int, array<string, mixed>>|null $documentTypes */
         $documentTypes = null;
-        $resolveDocumentTypes = function () use (&$documentTypes, $makeFilteredRowsQuery): array {
+        $resolveDocumentTypes = function () use (
+            &$documentTypes,
+            $makeFilteredRowsQuery,
+            $rememberDashboardValue,
+        ): array {
             if ($documentTypes === null) {
-                $documentTypes = $this->buildDocumentTypes($makeFilteredRowsQuery());
+                $documentTypes = $rememberDashboardValue(
+                    'document-types',
+                    fn (): array => $this->buildDocumentTypes($makeFilteredRowsQuery()),
+                );
             }
 
             return $documentTypes;
@@ -178,13 +198,17 @@ class EventDashboardController extends Controller
             $latestActiveImportSummary,
             $filters,
             $makeFilteredProductRowsQuery,
+            $rememberDashboardValue,
         ): array {
             if ($dailyBreakdowns === null) {
-                $dailyBreakdowns = $this->buildDailyBreakdowns(
-                    $event->latestActiveReportImport,
-                    $latestActiveImportSummary,
-                    $filters,
-                    $makeFilteredProductRowsQuery(),
+                $dailyBreakdowns = $rememberDashboardValue(
+                    'daily-breakdowns',
+                    fn (): array => $this->buildDailyBreakdowns(
+                        $event->latestActiveReportImport,
+                        $latestActiveImportSummary,
+                        $filters,
+                        $makeFilteredProductRowsQuery(),
+                    ),
                 );
             }
 
@@ -235,44 +259,79 @@ class EventDashboardController extends Controller
             'autoSync' => $this->autoSync->status($event),
             'syncStatus' => $this->buildSyncStatus($event),
             'filters' => $filters,
-            'filterOptions' => Inertia::defer(fn (): array => [
-                'barGroups' => $this->buildBarGroupOptions($makeBaseRowsQuery()),
-                'stores' => $this->buildStoreOptions($makeBaseRowsQuery()),
-                'products' => $this->buildProductOptions($makeBaseRowsQuery()),
-            ], 'dashboard-details'),
-            'summary' => fn (): array => $this->buildSummary(
-                $makeBaseRowsQuery(),
-                $makeFilteredRowsQuery(),
-                (int) $event->processing_report_imports_count,
-                $event->latestActiveReportImport?->imported_at?->toISOString(),
-                (int) ($event->latestActiveReportImport?->summary['machines_count'] ?? 0),
-                $resolveDocumentTypes(),
+            'filterOptions' => Inertia::defer(fn (): array => $rememberDashboardValue(
+                'filter-options',
+                fn (): array => [
+                    'barGroups' => $this->buildBarGroupOptions($makeBaseRowsQuery()),
+                    'stores' => $this->buildStoreOptions($makeBaseRowsQuery()),
+                    'products' => $this->buildProductOptions($makeBaseRowsQuery()),
+                ],
+                false,
+            ), 'dashboard-operational'),
+            'summary' => fn (): array => $rememberDashboardValue(
+                'summary',
+                fn (): array => $this->buildSummary(
+                    $makeBaseRowsQuery(),
+                    $makeFilteredRowsQuery(),
+                    (int) $event->processing_report_imports_count,
+                    $event->latestActiveReportImport?->imported_at?->toISOString(),
+                    (int) ($event->latestActiveReportImport?->summary['machines_count'] ?? 0),
+                    $resolveDocumentTypes(),
+                ),
             ),
-            'barGroups' => Inertia::defer(fn (): array => $this->buildBarGroups($makeFilteredRowsQuery()), 'dashboard-details'),
-            'zoneDevices' => Inertia::defer(fn (): array => $this->buildZoneDevices($makeFilteredRowsQuery()), 'dashboard-details'),
-            'topStores' => Inertia::defer(fn (): array => $this->buildTopStores($makeFilteredRowsQuery()), 'dashboard-details'),
-            'topProducts' => Inertia::defer(fn (): array => $this->buildTopProducts($makeFilteredProductRowsQuery()), 'dashboard-details'),
-            'productBreakdowns' => Inertia::defer(fn (): array => $this->buildProductBreakdowns($makeFilteredProductRowsQuery()), 'dashboard-details'),
+            'barGroups' => Inertia::defer(fn (): array => $rememberDashboardValue(
+                'bar-groups',
+                fn (): array => $this->buildBarGroups($makeFilteredRowsQuery()),
+            ), 'dashboard-operational'),
+            'zoneDevices' => Inertia::defer(fn (): array => $rememberDashboardValue(
+                'zone-devices',
+                fn (): array => $this->buildZoneDevices($makeFilteredRowsQuery()),
+            ), 'dashboard-operational'),
+            'topStores' => Inertia::defer(fn (): array => $rememberDashboardValue(
+                'top-stores',
+                fn (): array => $this->buildTopStores($makeFilteredRowsQuery()),
+            ), 'dashboard-operational'),
+            'topProducts' => Inertia::defer(fn (): array => $rememberDashboardValue(
+                'top-products',
+                fn (): array => $this->buildTopProducts($makeFilteredProductRowsQuery()),
+            ), 'dashboard-products'),
+            'productBreakdowns' => Inertia::defer(fn (): array => $rememberDashboardValue(
+                'product-breakdowns',
+                fn (): array => $this->buildProductBreakdowns($makeFilteredProductRowsQuery()),
+            ), 'dashboard-products'),
             'dailySales' => fn (): array => $resolveDailyBreakdowns(),
             'dailyBreakdowns' => fn (): array => $resolveDailyBreakdowns(),
-            'hourlySales' => Inertia::defer(fn (): array => $this->buildHourlySales($makeFilteredRowsQuery()), 'dashboard-details'),
+            'hourlySales' => Inertia::defer(fn (): array => $rememberDashboardValue(
+                'hourly-sales',
+                fn (): array => $this->buildHourlySales($makeFilteredRowsQuery()),
+            ), 'dashboard-analytics'),
             'documentTypes' => Inertia::optional(fn (): array => $resolveDocumentTypes()),
-            'paymentSummary' => fn (): array => $this->buildPaymentSummary(
-                $event->latestActiveReportImport,
-                $latestActiveImportSummary,
-                $filters,
+            'paymentSummary' => fn (): array => $rememberDashboardValue(
+                'payment-summary',
+                fn (): array => $this->buildPaymentSummary(
+                    $event->latestActiveReportImport,
+                    $latestActiveImportSummary,
+                    $filters,
+                ),
             ),
-            'reconciliation' => Inertia::defer(fn (): array => $this->buildPaymentReconciliation(
-                $event->latestActiveReportImport,
-                $latestActiveImportSummary,
-                $makeFilteredRowsQuery(),
-                $filters,
-            ), 'dashboard-details'),
-            'comparison' => Inertia::defer(fn (): array => $this->buildComparison(
-                $event,
-                $makeBaseRowsQuery(),
-                $latestActiveImportSummary,
-            ), 'dashboard-details'),
+            'reconciliation' => Inertia::defer(fn (): array => $rememberDashboardValue(
+                'reconciliation',
+                fn (): array => $this->buildPaymentReconciliation(
+                    $event->latestActiveReportImport,
+                    $latestActiveImportSummary,
+                    $makeFilteredRowsQuery(),
+                    $filters,
+                ),
+            ), 'dashboard-finance'),
+            'comparison' => Inertia::defer(fn (): array => $rememberDashboardValue(
+                'comparison',
+                fn (): array => $this->buildComparison(
+                    $event,
+                    $makeBaseRowsQuery(),
+                    $latestActiveImportSummary,
+                ),
+                false,
+            ), 'dashboard-finance'),
             'rows' => Inertia::optional(fn () => $resolveRows()->getCollection()->map(fn (EventReportRow $row): array => [
                 'id' => $row->id,
                 'store_code' => $row->store_code,
@@ -304,6 +363,63 @@ class EventDashboardController extends Controller
             'backUrl' => $backUrl,
             'backLabel' => $backLabel,
         ]);
+    }
+
+    private function dashboardCacheVersion(Event $event): string
+    {
+        $clientImports = EventReportImport::query()
+            ->where('is_active', true)
+            ->where('status', 'completed')
+            ->whereHas('event', fn (Builder $query): Builder => $query->where('client_id', $event->client_id))
+            ->selectRaw('MAX(id) AS latest_id, MAX(updated_at) AS latest_updated_at')
+            ->toBase()
+            ->first();
+
+        return hash('sha256', serialize([
+            'event' => $event->id,
+            'event_updated_at' => $event->updated_at?->toISOString(),
+            'active_import' => $event->latestActiveReportImport?->id,
+            'active_import_updated_at' => $event->latestActiveReportImport?->updated_at?->toISOString(),
+            'latest_attempt' => $event->latestReportImport?->id,
+            'latest_attempt_status' => $event->latestReportImport?->status,
+            'latest_attempt_updated_at' => $event->latestReportImport?->updated_at?->toISOString(),
+            'processing_imports' => (int) $event->processing_report_imports_count,
+            'client_latest_active_import' => $clientImports?->latest_id,
+            'client_latest_active_import_updated_at' => $clientImports?->latest_updated_at,
+        ]));
+    }
+
+    /**
+     * @param  array<string, mixed>  $filters
+     */
+    private function rememberDashboardValue(
+        Event $event,
+        string $cacheVersion,
+        array $filters,
+        string $fragment,
+        callable $resolver,
+    ): mixed {
+        $ttl = max(0, (int) config('event-reports.dashboard.cache_ttl_seconds', 300));
+
+        if ($ttl === 0) {
+            return $resolver();
+        }
+
+        $cacheFilters = $filters;
+        if (is_array($cacheFilters['bar_groups'] ?? null)) {
+            sort($cacheFilters['bar_groups']);
+        }
+        ksort($cacheFilters);
+
+        $cacheKey = implode(':', [
+            'event-dashboard-v1',
+            $event->id,
+            $cacheVersion,
+            $fragment,
+            hash('sha256', serialize($cacheFilters)),
+        ]);
+
+        return Cache::remember($cacheKey, now()->addSeconds($ttl), $resolver);
     }
 
     /**
@@ -397,12 +513,14 @@ class EventDashboardController extends Controller
     }
 
     /**
-     * @return array{bar_group: string, store: string, product: string, date_from: string, date_to: string, hour_from: string, hour_to: string, total_min: string, total_max: string}
+     * @return array{bar_groups: array<int, string>, store: string, product: string, date_from: string, date_to: string, hour_from: string, hour_to: string, total_min: string, total_max: string}
      */
     private function normalizeFilters(Request $request): array
     {
         $validated = $request->validate([
             'bar_group' => ['nullable', 'string', 'max:255'],
+            'bar_groups' => ['nullable', 'array', 'max:50'],
+            'bar_groups.*' => ['string', 'max:255'],
             'store' => ['nullable', 'string', 'max:255'],
             'product' => ['nullable', 'string', 'max:255'],
             'date_from' => ['nullable', 'date'],
@@ -413,8 +531,19 @@ class EventDashboardController extends Controller
             'total_max' => ['nullable', 'string', 'max:40'],
         ]);
 
+        $barGroups = collect($validated['bar_groups'] ?? [])
+            ->when(
+                empty($validated['bar_groups'] ?? []) && isset($validated['bar_group']),
+                fn (Collection $groups): Collection => $groups->push($validated['bar_group']),
+            )
+            ->map(fn (mixed $group): string => trim((string) $group))
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
+
         return [
-            'bar_group' => trim((string) ($validated['bar_group'] ?? '')),
+            'bar_groups' => $barGroups,
             'store' => trim((string) ($validated['store'] ?? '')),
             'product' => trim((string) ($validated['product'] ?? '')),
             'date_from' => trim((string) ($validated['date_from'] ?? '')),
@@ -428,8 +557,8 @@ class EventDashboardController extends Controller
 
     private function applyFilters(Builder $query, array $filters): Builder
     {
-        if ($filters['bar_group'] !== '') {
-            $this->applyBarGroupFilter($query, $filters['bar_group']);
+        if ($filters['bar_groups'] !== []) {
+            $this->applyBarGroupsFilter($query, $filters['bar_groups']);
         }
 
         if ($filters['store'] !== '') {
@@ -807,7 +936,7 @@ class EventDashboardController extends Controller
 
     /**
      * @param  array<string, mixed>  $latestImportSummary
-     * @param  array{bar_group: string, store: string, product: string, date_from: string, date_to: string, total_min: string, total_max: string}  $filters
+     * @param  array{bar_groups: array<int, string>, store: string, product: string, date_from: string, date_to: string, hour_from: string, hour_to: string, total_min: string, total_max: string}  $filters
      * @return array<int, array<string, mixed>>
      */
     private function buildDailyBreakdowns(
@@ -1008,7 +1137,7 @@ class EventDashboardController extends Controller
 
     /**
      * @param  array<string, mixed>  $latestImportSummary
-     * @param  array{bar_group: string, store: string, product: string, date_from: string, date_to: string, total_min: string, total_max: string}  $filters
+     * @param  array{bar_groups: array<int, string>, store: string, product: string, date_from: string, date_to: string, hour_from: string, hour_to: string, total_min: string, total_max: string}  $filters
      * @return array<string, mixed>
      */
     private function buildPaymentSummary(
@@ -1126,7 +1255,7 @@ class EventDashboardController extends Controller
 
     /**
      * @param  array<string, mixed>  $latestImportSummary
-     * @param  array{bar_group: string, store: string, product: string, date_from: string, date_to: string, total_min: string, total_max: string}  $filters
+     * @param  array{bar_groups: array<int, string>, store: string, product: string, date_from: string, date_to: string, hour_from: string, hour_to: string, total_min: string, total_max: string}  $filters
      * @return array<string, mixed>
      */
     private function buildPaymentReconciliation(
@@ -1417,12 +1546,12 @@ class EventDashboardController extends Controller
     }
 
     /**
-     * @return array{bar_group: string, store: string, product: string, date_from: string, date_to: string, hour_from: string, hour_to: string, total_min: string, total_max: string}
+     * @return array{bar_groups: array<int, string>, store: string, product: string, date_from: string, date_to: string, hour_from: string, hour_to: string, total_min: string, total_max: string}
      */
     private function emptyFilters(): array
     {
         return [
-            'bar_group' => '',
+            'bar_groups' => [],
             'store' => '',
             'product' => '',
             'date_from' => '',
@@ -1447,7 +1576,7 @@ class EventDashboardController extends Controller
      * Stream normalized payment documents without hydrating the complete event payload.
      *
      * @param  array<string, mixed>  $legacySummary
-     * @param  array{bar_group: string, store: string, product: string, date_from: string, date_to: string, hour_from: string, hour_to: string, total_min: string, total_max: string}  $filters
+     * @param  array{bar_groups: array<int, string>, store: string, product: string, date_from: string, date_to: string, hour_from: string, hour_to: string, total_min: string, total_max: string}  $filters
      * @return \Generator<int, array<string, mixed>>
      */
     private function paymentDocuments(
@@ -1505,12 +1634,12 @@ class EventDashboardController extends Controller
     }
 
     /**
-     * @param  array{bar_group: string, store: string, product: string, date_from: string, date_to: string, hour_from: string, hour_to: string, total_min: string, total_max: string}  $filters
+     * @param  array{bar_groups: array<int, string>, store: string, product: string, date_from: string, date_to: string, hour_from: string, hour_to: string, total_min: string, total_max: string}  $filters
      */
     private function applyPaymentDocumentFilters(Builder $query, array $filters): Builder
     {
-        if ($filters['bar_group'] !== '') {
-            $this->applyBarGroupFilter($query, $filters['bar_group']);
+        if ($filters['bar_groups'] !== []) {
+            $this->applyBarGroupsFilter($query, $filters['bar_groups']);
         }
 
         if ($filters['store'] !== '') {
@@ -1540,18 +1669,18 @@ class EventDashboardController extends Controller
 
     /**
      * @param  Collection<int, array<string, mixed>>  $documents
-     * @param  array{bar_group: string, store: string, product: string, date_from: string, date_to: string, total_min: string, total_max: string}  $filters
+     * @param  array{bar_groups: array<int, string>, store: string, product: string, date_from: string, date_to: string, hour_from: string, hour_to: string, total_min: string, total_max: string}  $filters
      * @return Collection<int, array<string, mixed>>
      */
     private function filterPaymentDocuments(Collection $documents, array $filters): Collection
     {
-        if ($filters['bar_group'] !== '') {
+        if ($filters['bar_groups'] !== []) {
             $documents = $documents->filter(function (array $document) use ($filters): bool {
                 $storeName = is_string($document['store_name'] ?? null)
                     ? $document['store_name']
                     : null;
 
-                return $this->resolveBarGroupLabel($storeName) === $filters['bar_group'];
+                return in_array($this->resolveBarGroupLabel($storeName), $filters['bar_groups'], true);
             })->values();
         }
 
@@ -1861,6 +1990,20 @@ class EventDashboardController extends Controller
         }
 
         $query->whereRaw('TRIM(COALESCE(store_name, \'\')) = ?', [$normalizedBarGroup]);
+    }
+
+    /**
+     * @param  array<int, string>  $barGroups
+     */
+    private function applyBarGroupsFilter(Builder $query, array $barGroups): void
+    {
+        $query->where(function (Builder $builder) use ($barGroups): void {
+            foreach ($barGroups as $barGroup) {
+                $builder->orWhere(function (Builder $barGroupQuery) use ($barGroup): void {
+                    $this->applyBarGroupFilter($barGroupQuery, $barGroup);
+                });
+            }
+        });
     }
 
     private function resolveBarGroupLabel(?string $storeName): string
