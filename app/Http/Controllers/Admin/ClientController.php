@@ -19,7 +19,16 @@ class ClientController extends Controller
     public function index(): Response
     {
         $clients = Client::query()
-            ->with('user')
+            ->select([
+                'id',
+                'user_id',
+                'name',
+                'business_name',
+                'address',
+                'phone',
+                'is_active',
+            ])
+            ->with('user:id,email')
             ->withCount([
                 'events',
             ])

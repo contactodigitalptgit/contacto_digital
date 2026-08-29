@@ -1721,6 +1721,7 @@ function getDifferenceClass(value: number | null) {
                     <Link
                         v-if="isAdmin"
                         :href="route('admin.events.index')"
+                        prefetch
                         class="contacto-sidebar-menu-item"
                     >
                         <AppSidebarIcon name="events" />
@@ -1730,6 +1731,7 @@ function getDifferenceClass(value: number | null) {
                     <Link
                         v-if="isAdmin"
                         :href="route('admin.clients.index')"
+                        prefetch
                         class="contacto-sidebar-menu-item"
                     >
                         <AppSidebarIcon name="clients" />

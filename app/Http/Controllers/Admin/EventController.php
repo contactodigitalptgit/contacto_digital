@@ -6,7 +6,6 @@ use App\Http\Controllers\Controller;
 use App\Jobs\SyncEventReportJob;
 use App\Models\Client;
 use App\Models\Event;
-use App\Models\EventReportRow;
 use App\Services\EventReportSyncService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -19,32 +18,37 @@ class EventController extends Controller
 {
     public function index(): Response
     {
-        app(EventReportSyncService::class)->markStaleProcessingImportsAsFailed();
-
         return Inertia::render('Admin/Events/Index', [
             'events' => function () {
-                $activeReportStats = EventReportRow::query()
-                    ->join(
-                        'event_report_imports',
-                        'event_report_imports.id',
-                        '=',
-                        'event_report_rows.event_report_import_id',
-                    )
-                    ->where('event_report_imports.is_active', true)
-                    ->where('event_report_imports.status', 'completed')
-                    ->groupBy('event_report_rows.event_id')
-                    ->selectRaw(
-                        'event_report_rows.event_id, COUNT(*) as rows_count, '
-                        .'COALESCE(SUM(event_report_rows.total), 0) as total',
-                    )
-                    ->get()
-                    ->keyBy('event_id');
-
                 return Event::query()
+                    ->select([
+                        'id',
+                        'client_id',
+                        'title',
+                        'description',
+                        'event_date',
+                        'report_starts_at',
+                        'report_ends_at',
+                        'show_zt_card',
+                        'is_active',
+                    ])
                     ->with([
-                        'latestActiveReportImport',
-                        'latestReportImport',
-                        'client',
+                        'latestActiveReportImport' => fn ($query) => $query->select([
+                            'event_report_imports.id',
+                            'event_report_imports.event_id',
+                            'event_report_imports.summary',
+                            'event_report_imports.imported_rows_count',
+                            'event_report_imports.imported_at',
+                            'event_report_imports.status',
+                        ]),
+                        'latestReportImport' => fn ($query) => $query->select([
+                            'event_report_imports.id',
+                            'event_report_imports.event_id',
+                            'event_report_imports.summary',
+                            'event_report_imports.created_at',
+                            'event_report_imports.status',
+                        ]),
+                        'client:id,name',
                     ])
                     ->withCount([
                         'zonesoftMachines as active_zonesoft_machines_count' => fn ($query) => $query->where('is_active', true),
@@ -53,11 +57,13 @@ class EventController extends Controller
                     ->orderByDesc('is_active')
                     ->orderBy('event_date')
                     ->get()
-                    ->map(function (Event $event) use ($activeReportStats): array {
+                    ->map(function (Event $event): array {
                         $latestActiveImport = $event->latestActiveReportImport;
                         $latestImport = $event->latestReportImport;
-                        $activeReportStat = $activeReportStats->get($event->id);
                         $hasAnyImport = $latestActiveImport !== null || $latestImport !== null;
+                        $latestActiveImportSummary = is_array($latestActiveImport?->summary)
+                            ? $latestActiveImport->summary
+                            : [];
                         $latestImportSummary = is_array($latestImport?->summary) ? $latestImport->summary : [];
 
                         return [
@@ -77,8 +83,8 @@ class EventController extends Controller
                             'available_machine_count' => (int) ($event->active_zonesoft_machines_count ?? 0),
                             'report_summary' => $hasAnyImport ? [
                                 'active_syncs_count' => (int) $event->processing_report_imports_count,
-                                'active_rows_count' => (int) ($activeReportStat?->rows_count ?? 0),
-                                'total' => (float) ($activeReportStat?->total ?? 0),
+                                'active_rows_count' => (int) ($latestActiveImport?->imported_rows_count ?? 0),
+                                'total' => (float) ($latestActiveImportSummary['sales_total'] ?? 0),
                                 'last_synced_at' => $latestActiveImport?->imported_at?->toISOString(),
                                 'machines_count' => (int) ($latestActiveImport?->summary['machines_count'] ?? 0),
                                 'status' => $latestImport?->status ?? ($latestActiveImport ? 'completed' : null),
