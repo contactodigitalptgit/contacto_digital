@@ -546,6 +546,62 @@ class EventReportImportTest extends TestCase
             ]);
     }
 
+    public function test_admin_marks_closed_session_as_closed_when_zonesoft_returns_a_closed_record(): void
+    {
+        [$admin, $client] = $this->makeAdminClientContext();
+        $event = $this->makeEvent($client);
+        $application = $this->makeApplication();
+        $machine = ClientZoneSoftMachine::create([
+            'client_id' => $client->id,
+            'event_id' => $event->id,
+            'zonesoft_application_id' => $application->id,
+            'zs_client_id' => 'SESSION-CLOSED-CLIENT',
+            'license' => 'SESSION-LICENSE',
+            'store_id' => 163,
+            'store_label' => 'Bar Teste',
+            'permissions' => 'API + All document interfaces',
+            'is_active' => true,
+        ]);
+
+        Http::fake([
+            'https://api.zonesoft.org/v3/salessessions/getOpenSaleSessionInstance' => Http::response([
+                'Response' => [
+                    'StatusCode' => 200,
+                    'StatusMessage' => 'OK',
+                    'Content' => [
+                        'salessession' => [
+                            'caixa' => 163,
+                            'dataopen' => '2026-08-29 23:14:40',
+                            'dataclose' => '2026-08-29 23:15:08',
+                            'opencx' => '10',
+                            'closecx' => '10',
+                            'idcx' => 23,
+                            'empid' => 10,
+                            'status' => 0,
+                        ],
+                    ],
+                ],
+            ]),
+        ]);
+
+        $this
+            ->actingAs($admin)
+            ->post(route('admin.events.tpas.session-status', [$event, $machine]))
+            ->assertOk()
+            ->assertJson([
+                'status' => 'closed',
+                'label' => 'Fechada',
+                'message' => 'A última sessão encontrada para este TPA já está fechada.',
+                'session' => [
+                    'cash_register' => 163,
+                    'opened_by' => '10',
+                    'closed_by' => '10',
+                    'session_id' => 23,
+                    'employee_id' => 10,
+                ],
+            ]);
+    }
+
     public function test_admin_can_start_sales_sync_from_event_tpa_panel(): void
     {
         [$admin, $client] = $this->makeAdminClientContext();

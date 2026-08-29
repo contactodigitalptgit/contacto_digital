@@ -136,10 +136,14 @@ class EventZoneSoftIntegrationController extends Controller
             ]);
         }
 
+        $isOpen = $this->isOpenSaleSession($session);
+
         return response()->json([
-            'status' => 'open',
-            'label' => 'Aberta',
-            'message' => 'Existe uma sessão aberta para este TPA.',
+            'status' => $isOpen ? 'open' : 'closed',
+            'label' => $isOpen ? 'Aberta' : 'Fechada',
+            'message' => $isOpen
+                ? 'Existe uma sessão aberta para este TPA.'
+                : 'A última sessão encontrada para este TPA já está fechada.',
             'session' => [
                 'cash_register' => (int) ($session['caixa'] ?? $machine->store_id),
                 'opened_at' => $this->toIsoString($session['dataopen'] ?? null),
@@ -502,6 +506,24 @@ class EventZoneSoftIntegrationController extends Controller
         }
 
         return isset($payload['caixa']) || isset($payload['dataopen']) ? $payload : null;
+    }
+
+    /**
+     * @param  array<string, mixed>  $session
+     */
+    private function isOpenSaleSession(array $session): bool
+    {
+        if (array_key_exists('status', $session) && is_numeric($session['status'])) {
+            return (int) $session['status'] === 1;
+        }
+
+        if (array_key_exists('dataclose', $session)) {
+            $closedAt = $session['dataclose'];
+
+            return ! is_string($closedAt) || trim($closedAt) === '';
+        }
+
+        return true;
     }
 
     private function toIsoString(mixed $value): ?string
