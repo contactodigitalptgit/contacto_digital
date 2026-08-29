@@ -440,12 +440,12 @@ const deleteMachine = async (machine: MachineItem) => {
                     <h2 class="dash-page-title">Integrações ZoneSoft</h2>
                     <p class="dash-muted-text">Catálogo global de licenças, Client IDs e TPAs</p>
                 </div>
-                <Link :href="route('admin.events.index')" class="dash-link-button">Ver eventos</Link>
+                <Link :href="route('admin.events.index')" class="dash-link-button w-full justify-center sm:w-auto">Ver eventos</Link>
             </div>
         </template>
 
         <div class="dash-page space-y-6">
-            <section class="grid gap-4 md:grid-cols-3">
+            <section class="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
                 <article class="dash-card">
                     <p class="dash-recent-subtitle">Licenças</p>
                     <p class="mt-2 text-3xl font-bold text-current">{{ licenseCount }}</p>
@@ -468,7 +468,7 @@ const deleteMachine = async (machine: MachineItem) => {
                         <h3 class="dash-card-title mb-0">Aplicações ZoneSoft</h3>
                         <p class="dash-recent-subtitle">Cada catálogo mantém as credenciais da aplicação que o originou.</p>
                     </div>
-                    <button type="button" class="dash-link-button" @click="createApplication">Nova aplicação</button>
+                    <button type="button" class="dash-link-button w-full justify-center sm:w-auto" @click="createApplication">Nova aplicação</button>
                 </div>
 
                 <form class="dash-modal-grid" @submit.prevent="saveApplication">
@@ -522,7 +522,7 @@ const deleteMachine = async (machine: MachineItem) => {
                         Aplicação ativa
                     </label>
                     <div class="dash-modal-actions dash-modal-field-full">
-                        <button class="dash-action-button dash-action-button-inline" :disabled="applicationForm.processing">
+                        <button class="dash-action-button dash-action-button-inline w-full justify-center sm:w-auto" :disabled="applicationForm.processing">
                             {{ applicationForm.create_new ? 'Criar aplicação' : 'Guardar aplicação' }}
                         </button>
                     </div>
@@ -572,7 +572,7 @@ const deleteMachine = async (machine: MachineItem) => {
                     <div class="dash-modal-actions dash-modal-field-full">
                         <button
                             type="button"
-                            class="dash-link-button"
+                            class="dash-link-button w-full justify-center sm:w-auto"
                             :disabled="previewingImport || importingMachines || !hasConfiguredApplication"
                             @click="previewMachineImport"
                         >
@@ -605,7 +605,25 @@ const deleteMachine = async (machine: MachineItem) => {
                         </article>
                     </div>
 
-                    <div class="overflow-x-auto rounded-xl border border-current/10">
+                    <div class="space-y-3 lg:hidden">
+                        <article
+                            v-for="row in importPreview.rows.slice(0, 25)"
+                            :key="`${row.line}-${row.store_id}-mobile`"
+                            class="rounded-xl border border-current/10 bg-white/[0.02] p-4"
+                        >
+                            <div class="flex items-start justify-between gap-3">
+                                <div>
+                                    <p class="text-sm font-semibold text-current">Linha {{ row.line }}</p>
+                                    <p class="mt-1 text-xs text-current/55">Store {{ row.store_id }} · {{ row.license }}</p>
+                                </div>
+                                <span class="status-pill" :class="importStatusClass(row.status)">{{ importStatusLabel(row.status) }}</span>
+                            </div>
+                            <p class="mt-3 break-all text-sm text-current/80">{{ row.zs_client_id }}</p>
+                            <p class="mt-3 text-sm text-current/65">{{ row.message }}</p>
+                        </article>
+                    </div>
+
+                    <div class="hidden overflow-x-auto rounded-xl border border-current/10 lg:block">
                         <table class="admin-clients-table min-w-[850px]">
                             <thead>
                                 <tr>
@@ -638,7 +656,7 @@ const deleteMachine = async (machine: MachineItem) => {
                     <div class="dash-modal-actions">
                         <button
                             type="button"
-                            class="dash-action-button dash-action-button-inline"
+                            class="dash-action-button dash-action-button-inline w-full justify-center sm:w-auto"
                             :disabled="!importPreview.can_import || importingMachines"
                             @click="importMachines"
                         >
@@ -688,9 +706,9 @@ const deleteMachine = async (machine: MachineItem) => {
                     </div>
                     <div class="dash-modal-field">
                         <label class="dash-modal-label" for="zs_store_id">Store ID</label>
-                        <div class="flex gap-3">
+                        <div class="flex flex-col gap-3 sm:flex-row">
                             <input id="zs_store_id" v-model.number="machineForm.store_id" class="dash-modal-input" type="number" min="0" required />
-                            <button type="button" class="dash-link-button shrink-0" :disabled="discoveringStores" @click="discoverStore">
+                            <button type="button" class="dash-link-button w-full justify-center shrink-0 sm:w-auto" :disabled="discoveringStores" @click="discoverStore">
                                 {{ discoveringStores ? 'A validar...' : 'Validar' }}
                             </button>
                         </div>
@@ -706,8 +724,8 @@ const deleteMachine = async (machine: MachineItem) => {
                         TPA ativo
                     </label>
                     <div class="dash-modal-actions dash-modal-field-full">
-                        <button v-if="editingMachineId" type="button" class="dash-modal-cancel" @click="resetMachineForm">Cancelar edição</button>
-                        <button class="dash-action-button dash-action-button-inline" :disabled="machineForm.processing || !hasConfiguredApplication">
+                        <button v-if="editingMachineId" type="button" class="dash-modal-cancel w-full justify-center sm:w-auto" @click="resetMachineForm">Cancelar edição</button>
+                        <button class="dash-action-button dash-action-button-inline w-full justify-center sm:w-auto" :disabled="machineForm.processing || !hasConfiguredApplication">
                             {{ editingMachineId ? 'Guardar alterações' : 'Adicionar ao catálogo' }}
                         </button>
                     </div>
@@ -729,12 +747,67 @@ const deleteMachine = async (machine: MachineItem) => {
                             </select>
                         </div>
                     </div>
-                    <button type="button" class="dash-link-button" :disabled="validatingMachines || !props.machines.length" @click="validateMachines">
+                    <button type="button" class="dash-link-button w-full justify-center lg:w-auto" :disabled="validatingMachines || !props.machines.length" @click="validateMachines">
                         {{ validatingMachines ? 'A validar...' : 'Validar lojas' }}
                     </button>
                 </div>
 
-                <div class="overflow-x-auto">
+                <div class="space-y-3 lg:hidden">
+                    <article
+                        v-for="machine in filteredMachines"
+                        :key="`${machine.id}-mobile`"
+                        class="rounded-2xl border border-current/10 bg-white/[0.02] p-4"
+                    >
+                        <div class="flex items-start justify-between gap-3">
+                            <div>
+                                <p class="text-base font-semibold text-current">{{ machine.store_label || 'Sem nome' }}</p>
+                                <p class="mt-1 text-xs text-current/55">
+                                    {{ machine.client_name }} · Store {{ machine.store_id }}
+                                </p>
+                            </div>
+                            <span class="status-pill" :class="machine.is_active ? 'success' : 'neutral'">{{ machine.is_active ? 'Ativo' : 'Inativo' }}</span>
+                        </div>
+
+                        <dl class="mt-4 space-y-2 text-sm">
+                            <div class="flex items-start justify-between gap-4">
+                                <dt class="text-current/55">Aplicação</dt>
+                                <dd class="text-right text-current">{{ machine.application_name || 'Sem aplicação' }}</dd>
+                            </div>
+                            <div class="flex items-start justify-between gap-4">
+                                <dt class="text-current/55">Licença</dt>
+                                <dd class="text-right text-current">{{ machine.license }}</dd>
+                            </div>
+                            <div class="flex items-start justify-between gap-4">
+                                <dt class="text-current/55">Client ID</dt>
+                                <dd class="max-w-[13rem] break-all text-right text-current">{{ machine.zs_client_id }}</dd>
+                            </div>
+                            <div class="flex items-start justify-between gap-4">
+                                <dt class="text-current/55">Eventos</dt>
+                                <dd class="text-right text-current">
+                                    {{ machine.events.length ? `${machine.events.length} associado${machine.events.length === 1 ? '' : 's'}` : 'Nenhum' }}
+                                </dd>
+                            </div>
+                            <div>
+                                <dt class="text-current/55">Validação</dt>
+                                <dd class="mt-1 text-current">{{ formatDateTime(machine.last_validated_at) }}</dd>
+                                <p v-if="machine.last_error" class="mt-2 text-xs text-rose-500">{{ machine.last_error }}</p>
+                            </div>
+                        </dl>
+
+                        <div class="mt-4 flex flex-col gap-2 sm:flex-row">
+                            <button type="button" class="dash-link-button w-full justify-center sm:w-auto" @click="editMachine(machine)">Editar</button>
+                            <button type="button" class="dash-link-button w-full justify-center border-rose-500/30 text-rose-500 hover:border-rose-500/50 hover:bg-rose-500/10 sm:w-auto" @click="deleteMachine(machine)">
+                                Eliminar
+                            </button>
+                        </div>
+                    </article>
+
+                    <p v-if="!filteredMachines.length" class="rounded-xl border border-current/10 bg-white/[0.02] px-4 py-6 text-center text-sm text-current/60">
+                        Nenhuma integração encontrada.
+                    </p>
+                </div>
+
+                <div class="hidden overflow-x-auto lg:block">
                     <table class="admin-clients-table min-w-[1100px]">
                         <thead>
                             <tr>

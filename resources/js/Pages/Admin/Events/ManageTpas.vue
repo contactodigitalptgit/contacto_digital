@@ -62,6 +62,7 @@ const selectedLicense = ref(
     || licenses.value[0]
     || '',
 );
+const activeTab = ref<'catalog' | 'linked'>('catalog');
 const selectedMachineIds = ref<number[]>(
     initialSelectedMachines.map((machine) => machine.id),
 );
@@ -377,7 +378,28 @@ const saveSelection = () => {
                             </div>
                         </div>
 
-                        <div class="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(18rem,1fr)]">
+                        <div class="inline-flex w-full max-w-max rounded-2xl border border-current/10 bg-white/[0.02] p-1">
+                            <button
+                                type="button"
+                                class="rounded-xl px-4 py-2 text-sm font-semibold transition"
+                                :class="activeTab === 'catalog' ? 'bg-sky-500 text-white shadow-sm' : 'text-current/70 hover:bg-white/[0.04]'"
+                                @click="activeTab = 'catalog'"
+                            >
+                                Catálogo
+                                <span class="ml-2 text-xs opacity-80">{{ filteredMachines.length }}</span>
+                            </button>
+                            <button
+                                type="button"
+                                class="rounded-xl px-4 py-2 text-sm font-semibold transition"
+                                :class="activeTab === 'linked' ? 'bg-sky-500 text-white shadow-sm' : 'text-current/70 hover:bg-white/[0.04]'"
+                                @click="activeTab = 'linked'"
+                            >
+                                TPAs do evento
+                                <span class="ml-2 text-xs opacity-80">{{ selectedMachineSummary.length }}</span>
+                            </button>
+                        </div>
+
+                        <div v-if="activeTab === 'catalog'" class="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(18rem,1fr)]">
                             <div>
                                 <label class="sr-only" for="tpa_search">Pesquisar TPA</label>
                                 <input
@@ -459,44 +481,48 @@ const saveSelection = () => {
                                 </div>
                             </div>
                         </div>
+
+                        <div v-else class="rounded-2xl border border-current/10 bg-white/[0.02] p-5">
+                            <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                                <div>
+                                    <h3 class="text-base font-semibold text-current">TPAs vinculados ao evento</h3>
+                                    <p class="dash-recent-subtitle mt-1">
+                                        Clique num TPA para abrir o painel lateral com o estado da sessão e a sincronização das vendas.
+                                    </p>
+                                </div>
+                                <span class="rounded-full bg-current/5 px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-current/60">
+                                    {{ selectedMachineSummary.length }} vinculado{{ selectedMachineSummary.length === 1 ? '' : 's' }}
+                                </span>
+                            </div>
+
+                            <div v-if="selectedMachineSummary.length" class="mt-4 flex flex-wrap gap-3">
+                                <button
+                                    v-for="machine in selectedMachineSummary"
+                                    :key="`selected-${machine.id}`"
+                                    type="button"
+                                    class="rounded-2xl border border-current/10 bg-white/[0.03] px-4 py-3 text-left transition hover:border-sky-400/45 hover:bg-sky-500/5"
+                                    @click="openMachineDetail(machine)"
+                                >
+                                    <p class="text-sm font-semibold text-current">{{ machine.title }}</p>
+                                    <p class="mt-1 text-xs text-current/55">
+                                        Store {{ machine.store_id }} · {{ machine.zs_client_id }}
+                                    </p>
+                                </button>
+                            </div>
+
+                            <p v-else class="mt-4 text-sm text-current/60">
+                                Ainda não existem TPAs vinculados a este evento.
+                            </p>
+                        </div>
                     </div>
 
-                    <p class="dash-recent-subtitle mt-5 border-t border-current/10 pt-5">
+                    <p v-if="activeTab === 'catalog'" class="dash-recent-subtitle mt-5 border-t border-current/10 pt-5">
                         {{ filteredMachines.length }} resultado{{ filteredMachines.length === 1 ? '' : 's' }} apresentado{{ filteredMachines.length === 1 ? '' : 's' }}
                         <template v-if="search.trim() !== ''"> para “{{ search.trim() }}”</template>.
                     </p>
                 </section>
 
-                <section v-if="selectedMachineSummary.length" class="dash-card">
-                    <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-                        <div>
-                            <h3 class="text-base font-semibold text-current">TPAs vinculados ao evento</h3>
-                            <p class="dash-recent-subtitle mt-1">
-                                Clique num TPA para abrir o painel lateral com o estado da sessão e a sincronização das vendas.
-                            </p>
-                        </div>
-                        <span class="rounded-full bg-current/5 px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-current/60">
-                            {{ selectedMachineSummary.length }} vinculado{{ selectedMachineSummary.length === 1 ? '' : 's' }}
-                        </span>
-                    </div>
-
-                    <div class="mt-4 flex flex-wrap gap-3">
-                        <button
-                            v-for="machine in selectedMachineSummary"
-                            :key="`selected-${machine.id}`"
-                            type="button"
-                            class="rounded-2xl border border-current/10 bg-white/[0.03] px-4 py-3 text-left transition hover:border-sky-400/45 hover:bg-sky-500/5"
-                            @click="openMachineDetail(machine)"
-                        >
-                            <p class="text-sm font-semibold text-current">{{ machine.title }}</p>
-                            <p class="mt-1 text-xs text-current/55">
-                                Store {{ machine.store_id }} · {{ machine.zs_client_id }}
-                            </p>
-                        </button>
-                    </div>
-                </section>
-
-                <section v-if="!filteredMachines.length" class="event-dashboard-empty">
+                <section v-if="activeTab === 'catalog' && !filteredMachines.length" class="event-dashboard-empty">
                     <template v-if="search.trim() !== ''">
                         Não foram encontrados TPAs para esta pesquisa.
                     </template>
@@ -505,7 +531,7 @@ const saveSelection = () => {
                     </template>
                 </section>
 
-                <section v-else-if="viewMode === 'cards'" class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                <section v-else-if="activeTab === 'catalog' && viewMode === 'cards'" class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
                     <article
                         v-for="machine in filteredMachines"
                         :key="machine.id"
@@ -569,7 +595,7 @@ const saveSelection = () => {
                     </article>
                 </section>
 
-                <section v-else class="dash-card overflow-x-auto p-0">
+                <section v-else-if="activeTab === 'catalog'" class="dash-card overflow-x-auto p-0">
                     <table class="admin-clients-table min-w-[820px]">
                         <thead>
                             <tr>
