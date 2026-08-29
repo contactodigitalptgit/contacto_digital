@@ -184,9 +184,9 @@ const saveSelection = () => {
         </template>
 
         <div class="dash-page space-y-6">
-            <section class="dash-card space-y-5">
-                <div class="grid gap-5 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
-                    <div class="max-w-xl">
+            <section class="rounded-2xl border border-current/10 bg-white/[0.02] px-6 py-5">
+                <div class="grid gap-4 lg:grid-cols-[minmax(18rem,42rem)_auto] lg:items-center lg:justify-between">
+                    <div class="max-w-2xl">
                         <label class="dash-modal-label" for="event_zonesoft_license">
                             Licença ZoneSoft deste evento
                         </label>
@@ -202,7 +202,7 @@ const saveSelection = () => {
                                 {{ license }}
                             </option>
                         </select>
-                        <p class="admin-event-input-hint">
+                        <p class="mt-2 text-sm text-current/55">
                             Cada edição usa uma licença e apenas os TPAs selecionados abaixo.
                         </p>
                         <p v-if="form.errors.machine_ids" class="dash-modal-error">
@@ -212,7 +212,7 @@ const saveSelection = () => {
 
                     <button
                         type="button"
-                        class="dash-action-button dash-action-button-inline"
+                        class="rounded-xl border border-sky-400/20 bg-sky-500/10 px-5 py-3 text-sm font-semibold text-sky-100 transition hover:bg-sky-500/20 disabled:cursor-not-allowed"
                         :disabled="form.processing"
                         :class="{ 'opacity-60': form.processing }"
                         @click="saveSelection"
