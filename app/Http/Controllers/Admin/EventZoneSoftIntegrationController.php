@@ -70,6 +70,30 @@ class EventZoneSoftIntegrationController extends Controller
         ]);
     }
 
+    public function manageTpas(Event $event): Response
+    {
+        return Inertia::render('Admin/Events/ManageTpas', [
+            'event' => [
+                'id' => $event->id,
+                'title' => $event->title,
+                'event_date' => $event->event_date->toISOString(),
+            ],
+            'machines' => $event->zonesoftMachines()
+                ->orderBy('store_id')
+                ->get()
+                ->map(fn (ClientZoneSoftMachine $machine): array => [
+                    'id' => $machine->id,
+                    'store_id' => $machine->store_id,
+                    'store_label' => $machine->store_label,
+                    'license' => $machine->license,
+                    'is_active' => $machine->is_active,
+                    'last_validated_at' => $machine->last_validated_at?->toISOString(),
+                    'last_error' => $machine->last_error,
+                ])
+                ->values(),
+        ]);
+    }
+
     public function saveApplication(Request $request, Event $event): RedirectResponse
     {
         $existing = ZoneSoftApplication::query()->latest('id')->first();

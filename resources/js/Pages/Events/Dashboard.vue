@@ -1704,6 +1704,15 @@ function getDifferenceClass(value: number | null) {
                         <AppSidebarIcon name="edit" />
                         <span>Editar página</span>
                     </Link>
+
+                    <Link
+                        v-if="props.dashboardEditor?.enabled"
+                        :href="props.dashboardEditor.manage_tpas_url"
+                        class="contacto-sidebar-menu-item"
+                    >
+                        <AppSidebarIcon name="tpa" />
+                        <span>Gerir TPA</span>
+                    </Link>
                 </div>
 
                 <div class="contacto-sidebar-sync">

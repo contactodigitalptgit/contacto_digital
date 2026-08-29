@@ -92,6 +92,8 @@ Route::middleware(['auth', 'active.client', 'admin'])
             ->name('events.dashboard-configuration.edit');
         Route::patch('events/{event}/dashboard-configuration', [EventDashboardConfigurationController::class, 'update'])
             ->name('events.dashboard-configuration.update');
+        Route::get('events/{event}/gerir-tpa', [EventZoneSoftIntegrationController::class, 'manageTpas'])
+            ->name('events.tpas.manage');
         Route::post('events/{event}/reports', [EventController::class, 'storeReport'])
             ->name('events.reports.store');
         Route::get('events/{event}/integrations', [EventZoneSoftIntegrationController::class, 'show'])

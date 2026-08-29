@@ -224,6 +224,7 @@ class EventDashboardController extends Controller
             'dashboardEditor' => $previewMode ? [
                 'enabled' => true,
                 'edit_url' => route('admin.events.dashboard-configuration.edit', $event),
+                'manage_tpas_url' => route('admin.events.tpas.manage', $event),
             ] : null,
             'integration' => [
                 'source' => 'ZoneSoft API',

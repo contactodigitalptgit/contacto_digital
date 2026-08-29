@@ -157,6 +157,48 @@ class EventReportImportTest extends TestCase
                 ->where('machines.0.store_label', 'Máquina '.$firstEvent->id));
     }
 
+    public function test_admin_can_list_only_the_tpas_linked_to_an_event(): void
+    {
+        [$admin, $client] = $this->makeAdminClientContext();
+        $application = $this->makeApplication();
+        $event = $this->makeEvent($client);
+        $otherEvent = $this->makeEvent($client);
+
+        $event->zonesoftMachines()->create([
+            'client_id' => $client->id,
+            'zonesoft_application_id' => $application->id,
+            'zs_client_id' => 'EVENT-TPA-CLIENT',
+            'license' => 'EVENT-TPA-LICENSE',
+            'store_id' => 15,
+            'store_label' => 'Bar Principal - POS 1',
+            'permissions' => 'API + All document interfaces',
+            'is_active' => true,
+        ]);
+        $otherEvent->zonesoftMachines()->create([
+            'client_id' => $client->id,
+            'zonesoft_application_id' => $application->id,
+            'zs_client_id' => 'OTHER-TPA-CLIENT',
+            'license' => 'OTHER-TPA-LICENSE',
+            'store_id' => 16,
+            'store_label' => 'Outro evento - POS 1',
+            'permissions' => 'API + All document interfaces',
+            'is_active' => true,
+        ]);
+
+        $this
+            ->actingAs($admin)
+            ->get(route('admin.events.tpas.manage', $event))
+            ->assertOk()
+            ->assertInertia(fn (AssertableInertia $page) => $page
+                ->component('Admin/Events/ManageTpas')
+                ->where('event.id', $event->id)
+                ->where('event.title', $event->title)
+                ->has('machines', 1)
+                ->where('machines.0.store_id', 15)
+                ->where('machines.0.store_label', 'Bar Principal - POS 1')
+                ->missing('machines.1'));
+    }
+
     public function test_admin_can_discover_stores_for_client_id(): void
     {
         [$admin, $client] = $this->makeAdminClientContext();

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 defineProps<{
-    name: 'dashboard' | 'products' | 'payments' | 'zones' | 'performance' | 'events' | 'clients' | 'compare' | 'edit';
+    name: 'dashboard' | 'products' | 'payments' | 'zones' | 'performance' | 'events' | 'clients' | 'compare' | 'edit' | 'tpa';
 }>();
 </script>
 
@@ -55,6 +55,11 @@ defineProps<{
             <circle cx="7" cy="7" r="2" />
             <circle cx="17" cy="17" r="2" />
             <path d="M7 9v8a2 2 0 0 0 2 2h6M17 15V7a2 2 0 0 0-2-2H9" />
+        </template>
+
+        <template v-else-if="name === 'tpa'">
+            <rect x="4" y="3" width="16" height="18" rx="2" />
+            <path d="M7 7h10M8 12h.01M12 12h.01M16 12h.01M8 16h.01M12 16h.01M16 16h.01" />
         </template>
 
         <template v-else>

@@ -40,4 +40,5 @@ export interface DashboardPreset {
 export interface DashboardEditorMeta {
     enabled: boolean;
     edit_url: string;
+    manage_tpas_url: string;
 }

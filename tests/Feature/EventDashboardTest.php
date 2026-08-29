@@ -327,6 +327,7 @@ class EventDashboardTest extends TestCase
             ->where('previewMode', true)
             ->where('dashboardEditor.enabled', true)
             ->where('dashboardEditor.edit_url', route('admin.events.dashboard-configuration.edit', $event))
+            ->where('dashboardEditor.manage_tpas_url', route('admin.events.tpas.manage', $event))
             ->where('dashboardConfiguration.preset', 'complete')
             ->where('dashboardConfiguration.customized', false)
             ->where('dashboardConfiguration.sections.0.key', 'summary')
