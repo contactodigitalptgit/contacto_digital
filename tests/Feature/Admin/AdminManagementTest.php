@@ -345,6 +345,28 @@ class AdminManagementTest extends TestCase
             'phone' => '+351 950000000',
             'is_active' => true,
         ]);
+        $event = Event::create([
+            'client_id' => $client->id,
+            'title' => 'Evento Delete',
+            'event_date' => now(),
+            'report_ends_at' => now()->addDay(),
+            'is_active' => true,
+        ]);
+        $application = ZoneSoftApplication::create([
+            'name' => 'Aplicação Delete',
+            'app_key' => 'delete-key',
+            'app_secret' => 'delete-secret',
+            'is_active' => true,
+        ]);
+        $machine = ClientZoneSoftMachine::create([
+            'client_id' => $client->id,
+            'zonesoft_application_id' => $application->id,
+            'zs_client_id' => 'delete-client-id',
+            'license' => 'DELETE-LICENSE',
+            'store_id' => 99,
+            'is_active' => true,
+        ]);
+        $event->zonesoftMachines()->attach($machine->id);
 
         $response = $this
             ->actingAs($admin)
@@ -358,6 +380,18 @@ class AdminManagementTest extends TestCase
 
         $this->assertDatabaseMissing('users', [
             'id' => $clientUser->id,
+        ]);
+        $this->assertDatabaseMissing('events', [
+            'id' => $event->id,
+        ]);
+        $this->assertDatabaseMissing('client_zonesoft_machines', [
+            'id' => $machine->id,
+        ]);
+        $this->assertDatabaseMissing('event_zonesoft_machines', [
+            'event_id' => $event->id,
+        ]);
+        $this->assertDatabaseHas('zonesoft_applications', [
+            'id' => $application->id,
         ]);
     }
 }

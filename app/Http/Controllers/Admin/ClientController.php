@@ -174,15 +174,28 @@ class ClientController extends Controller
     public function destroy(Client $client): RedirectResponse
     {
         DB::transaction(function () use ($client): void {
-            $client->load('user');
+            $userId = $client->user_id;
+            $eventIds = DB::table('events')
+                ->where('client_id', $client->id)
+                ->pluck('id');
+            $machineIds = DB::table('client_zonesoft_machines')
+                ->where('client_id', $client->id)
+                ->pluck('id');
 
-            if ($client->user) {
-                $client->user->delete();
-
-                return;
-            }
-
-            $client->delete();
+            DB::table('event_zonesoft_machines')
+                ->whereIn('event_id', $eventIds)
+                ->orWhereIn('client_zonesoft_machine_id', $machineIds)
+                ->delete();
+            DB::table('event_report_payment_documents')->whereIn('event_id', $eventIds)->delete();
+            DB::table('event_report_rows')->whereIn('event_id', $eventIds)->delete();
+            DB::table('event_report_imports')->whereIn('event_id', $eventIds)->delete();
+            DB::table('events')->whereIn('id', $eventIds)->delete();
+            DB::table('client_zonesoft_machines')->whereIn('id', $machineIds)->delete();
+            DB::table('clients')->where('id', $client->id)->delete();
+            DB::table('users')
+                ->where('id', $userId)
+                ->where('role', '!=', 'admin')
+                ->delete();
         });
 
         return to_route('admin.clients.index');
