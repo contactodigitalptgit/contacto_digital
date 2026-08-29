@@ -3,11 +3,13 @@
 namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Admin\ZoneSoftMachineBulkImportRequest;
 use App\Models\Client;
 use App\Models\ClientZoneSoftMachine;
 use App\Models\ZoneSoftApplication;
 use App\Services\ZoneSoft\ZoneSoftApiException;
 use App\Services\ZoneSoft\ZoneSoftDiscoveryService;
+use App\Services\ZoneSoft\ZoneSoftMachineBulkImportService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -152,6 +154,32 @@ class ZoneSoftIntegrationController extends Controller
             $discoveryService,
             'Nenhum Client ID global registado para validar.',
         );
+    }
+
+    public function previewMachineImport(
+        ZoneSoftMachineBulkImportRequest $request,
+        ZoneSoftMachineBulkImportService $importService,
+    ): JsonResponse {
+        $validated = $request->validated();
+
+        return response()->json($importService->preview(
+            Client::query()->findOrFail($validated['client_id']),
+            $this->getReadableApplication(),
+            $validated['payload'],
+        ));
+    }
+
+    public function importMachines(
+        ZoneSoftMachineBulkImportRequest $request,
+        ZoneSoftMachineBulkImportService $importService,
+    ): JsonResponse {
+        $validated = $request->validated();
+
+        return response()->json($importService->import(
+            Client::query()->findOrFail($validated['client_id']),
+            $this->getReadableApplication(),
+            $validated['payload'],
+        ));
     }
 
     public function storeMachine(Request $request): RedirectResponse

@@ -48,6 +48,30 @@ interface StoreOption {
     display_label: string;
 }
 
+interface ImportPreviewRow {
+    line: number;
+    zs_client_id: string;
+    license: string;
+    store_id: number;
+    permissions: string;
+    status: 'new' | 'existing' | 'conflict' | 'invalid';
+    message: string;
+}
+
+interface ImportPreview {
+    source_application: { id: string; name: string };
+    client: { id: number; name: string };
+    summary: {
+        total: number;
+        new: number;
+        existing: number;
+        conflicts: number;
+        invalid: number;
+    };
+    can_import: boolean;
+    rows: ImportPreviewRow[];
+}
+
 const props = defineProps<{
     application: ApplicationData | null;
     clients: ClientData[];
@@ -61,6 +85,11 @@ const editingMachineId = ref<number | null>(null);
 const discoveringStores = ref(false);
 const validatingMachines = ref(false);
 const storeValidationMessage = ref('');
+const importClientId = ref<number | ''>(props.clients.length === 1 ? props.clients[0].id : '');
+const importPayload = ref('');
+const importPreview = ref<ImportPreview | null>(null);
+const previewingImport = ref(false);
+const importingMachines = ref(false);
 
 const applicationForm = useForm({
     name: props.application?.name ?? 'Portal Contactodigital',
@@ -118,6 +147,108 @@ const integrationRoute = (action: string, machineId?: number) => route(
     `admin.integrations.zonesoft.${action}`,
     machineId,
 );
+
+const importStatusLabel = (status: ImportPreviewRow['status']) => ({
+    new: 'Nova',
+    existing: 'Já existe',
+    conflict: 'Conflito',
+    invalid: 'Inválida',
+}[status]);
+
+const importStatusClass = (status: ImportPreviewRow['status']) => ({
+    new: 'success',
+    existing: 'neutral',
+    conflict: 'warning',
+    invalid: 'warning',
+}[status]);
+
+const clearImportPreview = () => {
+    importPreview.value = null;
+};
+
+const parseImportPayload = (): Record<string, unknown> => {
+    if (importClientId.value === '') {
+        throw new Error('Selecione o cliente que será proprietário das integrações.');
+    }
+
+    if (!importPayload.value.trim()) {
+        throw new Error('Cole primeiro o lote copiado pela extensão.');
+    }
+
+    const parsed = JSON.parse(importPayload.value) as unknown;
+
+    if (!parsed || Array.isArray(parsed) || typeof parsed !== 'object') {
+        throw new Error('O lote deve ser um objeto JSON exportado pela extensão.');
+    }
+
+    return parsed as Record<string, unknown>;
+};
+
+const importErrorMessage = (error: unknown, fallback: string) => {
+    if (!axios.isAxiosError(error)) {
+        return error instanceof Error ? error.message : fallback;
+    }
+
+    const errors = error.response?.data?.errors as Record<string, string[]> | undefined;
+    const firstValidationError = errors ? Object.values(errors).flat()[0] : undefined;
+
+    return firstValidationError
+        ?? (error.response?.data?.message as string | undefined)
+        ?? fallback;
+};
+
+const previewMachineImport = async () => {
+    clearImportPreview();
+    previewingImport.value = true;
+
+    try {
+        const payload = parseImportPayload();
+        const response = await axios.post(integrationRoute('machines.import.preview'), {
+            client_id: importClientId.value,
+            payload,
+        });
+        importPreview.value = response.data as ImportPreview;
+    } catch (error: unknown) {
+        void showErrorToast(importErrorMessage(error, 'Não foi possível pré-visualizar o lote.'));
+    } finally {
+        previewingImport.value = false;
+    }
+};
+
+const importMachines = async () => {
+    if (!importPreview.value?.can_import) {
+        return;
+    }
+
+    const confirmed = await confirmAction({
+        title: 'Importar integrações globais?',
+        text: `${importPreview.value.summary.new} novas integrações serão adicionadas a ${importPreview.value.client.name}.`,
+        confirmButtonText: 'Importar lote',
+    });
+
+    if (!confirmed) {
+        return;
+    }
+
+    importingMachines.value = true;
+
+    try {
+        const payload = parseImportPayload();
+        const response = await axios.post(integrationRoute('machines.import.store'), {
+            client_id: importClientId.value,
+            payload,
+        });
+        importPayload.value = '';
+        clearImportPreview();
+        void showSuccessToast(String(response.data.message ?? 'Lote importado com sucesso.'));
+        router.reload({ only: ['machines'] });
+    } catch (error: unknown) {
+        clearImportPreview();
+        void showErrorToast(importErrorMessage(error, 'Não foi possível importar o lote.'));
+    } finally {
+        importingMachines.value = false;
+    }
+};
 
 const formatDateTime = (date: string | null) => date
     ? new Intl.DateTimeFormat('pt-PT', {
@@ -330,6 +461,125 @@ const deleteMachine = async (machine: MachineItem) => {
                         </button>
                     </div>
                 </form>
+            </section>
+
+            <section class="dash-card space-y-5">
+                <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                    <div>
+                        <h3 class="dash-card-title mb-0">Importar em massa</h3>
+                        <p class="dash-recent-subtitle">
+                            Na extensão ZoneSoft, use “Copiar lote para plataforma” e cole o resultado aqui.
+                        </p>
+                    </div>
+                    <span class="status-pill neutral">Sem APP-KEY ou APP-SECRET</span>
+                </div>
+
+                <div class="dash-modal-grid">
+                    <div class="dash-modal-field">
+                        <label class="dash-modal-label" for="zs_import_client">Cliente proprietário</label>
+                        <select
+                            id="zs_import_client"
+                            v-model.number="importClientId"
+                            class="dash-modal-input"
+                            required
+                            @change="clearImportPreview"
+                        >
+                            <option value="" disabled>Selecione o cliente</option>
+                            <option v-for="client in props.clients" :key="client.id" :value="client.id">
+                                {{ client.name }}
+                            </option>
+                        </select>
+                    </div>
+                    <div class="dash-modal-field dash-modal-field-full">
+                        <label class="dash-modal-label" for="zs_import_payload">Lote JSON</label>
+                        <textarea
+                            id="zs_import_payload"
+                            v-model="importPayload"
+                            class="dash-modal-input min-h-40 font-mono text-xs"
+                            placeholder="Cole aqui o lote copiado pela extensão..."
+                            @input="clearImportPreview"
+                        />
+                        <p class="admin-event-input-hint">
+                            A pré-visualização não grava dados. São aceitas até 500 integrações por lote.
+                        </p>
+                    </div>
+                    <div class="dash-modal-actions dash-modal-field-full">
+                        <button
+                            type="button"
+                            class="dash-link-button"
+                            :disabled="previewingImport || importingMachines || !hasConfiguredApplication"
+                            @click="previewMachineImport"
+                        >
+                            {{ previewingImport ? 'A analisar...' : 'Pré-visualizar lote' }}
+                        </button>
+                    </div>
+                </div>
+
+                <div v-if="importPreview" class="space-y-4 border-t border-current/10 pt-5">
+                    <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+                        <article class="rounded-xl border border-current/10 p-4">
+                            <p class="dash-recent-subtitle">Total</p>
+                            <p class="mt-1 text-2xl font-bold">{{ importPreview.summary.total }}</p>
+                        </article>
+                        <article class="rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-4">
+                            <p class="dash-recent-subtitle">Novas</p>
+                            <p class="mt-1 text-2xl font-bold text-emerald-500">{{ importPreview.summary.new }}</p>
+                        </article>
+                        <article class="rounded-xl border border-current/10 p-4">
+                            <p class="dash-recent-subtitle">Já existem</p>
+                            <p class="mt-1 text-2xl font-bold">{{ importPreview.summary.existing }}</p>
+                        </article>
+                        <article class="rounded-xl border border-amber-500/30 bg-amber-500/5 p-4">
+                            <p class="dash-recent-subtitle">Conflitos</p>
+                            <p class="mt-1 text-2xl font-bold text-amber-500">{{ importPreview.summary.conflicts }}</p>
+                        </article>
+                        <article class="rounded-xl border border-rose-500/30 bg-rose-500/5 p-4">
+                            <p class="dash-recent-subtitle">Inválidas</p>
+                            <p class="mt-1 text-2xl font-bold text-rose-500">{{ importPreview.summary.invalid }}</p>
+                        </article>
+                    </div>
+
+                    <div class="overflow-x-auto rounded-xl border border-current/10">
+                        <table class="admin-clients-table min-w-[850px]">
+                            <thead>
+                                <tr>
+                                    <th>Linha</th>
+                                    <th>Licença</th>
+                                    <th>Store ID</th>
+                                    <th>Client ID</th>
+                                    <th>Resultado</th>
+                                    <th>Detalhe</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr v-for="row in importPreview.rows.slice(0, 25)" :key="`${row.line}-${row.store_id}`">
+                                    <td class="admin-clients-text">{{ row.line }}</td>
+                                    <td class="admin-clients-text">{{ row.license }}</td>
+                                    <td class="admin-clients-text">{{ row.store_id }}</td>
+                                    <td class="admin-clients-text"><span class="block max-w-[12rem] truncate">{{ row.zs_client_id }}</span></td>
+                                    <td><span class="status-pill" :class="importStatusClass(row.status)">{{ importStatusLabel(row.status) }}</span></td>
+                                    <td class="admin-clients-text">{{ row.message }}</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <p v-if="importPreview.rows.length > 25" class="admin-event-input-hint">
+                        A mostrar as primeiras 25 de {{ importPreview.rows.length }} linhas.
+                    </p>
+                    <p v-if="!importPreview.can_import" class="dash-modal-error">
+                        Corrija os conflitos ou linhas inválidas e faça uma nova pré-visualização.
+                    </p>
+                    <div class="dash-modal-actions">
+                        <button
+                            type="button"
+                            class="dash-action-button dash-action-button-inline"
+                            :disabled="!importPreview.can_import || importingMachines"
+                            @click="importMachines"
+                        >
+                            {{ importingMachines ? 'A importar...' : `Importar ${importPreview.summary.new} integrações` }}
+                        </button>
+                    </div>
+                </div>
             </section>
 
             <section class="dash-card space-y-5">

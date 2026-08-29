@@ -121,6 +121,10 @@ Route::middleware(['auth', 'active.client', 'admin'])
             ->name('integrations.zonesoft.discover-stores');
         Route::post('integrations/zonesoft/machines/validate-stores', [ZoneSoftIntegrationController::class, 'validateAllMachines'])
             ->name('integrations.zonesoft.machines.validate-all');
+        Route::post('integrations/zonesoft/machines/import-preview', [ZoneSoftIntegrationController::class, 'previewMachineImport'])
+            ->name('integrations.zonesoft.machines.import.preview');
+        Route::post('integrations/zonesoft/machines/import', [ZoneSoftIntegrationController::class, 'importMachines'])
+            ->name('integrations.zonesoft.machines.import.store');
         Route::post('integrations/zonesoft/machines', [ZoneSoftIntegrationController::class, 'storeMachine'])
             ->name('integrations.zonesoft.machines.store');
         Route::put('integrations/zonesoft/machines/{machine}', [ZoneSoftIntegrationController::class, 'updateMachine'])
