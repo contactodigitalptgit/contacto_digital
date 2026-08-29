@@ -231,25 +231,59 @@ const saveSelection = () => {
 
             <template v-else>
                 <section class="dash-card">
-                    <div class="flex flex-col gap-5 xl:flex-row xl:items-end xl:justify-between">
-                        <div>
-                            <p class="text-sm font-semibold text-current">
-                                {{ licenseMachines.length }} TPA{{ licenseMachines.length === 1 ? '' : 's' }} disponível{{ licenseMachines.length === 1 ? '' : 'is' }}
-                            </p>
-                            <p class="dash-recent-subtitle mt-1">
-                                {{ selectedCount }} selecionado{{ selectedCount === 1 ? '' : 's' }} para este evento
-                            </p>
+                    <div class="flex flex-col gap-5">
+                        <div class="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+                            <div>
+                                <p class="text-sm font-semibold text-current">
+                                    {{ licenseMachines.length }} TPA{{ licenseMachines.length === 1 ? '' : 's' }} disponível{{ licenseMachines.length === 1 ? '' : 'is' }}
+                                </p>
+                                <p class="dash-recent-subtitle mt-1">
+                                    {{ selectedCount }} selecionado{{ selectedCount === 1 ? '' : 's' }} para este evento
+                                </p>
+                            </div>
+
+                            <div class="flex flex-wrap items-center gap-3 xl:justify-end">
+                                <button
+                                    type="button"
+                                    class="dash-link-button"
+                                    :disabled="!filteredMachines.length"
+                                    @click="toggleAllMachines"
+                                >
+                                    {{ allSelected ? 'Limpar resultados' : 'Selecionar resultados' }}
+                                </button>
+                                <div class="inline-flex overflow-hidden rounded-xl border border-current/15">
+                                    <button
+                                        type="button"
+                                        class="px-3 py-2 text-sm font-semibold transition"
+                                        :class="viewMode === 'cards' ? 'bg-sky-500 text-white' : 'hover:bg-current/5'"
+                                        @click="viewMode = 'cards'"
+                                    >
+                                        Cartões
+                                    </button>
+                                    <button
+                                        type="button"
+                                        class="border-l border-current/15 px-3 py-2 text-sm font-semibold transition"
+                                        :class="viewMode === 'list' ? 'bg-sky-500 text-white' : 'hover:bg-current/5'"
+                                        @click="viewMode = 'list'"
+                                    >
+                                        Lista
+                                    </button>
+                                </div>
+                            </div>
                         </div>
 
-                        <div class="grid gap-3 sm:grid-cols-[minmax(18rem,1fr)_minmax(18rem,1fr)] xl:w-[52rem]">
-                            <label class="sr-only" for="tpa_search">Pesquisar TPA</label>
-                            <input
-                                id="tpa_search"
-                                v-model="search"
-                                type="search"
-                                class="dash-modal-input"
-                                placeholder="Pesquisar nome, Store ID ou Client ID..."
-                            />
+                        <div class="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(18rem,1fr)]">
+                            <div>
+                                <label class="sr-only" for="tpa_search">Pesquisar TPA</label>
+                                <input
+                                    id="tpa_search"
+                                    v-model="search"
+                                    type="search"
+                                    class="dash-modal-input"
+                                    placeholder="Pesquisar nome, Store ID ou Client ID..."
+                                />
+                            </div>
+
                             <div ref="pickerContainer" class="relative">
                                 <button
                                     type="button"
@@ -259,7 +293,7 @@ const saveSelection = () => {
                                     @click="togglePicker"
                                 >
                                     <span class="truncate text-sm text-current/80">
-                                        {{ pickerSearch.trim() !== '' ? `Filtrar dropdown: ${pickerSearch.trim()}` : 'Selecionar TPAs no dropdown' }}
+                                        {{ pickerSearch.trim() !== '' ? `Filtrar dropdown: ${pickerSearch.trim()}` : 'Selecionar TPAs' }}
                                     </span>
                                     <span class="text-xs font-semibold uppercase tracking-[0.16em] text-current/45">
                                         {{ pickerMachines.length }}
@@ -318,35 +352,6 @@ const saveSelection = () => {
                                         Nenhum TPA encontrado no dropdown.
                                     </p>
                                 </div>
-                            </div>
-                        </div>
-
-                        <div class="flex flex-wrap items-center gap-3 xl:justify-end">
-                            <button
-                                type="button"
-                                class="dash-link-button"
-                                :disabled="!filteredMachines.length"
-                                @click="toggleAllMachines"
-                            >
-                                {{ allSelected ? 'Limpar resultados' : 'Selecionar resultados' }}
-                            </button>
-                            <div class="inline-flex overflow-hidden rounded-xl border border-current/15">
-                                <button
-                                    type="button"
-                                    class="px-3 py-2 text-sm font-semibold transition"
-                                    :class="viewMode === 'cards' ? 'bg-sky-500 text-white' : 'hover:bg-current/5'"
-                                    @click="viewMode = 'cards'"
-                                >
-                                    Cartões
-                                </button>
-                                <button
-                                    type="button"
-                                    class="border-l border-current/15 px-3 py-2 text-sm font-semibold transition"
-                                    :class="viewMode === 'list' ? 'bg-sky-500 text-white' : 'hover:bg-current/5'"
-                                    @click="viewMode = 'list'"
-                                >
-                                    Lista
-                                </button>
                             </div>
                         </div>
                     </div>
