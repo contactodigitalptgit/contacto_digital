@@ -48,13 +48,32 @@ const selectedLicense = ref(
 const selectedMachineIds = ref<number[]>(
     initialSelectedMachines.map((machine) => machine.id),
 );
+const activeTab = ref<'catalog' | 'selected'>('catalog');
 const viewMode = ref<'cards' | 'list'>('cards');
+const search = ref('');
 const form = useForm({ machine_ids: selectedMachineIds.value });
 
-const filteredMachines = computed(() => props.machines.filter(
+const licenseMachines = computed(() => props.machines.filter(
     (machine) => (machine.license?.trim() ?? '') === selectedLicense.value,
 ));
 const selectedCount = computed(() => selectedMachineIds.value.length);
+const tabMachines = computed(() => activeTab.value === 'selected'
+    ? licenseMachines.value.filter((machine) => selectedMachineIds.value.includes(machine.id))
+    : licenseMachines.value,
+);
+const filteredMachines = computed(() => {
+    const normalizedSearch = search.value.trim().toLocaleLowerCase('pt-PT');
+
+    if (normalizedSearch === '') {
+        return tabMachines.value;
+    }
+
+    return tabMachines.value.filter((machine) => [
+        machine.store_label,
+        machine.store_id.toString(),
+        machine.zs_client_id,
+    ].some((value) => value?.toLocaleLowerCase('pt-PT').includes(normalizedSearch)));
+});
 const allSelected = computed(() => (
     filteredMachines.value.length > 0
     && filteredMachines.value.every((machine) => selectedMachineIds.value.includes(machine.id))
@@ -71,6 +90,8 @@ const changeLicense = () => {
     selectedMachineIds.value = props.machines
         .filter((machine) => machine.is_selected && machine.license?.trim() === selectedLicense.value)
         .map((machine) => machine.id);
+    activeTab.value = 'catalog';
+    search.value = '';
 };
 
 const toggleMachine = (machineId: number) => {
@@ -81,8 +102,11 @@ const toggleMachine = (machineId: number) => {
 
 const toggleAllMachines = () => {
     selectedMachineIds.value = allSelected.value
-        ? []
-        : filteredMachines.value.filter((machine) => machine.is_active).map((machine) => machine.id);
+        ? selectedMachineIds.value.filter((id) => !filteredMachines.value.some((machine) => machine.id === id))
+        : [...new Set([
+            ...selectedMachineIds.value,
+            ...filteredMachines.value.filter((machine) => machine.is_active).map((machine) => machine.id),
+        ])];
 };
 
 const saveSelection = () => {
@@ -167,49 +191,82 @@ const saveSelection = () => {
 
             <template v-else>
                 <section class="dash-card">
-                    <div class="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+                    <div class="flex flex-col gap-5 xl:flex-row xl:items-end xl:justify-between">
                         <div>
                             <p class="text-sm font-semibold text-current">
-                                {{ filteredMachines.length }} TPA{{ filteredMachines.length === 1 ? '' : 's' }} disponível{{ filteredMachines.length === 1 ? '' : 'is' }}
+                                {{ licenseMachines.length }} TPA{{ licenseMachines.length === 1 ? '' : 's' }} disponível{{ licenseMachines.length === 1 ? '' : 'is' }}
                             </p>
                             <p class="dash-recent-subtitle mt-1">
                                 {{ selectedCount }} selecionado{{ selectedCount === 1 ? '' : 's' }} para este evento
                             </p>
                         </div>
 
-                        <div class="flex flex-wrap items-center gap-3">
+                        <div class="grid gap-3 sm:grid-cols-[minmax(18rem,1fr)_auto_auto] xl:w-[42rem]">
+                            <label class="sr-only" for="tpa_search">Pesquisar TPA</label>
+                            <input
+                                id="tpa_search"
+                                v-model="search"
+                                type="search"
+                                class="dash-modal-input"
+                                placeholder="Pesquisar nome, Store ID ou Client ID..."
+                            />
+                            <label class="sr-only" for="tpa_view_mode">Visualização</label>
+                            <select id="tpa_view_mode" v-model="viewMode" class="dash-modal-input min-w-36">
+                                <option value="cards">Cartões</option>
+                                <option value="list">Lista</option>
+                            </select>
                             <button
                                 type="button"
                                 class="dash-link-button"
                                 :disabled="!filteredMachines.length"
                                 @click="toggleAllMachines"
                             >
-                                {{ allSelected ? 'Limpar seleção' : 'Selecionar todos' }}
+                                {{ allSelected ? 'Limpar resultados' : 'Selecionar resultados' }}
                             </button>
-                            <div class="inline-flex overflow-hidden rounded-xl border border-current/15">
-                                <button
-                                    type="button"
-                                    class="px-3 py-2 text-sm font-semibold transition"
-                                    :class="viewMode === 'cards' ? 'bg-sky-500 text-white' : 'hover:bg-current/5'"
-                                    @click="viewMode = 'cards'"
-                                >
-                                    Cartões
-                                </button>
-                                <button
-                                    type="button"
-                                    class="border-l border-current/15 px-3 py-2 text-sm font-semibold transition"
-                                    :class="viewMode === 'list' ? 'bg-sky-500 text-white' : 'hover:bg-current/5'"
-                                    @click="viewMode = 'list'"
-                                >
-                                    Lista
-                                </button>
-                            </div>
                         </div>
                     </div>
+
+                    <div class="mt-5 flex flex-wrap gap-2 border-t border-current/10 pt-5" role="tablist" aria-label="TPAs do evento">
+                        <button
+                            type="button"
+                            class="rounded-xl px-4 py-2 text-sm font-semibold transition"
+                            :class="activeTab === 'catalog' ? 'bg-sky-500 text-white shadow-sm' : 'bg-current/[0.04] text-current/70 hover:bg-current/[0.08]'"
+                            :aria-selected="activeTab === 'catalog'"
+                            role="tab"
+                            @click="activeTab = 'catalog'"
+                        >
+                            Catálogo
+                            <span class="ml-1 opacity-75">{{ licenseMachines.length }}</span>
+                        </button>
+                        <button
+                            type="button"
+                            class="rounded-xl px-4 py-2 text-sm font-semibold transition"
+                            :class="activeTab === 'selected' ? 'bg-sky-500 text-white shadow-sm' : 'bg-current/[0.04] text-current/70 hover:bg-current/[0.08]'"
+                            :aria-selected="activeTab === 'selected'"
+                            role="tab"
+                            @click="activeTab = 'selected'"
+                        >
+                            TPAs do evento
+                            <span class="ml-1 opacity-75">{{ selectedCount }}</span>
+                        </button>
+                    </div>
+
+                    <p class="dash-recent-subtitle mt-4">
+                        {{ filteredMachines.length }} resultado{{ filteredMachines.length === 1 ? '' : 's' }} apresentado{{ filteredMachines.length === 1 ? '' : 's' }}
+                        <template v-if="search.trim() !== ''"> para “{{ search.trim() }}”</template>.
+                    </p>
                 </section>
 
                 <section v-if="!filteredMachines.length" class="event-dashboard-empty">
-                    Não existem TPAs cadastrados para a licença selecionada.
+                    <template v-if="activeTab === 'selected' && search.trim() === ''">
+                        Ainda não existem TPAs selecionados para este evento.
+                    </template>
+                    <template v-else-if="search.trim() !== ''">
+                        Não foram encontrados TPAs para esta pesquisa.
+                    </template>
+                    <template v-else>
+                        Não existem TPAs cadastrados para a licença selecionada.
+                    </template>
                 </section>
 
                 <section v-else-if="viewMode === 'cards'" class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
