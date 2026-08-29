@@ -3,7 +3,7 @@ import AppSidebarIcon from '@/Components/AppSidebarIcon.vue';
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout.vue';
 import { showErrorToast, showSuccessToast } from '@/lib/swal';
 import { Head, Link, useForm } from '@inertiajs/vue3';
-import { computed, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 
 interface EventData {
     id: number;
@@ -48,31 +48,44 @@ const selectedLicense = ref(
 const selectedMachineIds = ref<number[]>(
     initialSelectedMachines.map((machine) => machine.id),
 );
-const activeTab = ref<'catalog' | 'selected'>('catalog');
 const viewMode = ref<'cards' | 'list'>('cards');
 const search = ref('');
+const pickerOpen = ref(false);
+const pickerSearch = ref('');
+const pickerContainer = ref<HTMLElement | null>(null);
 const form = useForm({ machine_ids: selectedMachineIds.value });
 
 const licenseMachines = computed(() => props.machines.filter(
     (machine) => (machine.license?.trim() ?? '') === selectedLicense.value,
 ));
 const selectedCount = computed(() => selectedMachineIds.value.length);
-const tabMachines = computed(() => activeTab.value === 'selected'
-    ? licenseMachines.value.filter((machine) => selectedMachineIds.value.includes(machine.id))
-    : licenseMachines.value,
-);
-const filteredMachines = computed(() => {
-    const normalizedSearch = search.value.trim().toLocaleLowerCase('pt-PT');
-
-    if (normalizedSearch === '') {
-        return tabMachines.value;
-    }
-
-    return tabMachines.value.filter((machine) => [
+const matchesMachineSearch = (machine: MachineItem, normalizedSearch: string) => normalizedSearch === ''
+    || [
         machine.store_label,
         machine.store_id.toString(),
         machine.zs_client_id,
-    ].some((value) => value?.toLocaleLowerCase('pt-PT').includes(normalizedSearch)));
+    ].some((value) => value?.toLocaleLowerCase('pt-PT').includes(normalizedSearch));
+
+const filteredMachines = computed(() => {
+    const normalizedSearch = search.value.trim().toLocaleLowerCase('pt-PT');
+
+    return licenseMachines.value.filter((machine) => matchesMachineSearch(machine, normalizedSearch));
+});
+const pickerMachines = computed(() => {
+    const normalizedSearch = pickerSearch.value.trim().toLocaleLowerCase('pt-PT');
+
+    return [...licenseMachines.value]
+        .filter((machine) => matchesMachineSearch(machine, normalizedSearch))
+        .sort((left, right) => {
+            const leftSelected = selectedMachineIds.value.includes(left.id) ? 1 : 0;
+            const rightSelected = selectedMachineIds.value.includes(right.id) ? 1 : 0;
+
+            if (leftSelected !== rightSelected) {
+                return rightSelected - leftSelected;
+            }
+
+            return left.store_id - right.store_id;
+        });
 });
 const allSelected = computed(() => (
     filteredMachines.value.length > 0
@@ -90,8 +103,9 @@ const changeLicense = () => {
     selectedMachineIds.value = props.machines
         .filter((machine) => machine.is_selected && machine.license?.trim() === selectedLicense.value)
         .map((machine) => machine.id);
-    activeTab.value = 'catalog';
     search.value = '';
+    pickerSearch.value = '';
+    pickerOpen.value = false;
 };
 
 const toggleMachine = (machineId: number) => {
@@ -108,6 +122,32 @@ const toggleAllMachines = () => {
             ...filteredMachines.value.filter((machine) => machine.is_active).map((machine) => machine.id),
         ])];
 };
+
+const togglePicker = () => {
+    pickerOpen.value = !pickerOpen.value;
+};
+
+const toggleMachineFromPicker = (machineId: number) => {
+    toggleMachine(machineId);
+};
+
+const handlePointerDown = (event: MouseEvent) => {
+    if (
+        pickerContainer.value
+        && event.target instanceof Node
+        && !pickerContainer.value.contains(event.target)
+    ) {
+        pickerOpen.value = false;
+    }
+};
+
+onMounted(() => {
+    document.addEventListener('mousedown', handlePointerDown);
+});
+
+onBeforeUnmount(() => {
+    document.removeEventListener('mousedown', handlePointerDown);
+});
 
 const saveSelection = () => {
     form.machine_ids = selectedMachineIds.value;
@@ -201,7 +241,7 @@ const saveSelection = () => {
                             </p>
                         </div>
 
-                        <div class="grid gap-3 sm:grid-cols-[minmax(18rem,1fr)_auto_auto] xl:w-[42rem]">
+                        <div class="grid gap-3 sm:grid-cols-[minmax(18rem,1fr)_minmax(18rem,1fr)] xl:w-[52rem]">
                             <label class="sr-only" for="tpa_search">Pesquisar TPA</label>
                             <input
                                 id="tpa_search"
@@ -210,11 +250,78 @@ const saveSelection = () => {
                                 class="dash-modal-input"
                                 placeholder="Pesquisar nome, Store ID ou Client ID..."
                             />
-                            <label class="sr-only" for="tpa_view_mode">Visualização</label>
-                            <select id="tpa_view_mode" v-model="viewMode" class="dash-modal-input min-w-36">
-                                <option value="cards">Cartões</option>
-                                <option value="list">Lista</option>
-                            </select>
+                            <div ref="pickerContainer" class="relative">
+                                <button
+                                    type="button"
+                                    class="dash-modal-input flex w-full items-center justify-between gap-3 text-left"
+                                    :aria-expanded="pickerOpen"
+                                    aria-haspopup="listbox"
+                                    @click="togglePicker"
+                                >
+                                    <span class="truncate text-sm text-current/80">
+                                        {{ pickerSearch.trim() !== '' ? `Filtrar dropdown: ${pickerSearch.trim()}` : 'Selecionar TPAs no dropdown' }}
+                                    </span>
+                                    <span class="text-xs font-semibold uppercase tracking-[0.16em] text-current/45">
+                                        {{ pickerMachines.length }}
+                                    </span>
+                                </button>
+
+                                <div
+                                    v-if="pickerOpen"
+                                    class="absolute right-0 z-20 mt-2 w-full rounded-2xl border border-current/10 bg-slate-950 p-3 shadow-2xl shadow-slate-950/35"
+                                >
+                                    <label class="sr-only" for="tpa_picker_search">Pesquisar no dropdown</label>
+                                    <input
+                                        id="tpa_picker_search"
+                                        v-model="pickerSearch"
+                                        type="search"
+                                        class="dash-modal-input"
+                                        placeholder="Filtrar TPA no dropdown..."
+                                    />
+
+                                    <div
+                                        v-if="pickerMachines.length"
+                                        class="mt-3 max-h-80 space-y-2 overflow-y-auto pr-1"
+                                        role="listbox"
+                                        aria-label="Selecionar TPAs"
+                                    >
+                                        <button
+                                            v-for="machine in pickerMachines"
+                                            :key="machine.id"
+                                            type="button"
+                                            class="flex w-full items-start justify-between gap-3 rounded-xl border px-4 py-3 text-left transition"
+                                            :class="selectedMachineIds.includes(machine.id)
+                                                ? 'border-sky-400/70 bg-sky-400/10'
+                                                : 'border-current/10 bg-white/[0.03] hover:border-sky-400/40'"
+                                            @click="toggleMachineFromPicker(machine.id)"
+                                        >
+                                            <div class="min-w-0">
+                                                <p class="truncate text-sm font-semibold text-current">
+                                                    {{ machine.store_label || `TPA ${machine.store_id}` }}
+                                                </p>
+                                                <p class="mt-1 text-xs text-current/55">
+                                                    Store {{ machine.store_id }} · {{ machine.zs_client_id }}
+                                                </p>
+                                            </div>
+                                            <span
+                                                class="shrink-0 rounded-full px-2 py-1 text-[11px] font-semibold"
+                                                :class="selectedMachineIds.includes(machine.id)
+                                                    ? 'bg-sky-500/20 text-sky-200'
+                                                    : 'bg-current/10 text-current/65'"
+                                            >
+                                                {{ selectedMachineIds.includes(machine.id) ? 'Selecionado' : 'Selecionar' }}
+                                            </span>
+                                        </button>
+                                    </div>
+
+                                    <p v-else class="mt-3 text-sm text-current/60">
+                                        Nenhum TPA encontrado no dropdown.
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="flex flex-wrap items-center gap-3 xl:justify-end">
                             <button
                                 type="button"
                                 class="dash-link-button"
@@ -223,45 +330,35 @@ const saveSelection = () => {
                             >
                                 {{ allSelected ? 'Limpar resultados' : 'Selecionar resultados' }}
                             </button>
+                            <div class="inline-flex overflow-hidden rounded-xl border border-current/15">
+                                <button
+                                    type="button"
+                                    class="px-3 py-2 text-sm font-semibold transition"
+                                    :class="viewMode === 'cards' ? 'bg-sky-500 text-white' : 'hover:bg-current/5'"
+                                    @click="viewMode = 'cards'"
+                                >
+                                    Cartões
+                                </button>
+                                <button
+                                    type="button"
+                                    class="border-l border-current/15 px-3 py-2 text-sm font-semibold transition"
+                                    :class="viewMode === 'list' ? 'bg-sky-500 text-white' : 'hover:bg-current/5'"
+                                    @click="viewMode = 'list'"
+                                >
+                                    Lista
+                                </button>
+                            </div>
                         </div>
                     </div>
 
-                    <div class="mt-5 flex flex-wrap gap-2 border-t border-current/10 pt-5" role="tablist" aria-label="TPAs do evento">
-                        <button
-                            type="button"
-                            class="rounded-xl px-4 py-2 text-sm font-semibold transition"
-                            :class="activeTab === 'catalog' ? 'bg-sky-500 text-white shadow-sm' : 'bg-current/[0.04] text-current/70 hover:bg-current/[0.08]'"
-                            :aria-selected="activeTab === 'catalog'"
-                            role="tab"
-                            @click="activeTab = 'catalog'"
-                        >
-                            Catálogo
-                            <span class="ml-1 opacity-75">{{ licenseMachines.length }}</span>
-                        </button>
-                        <button
-                            type="button"
-                            class="rounded-xl px-4 py-2 text-sm font-semibold transition"
-                            :class="activeTab === 'selected' ? 'bg-sky-500 text-white shadow-sm' : 'bg-current/[0.04] text-current/70 hover:bg-current/[0.08]'"
-                            :aria-selected="activeTab === 'selected'"
-                            role="tab"
-                            @click="activeTab = 'selected'"
-                        >
-                            TPAs do evento
-                            <span class="ml-1 opacity-75">{{ selectedCount }}</span>
-                        </button>
-                    </div>
-
-                    <p class="dash-recent-subtitle mt-4">
+                    <p class="dash-recent-subtitle mt-5 border-t border-current/10 pt-5">
                         {{ filteredMachines.length }} resultado{{ filteredMachines.length === 1 ? '' : 's' }} apresentado{{ filteredMachines.length === 1 ? '' : 's' }}
                         <template v-if="search.trim() !== ''"> para “{{ search.trim() }}”</template>.
                     </p>
                 </section>
 
                 <section v-if="!filteredMachines.length" class="event-dashboard-empty">
-                    <template v-if="activeTab === 'selected' && search.trim() === ''">
-                        Ainda não existem TPAs selecionados para este evento.
-                    </template>
-                    <template v-else-if="search.trim() !== ''">
+                    <template v-if="search.trim() !== ''">
                         Não foram encontrados TPAs para esta pesquisa.
                     </template>
                     <template v-else>
