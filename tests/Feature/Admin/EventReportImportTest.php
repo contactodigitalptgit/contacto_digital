@@ -487,6 +487,105 @@ class EventReportImportTest extends TestCase
         Http::assertSentCount(2);
     }
 
+    public function test_admin_can_check_event_tpa_session_status(): void
+    {
+        [$admin, $client] = $this->makeAdminClientContext();
+        $event = $this->makeEvent($client);
+        $application = $this->makeApplication();
+        $machine = ClientZoneSoftMachine::create([
+            'client_id' => $client->id,
+            'event_id' => $event->id,
+            'zonesoft_application_id' => $application->id,
+            'zs_client_id' => 'SESSION-STATUS-CLIENT',
+            'license' => 'SESSION-LICENSE',
+            'store_id' => 151,
+            'store_label' => 'Bar Central',
+            'permissions' => 'API + All document interfaces',
+            'is_active' => true,
+        ]);
+
+        Http::fake([
+            'https://api.zonesoft.org/v3/salessessions/getOpenSaleSessionInstance' => function ($request) {
+                $this->assertSame(151, $request->data()['salessession']['caixa'] ?? null);
+                $this->assertSame('2026-06-20', $request->data()['salessession']['data'] ?? null);
+
+                return Http::response([
+                    'Response' => [
+                        'StatusCode' => 200,
+                        'StatusMessage' => 'OK',
+                        'Content' => [
+                            'salessession' => [[
+                                'caixa' => 151,
+                                'dataopen' => '2026-06-20 11:30:00',
+                                'dataclose' => null,
+                                'opencx' => 'Operador API',
+                                'closecx' => null,
+                                'idcx' => 3456,
+                                'empid' => 22,
+                            ]],
+                        ],
+                    ],
+                ]);
+            },
+        ]);
+
+        $this
+            ->actingAs($admin)
+            ->post(route('admin.events.tpas.session-status', [$event, $machine]))
+            ->assertOk()
+            ->assertJson([
+                'status' => 'open',
+                'label' => 'Aberta',
+                'message' => 'Existe uma sessão aberta para este TPA.',
+                'session' => [
+                    'cash_register' => 151,
+                    'opened_by' => 'Operador API',
+                    'session_id' => 3456,
+                    'employee_id' => 22,
+                ],
+            ]);
+    }
+
+    public function test_admin_can_start_sales_sync_from_event_tpa_panel(): void
+    {
+        [$admin, $client] = $this->makeAdminClientContext();
+        $event = $this->makeEvent($client);
+        $application = $this->makeApplication();
+        $machine = ClientZoneSoftMachine::create([
+            'client_id' => $client->id,
+            'event_id' => $event->id,
+            'zonesoft_application_id' => $application->id,
+            'zs_client_id' => 'SYNC-TPA-CLIENT',
+            'license' => 'SYNC-LICENSE',
+            'store_id' => 152,
+            'store_label' => 'Bar Expo',
+            'permissions' => 'API + All document interfaces',
+            'is_active' => true,
+        ]);
+
+        $this->mock(EventReportSyncService::class, function ($mock) use ($event, $admin): void {
+            $mock->shouldReceive('sync')
+                ->once()
+                ->withArgs(fn (Event $receivedEvent, User $receivedUser): bool => $receivedEvent->is($event) && $receivedUser->is($admin))
+                ->andReturn(new EventReportImport([
+                    'event_id' => $event->id,
+                    'uploaded_by_user_id' => $admin->id,
+                    'status' => 'completed',
+                ]));
+        });
+
+        $this
+            ->actingAs($admin)
+            ->post(route('admin.events.tpas.sync-sales', [$event, $machine]), [
+                'redirect_to' => route('admin.events.tpas.manage', $event, absolute: false),
+            ])
+            ->assertOk()
+            ->assertJson([
+                'message' => 'Sincronização das vendas iniciada para o evento a partir do TPA Bar Expo.',
+                'redirect_to' => route('admin.events.tpas.manage', $event, absolute: false),
+            ]);
+    }
+
     public function test_admin_can_sync_event_report_from_zonesoft_api(): void
     {
         [$admin, $client] = $this->makeAdminClientContext();

@@ -2,7 +2,8 @@
 import AppSidebarIcon from '@/Components/AppSidebarIcon.vue';
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout.vue';
 import { showErrorToast, showSuccessToast } from '@/lib/swal';
-import { Head, Link, useForm } from '@inertiajs/vue3';
+import axios from 'axios';
+import { Head, Link, router, useForm } from '@inertiajs/vue3';
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 
 interface EventData {
@@ -22,10 +23,26 @@ interface MachineItem {
     store_id: number;
     store_label: string | null;
     license: string | null;
+    permissions: string | null;
     is_active: boolean;
     last_validated_at: string | null;
     last_error: string | null;
     is_selected: boolean;
+}
+
+interface MachineSessionStatus {
+    status: 'open' | 'closed' | 'unknown';
+    label: string;
+    message: string;
+    session: {
+        cash_register: number;
+        opened_at: string | null;
+        closed_at: string | null;
+        opened_by: string | null;
+        closed_by: string | null;
+        session_id: number | string | null;
+        employee_id: number | string | null;
+    } | null;
 }
 
 const props = defineProps<{
@@ -53,6 +70,11 @@ const search = ref('');
 const pickerOpen = ref(false);
 const pickerSearch = ref('');
 const pickerContainer = ref<HTMLElement | null>(null);
+const detailMachine = ref<MachineItem | null>(null);
+const detailOpen = ref(false);
+const sessionStatus = ref<MachineSessionStatus | null>(null);
+const loadingSessionStatus = ref(false);
+const syncingSales = ref(false);
 const form = useForm({ machine_ids: selectedMachineIds.value });
 
 const licenseMachines = computed(() => props.machines.filter(
@@ -91,6 +113,13 @@ const allSelected = computed(() => (
     filteredMachines.value.length > 0
     && filteredMachines.value.every((machine) => selectedMachineIds.value.includes(machine.id))
 ));
+const selectedMachines = computed(() => licenseMachines.value.filter(
+    (machine) => selectedMachineIds.value.includes(machine.id),
+));
+const selectedMachineSummary = computed(() => selectedMachines.value.map((machine) => ({
+    ...machine,
+    title: machine.store_label || `Store ${machine.store_id}`,
+})));
 
 const formatDateTime = (date: string | null) => date
     ? new Intl.DateTimeFormat('pt-PT', {
@@ -98,6 +127,12 @@ const formatDateTime = (date: string | null) => date
         timeStyle: 'short',
     }).format(new Date(date))
     : 'Ainda não validado';
+const formatShortDateTime = (date: string | null) => date
+    ? new Intl.DateTimeFormat('pt-PT', {
+        dateStyle: 'short',
+        timeStyle: 'short',
+    }).format(new Date(date))
+    : 'Sem registo';
 
 const changeLicense = () => {
     selectedMachineIds.value = props.machines
@@ -129,6 +164,76 @@ const togglePicker = () => {
 
 const toggleMachineFromPicker = (machineId: number) => {
     toggleMachine(machineId);
+};
+
+const getCurrentPageUrl = () => (
+    typeof window === 'undefined'
+        ? route('admin.events.tpas.manage', props.event.id)
+        : `${window.location.pathname}${window.location.search}`
+);
+
+const openMachineDetail = async (machine: MachineItem) => {
+    detailMachine.value = machine;
+    detailOpen.value = true;
+    sessionStatus.value = null;
+    loadingSessionStatus.value = true;
+
+    try {
+        const response = await axios.post(
+            route('admin.events.tpas.session-status', [props.event.id, machine.id]),
+        );
+        sessionStatus.value = response.data as MachineSessionStatus;
+    } catch (error: unknown) {
+        const responseMessage = axios.isAxiosError(error)
+            ? error.response?.data?.message as string | undefined
+            : undefined;
+
+        sessionStatus.value = {
+            status: 'unknown',
+            label: 'Indisponível',
+            message: responseMessage ?? 'Não foi possível consultar o estado da sessão deste TPA.',
+            session: null,
+        };
+    } finally {
+        loadingSessionStatus.value = false;
+    }
+};
+
+const closeMachineDetail = () => {
+    detailOpen.value = false;
+    detailMachine.value = null;
+    sessionStatus.value = null;
+    loadingSessionStatus.value = false;
+    syncingSales.value = false;
+};
+
+const syncMachineSales = async () => {
+    if (!detailMachine.value || syncingSales.value) {
+        return;
+    }
+
+    syncingSales.value = true;
+
+    try {
+        const response = await axios.post(
+            route('admin.events.tpas.sync-sales', [props.event.id, detailMachine.value.id]),
+            { redirect_to: getCurrentPageUrl() },
+        );
+        const message = response.data?.message as string | undefined;
+
+        void showSuccessToast(message ?? 'Sincronização iniciada. O dashboard vai atualizar automaticamente.');
+        router.reload({
+            only: ['machines'],
+        });
+    } catch (error: unknown) {
+        const responseMessage = axios.isAxiosError(error)
+            ? error.response?.data?.message as string | undefined
+            : undefined;
+
+        void showErrorToast(responseMessage ?? 'Não foi possível iniciar a sincronização das vendas.');
+    } finally {
+        syncingSales.value = false;
+    }
 };
 
 const handlePointerDown = (event: MouseEvent) => {
@@ -362,6 +467,35 @@ const saveSelection = () => {
                     </p>
                 </section>
 
+                <section v-if="selectedMachineSummary.length" class="dash-card">
+                    <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                        <div>
+                            <h3 class="text-base font-semibold text-current">TPAs vinculados ao evento</h3>
+                            <p class="dash-recent-subtitle mt-1">
+                                Clique num TPA para abrir o painel lateral com o estado da sessão e a sincronização das vendas.
+                            </p>
+                        </div>
+                        <span class="rounded-full bg-current/5 px-3 py-1 text-xs font-semibold uppercase tracking-[0.16em] text-current/60">
+                            {{ selectedMachineSummary.length }} vinculado{{ selectedMachineSummary.length === 1 ? '' : 's' }}
+                        </span>
+                    </div>
+
+                    <div class="mt-4 flex flex-wrap gap-3">
+                        <button
+                            v-for="machine in selectedMachineSummary"
+                            :key="`selected-${machine.id}`"
+                            type="button"
+                            class="rounded-2xl border border-current/10 bg-white/[0.03] px-4 py-3 text-left transition hover:border-sky-400/45 hover:bg-sky-500/5"
+                            @click="openMachineDetail(machine)"
+                        >
+                            <p class="text-sm font-semibold text-current">{{ machine.title }}</p>
+                            <p class="mt-1 text-xs text-current/55">
+                                Store {{ machine.store_id }} · {{ machine.zs_client_id }}
+                            </p>
+                        </button>
+                    </div>
+                </section>
+
                 <section v-if="!filteredMachines.length" class="event-dashboard-empty">
                     <template v-if="search.trim() !== ''">
                         Não foram encontrados TPAs para esta pesquisa.
@@ -423,6 +557,15 @@ const saveSelection = () => {
                                 <dd class="mt-1 font-medium text-current">{{ formatDateTime(machine.last_validated_at) }}</dd>
                             </div>
                         </dl>
+
+                        <button
+                            v-if="selectedMachineIds.includes(machine.id)"
+                            type="button"
+                            class="mt-5 inline-flex items-center gap-2 text-sm font-semibold text-sky-200 transition hover:text-sky-100"
+                            @click="openMachineDetail(machine)"
+                        >
+                            Ver painel do TPA
+                        </button>
                     </article>
                 </section>
 
@@ -436,6 +579,7 @@ const saveSelection = () => {
                                 <th>Client ID</th>
                                 <th>Estado</th>
                                 <th>Última validação</th>
+                                <th>Ações</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -458,11 +602,127 @@ const saveSelection = () => {
                                     </span>
                                 </td>
                                 <td class="admin-clients-text">{{ formatDateTime(machine.last_validated_at) }}</td>
+                                <td class="admin-clients-text">
+                                    <button
+                                        v-if="selectedMachineIds.includes(machine.id)"
+                                        type="button"
+                                        class="text-sm font-semibold text-sky-200 transition hover:text-sky-100"
+                                        @click="openMachineDetail(machine)"
+                                    >
+                                        Abrir painel
+                                    </button>
+                                </td>
                             </tr>
                         </tbody>
                     </table>
                 </section>
             </template>
+        </div>
+
+        <div v-if="detailOpen && detailMachine" class="fixed inset-0 z-50 flex justify-end bg-slate-950/55 backdrop-blur-sm" @click.self="closeMachineDetail">
+            <aside class="flex h-full w-full max-w-2xl flex-col overflow-hidden border-l border-white/10 bg-slate-950 shadow-2xl shadow-slate-950/40">
+                <header class="flex items-start justify-between gap-4 border-b border-white/10 px-6 py-6">
+                    <div>
+                        <p class="text-xs font-semibold uppercase tracking-[0.22em] text-sky-300/80">TPA do evento</p>
+                        <h3 class="mt-2 text-2xl font-semibold text-white">
+                            {{ detailMachine.store_label || `Store ${detailMachine.store_id}` }}
+                        </h3>
+                        <p class="mt-2 text-sm text-slate-300">
+                            Store {{ detailMachine.store_id }} · {{ detailMachine.zs_client_id }}
+                        </p>
+                    </div>
+
+                    <button
+                        type="button"
+                        class="flex h-11 w-11 items-center justify-center rounded-full bg-white/6 text-2xl text-slate-200 transition hover:bg-white/12"
+                        aria-label="Fechar detalhe"
+                        @click="closeMachineDetail"
+                    >
+                        ×
+                    </button>
+                </header>
+
+                <div class="flex-1 space-y-6 overflow-y-auto px-6 py-6">
+                    <section class="grid gap-4 md:grid-cols-2">
+                        <article class="rounded-2xl border border-white/10 bg-white/[0.03] p-5">
+                            <p class="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Estado do TPA</p>
+                            <div class="mt-4 flex items-center gap-3">
+                                <span class="status-pill" :class="detailMachine.is_active ? 'success' : 'neutral'">
+                                    {{ detailMachine.is_active ? 'Ativo' : 'Inativo' }}
+                                </span>
+                                <span class="text-sm text-slate-300">{{ detailMachine.permissions || 'Sem permissões registadas' }}</span>
+                            </div>
+                            <p class="mt-4 text-sm text-slate-400">
+                                Última validação: {{ formatDateTime(detailMachine.last_validated_at) }}
+                            </p>
+                            <p v-if="detailMachine.last_error" class="mt-3 text-sm text-amber-300">
+                                {{ detailMachine.last_error }}
+                            </p>
+                        </article>
+
+                        <article class="rounded-2xl border border-white/10 bg-white/[0.03] p-5">
+                            <p class="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Sessão ZoneSoft</p>
+                            <div v-if="loadingSessionStatus" class="mt-4 text-sm text-slate-300">
+                                A consultar estado da sessão...
+                            </div>
+                            <template v-else-if="sessionStatus">
+                                <div class="mt-4 flex items-center gap-3">
+                                    <span
+                                        class="rounded-full px-3 py-1 text-sm font-semibold"
+                                        :class="sessionStatus.status === 'open'
+                                            ? 'bg-emerald-500/15 text-emerald-200'
+                                            : sessionStatus.status === 'closed'
+                                                ? 'bg-slate-700 text-slate-200'
+                                                : 'bg-amber-500/15 text-amber-200'"
+                                    >
+                                        {{ sessionStatus.label }}
+                                    </span>
+                                </div>
+                                <p class="mt-4 text-sm text-slate-300">{{ sessionStatus.message }}</p>
+                                <dl v-if="sessionStatus.session" class="mt-4 space-y-3 text-sm">
+                                    <div class="flex items-center justify-between gap-4">
+                                        <dt class="text-slate-400">Caixa</dt>
+                                        <dd class="font-medium text-white">{{ sessionStatus.session.cash_register }}</dd>
+                                    </div>
+                                    <div class="flex items-center justify-between gap-4">
+                                        <dt class="text-slate-400">Aberta em</dt>
+                                        <dd class="font-medium text-white">{{ formatShortDateTime(sessionStatus.session.opened_at) }}</dd>
+                                    </div>
+                                    <div class="flex items-center justify-between gap-4">
+                                        <dt class="text-slate-400">Aberta por</dt>
+                                        <dd class="font-medium text-white">{{ sessionStatus.session.opened_by || 'Sem operador' }}</dd>
+                                    </div>
+                                    <div v-if="sessionStatus.session.session_id !== null" class="flex items-center justify-between gap-4">
+                                        <dt class="text-slate-400">ID sessão</dt>
+                                        <dd class="font-medium text-white">{{ sessionStatus.session.session_id }}</dd>
+                                    </div>
+                                </dl>
+                            </template>
+                        </article>
+                    </section>
+
+                    <section class="rounded-2xl border border-white/10 bg-white/[0.03] p-5">
+                        <div class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                            <div>
+                                <p class="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Vendas</p>
+                                <h4 class="mt-2 text-lg font-semibold text-white">Sincronização do evento</h4>
+                                <p class="mt-2 text-sm text-slate-300">
+                                    Inicia a sincronização das vendas do evento usando a configuração ativa desta licença.
+                                </p>
+                            </div>
+
+                            <button
+                                type="button"
+                                class="rounded-xl border border-sky-400/20 bg-sky-500/10 px-5 py-3 text-sm font-semibold text-sky-100 transition hover:bg-sky-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+                                :disabled="syncingSales"
+                                @click="syncMachineSales"
+                            >
+                                {{ syncingSales ? 'A sincronizar...' : 'Sincronizar vendas' }}
+                            </button>
+                        </div>
+                    </section>
+                </div>
+            </aside>
         </div>
     </AuthenticatedLayout>
 </template>

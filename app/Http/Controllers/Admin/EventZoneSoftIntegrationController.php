@@ -3,11 +3,15 @@
 namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Jobs\SyncEventReportJob;
 use App\Models\ClientZoneSoftMachine;
 use App\Models\Event;
 use App\Models\ZoneSoftApplication;
+use App\Services\EventReportSyncService;
+use App\Services\ZoneSoft\ZoneSoftApiClient;
 use App\Services\ZoneSoft\ZoneSoftApiException;
 use App\Services\ZoneSoft\ZoneSoftDiscoveryService;
+use Carbon\CarbonImmutable;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -79,6 +83,108 @@ class EventZoneSoftIntegrationController extends Controller
         $event->zonesoftMachines()->sync($validMachineIds->all());
 
         return to_route('admin.events.tpas.manage', $event);
+    }
+
+    public function sessionStatus(
+        Event $event,
+        ClientZoneSoftMachine $machine,
+        ZoneSoftApiClient $apiClient,
+    ): JsonResponse {
+        $machine = $this->resolveEventMachine($event, $machine);
+        $machine->loadMissing('application');
+
+        if (! $machine->application || ! $machine->application->is_active || ! $machine->application->hasReadableSecret()) {
+            return response()->json([
+                'status' => 'unknown',
+                'label' => 'Indisponível',
+                'message' => 'A aplicação ZoneSoft deste TPA não está disponível.',
+                'session' => null,
+            ], 422);
+        }
+
+        try {
+            $response = $apiClient->post(
+                $machine->application,
+                $machine->zs_client_id,
+                'salessessions',
+                'getOpenSaleSessionInstance',
+                'salessession',
+                [
+                    'caixa' => $machine->store_id,
+                    'data' => $event->event_date->toDateString(),
+                ],
+                requestTimeoutSeconds: 12,
+                requestRetryAttempts: 1,
+            );
+        } catch (ZoneSoftApiException $exception) {
+            return response()->json([
+                'status' => 'unknown',
+                'label' => 'Indisponível',
+                'message' => $exception->getMessage(),
+                'session' => null,
+            ], $exception->statusCode() ?: 422);
+        }
+
+        $session = $this->extractSaleSession($response);
+
+        if ($session === null) {
+            return response()->json([
+                'status' => 'closed',
+                'label' => 'Fechada',
+                'message' => 'Nenhuma sessão aberta encontrada para este TPA na data do evento.',
+                'session' => null,
+            ]);
+        }
+
+        return response()->json([
+            'status' => 'open',
+            'label' => 'Aberta',
+            'message' => 'Existe uma sessão aberta para este TPA.',
+            'session' => [
+                'cash_register' => (int) ($session['caixa'] ?? $machine->store_id),
+                'opened_at' => $this->toIsoString($session['dataopen'] ?? null),
+                'closed_at' => $this->toIsoString($session['dataclose'] ?? null),
+                'opened_by' => $session['opencx'] ?? null,
+                'closed_by' => $session['closecx'] ?? null,
+                'session_id' => $session['idcx'] ?? null,
+                'employee_id' => $session['empid'] ?? null,
+            ],
+        ]);
+    }
+
+    public function syncSales(
+        Request $request,
+        Event $event,
+        ClientZoneSoftMachine $machine,
+        EventReportSyncService $syncService,
+    ): JsonResponse {
+        $machine = $this->resolveEventMachine($event, $machine);
+        $validated = $request->validate([
+            'redirect_to' => ['nullable', 'string', 'max:2048'],
+        ]);
+
+        if (app()->runningUnitTests() || app()->isLocal()) {
+            $syncService->sync($event, $request->user());
+
+            return response()->json([
+                'message' => sprintf(
+                    'Sincronização das vendas iniciada para o evento a partir do TPA %s.',
+                    $machine->store_label ?: 'Store '.$machine->store_id,
+                ),
+                'redirect_to' => $validated['redirect_to'] ?? null,
+            ]);
+        }
+
+        $syncLog = $syncService->start($event, $request->user());
+        SyncEventReportJob::dispatch($syncLog->id, $event->id);
+
+        return response()->json([
+            'message' => sprintf(
+                'Sincronização das vendas iniciada para o evento a partir do TPA %s.',
+                $machine->store_label ?: 'Store '.$machine->store_id,
+            ),
+            'redirect_to' => $validated['redirect_to'] ?? null,
+        ]);
     }
 
     public function saveApplication(Request $request, Event $event): RedirectResponse
@@ -362,6 +468,55 @@ class EventZoneSoftIntegrationController extends Controller
         return $application;
     }
 
+    private function resolveEventMachine(Event $event, ClientZoneSoftMachine $machine): ClientZoneSoftMachine
+    {
+        abort_unless(
+            $machine->client_id === $event->client_id
+            && $event->zonesoftMachines()->whereKey($machine->id)->exists(),
+            404,
+        );
+
+        return $machine;
+    }
+
+    /**
+     * @param  array<string, mixed>  $payload
+     * @return array<string, mixed>|null
+     */
+    private function extractSaleSession(array $payload): ?array
+    {
+        $session = $payload['salessession'] ?? $payload['saleSession'] ?? $payload['session'] ?? null;
+
+        if (is_array($session) && array_is_list($session)) {
+            $session = $session[0] ?? null;
+        }
+
+        if (is_array($session)) {
+            return $session;
+        }
+
+        if (array_is_list($payload)) {
+            $first = $payload[0] ?? null;
+
+            return is_array($first) ? $first : null;
+        }
+
+        return isset($payload['caixa']) || isset($payload['dataopen']) ? $payload : null;
+    }
+
+    private function toIsoString(mixed $value): ?string
+    {
+        if (! is_string($value) || trim($value) === '') {
+            return null;
+        }
+
+        try {
+            return CarbonImmutable::parse($value)->toIso8601String();
+        } catch (Throwable) {
+            return null;
+        }
+    }
+
     private function renderTpaManager(Event $event): Response
     {
         $event->load('client');
@@ -387,6 +542,7 @@ class EventZoneSoftIntegrationController extends Controller
                     'store_id' => $machine->store_id,
                     'store_label' => $machine->store_label,
                     'license' => $machine->license,
+                    'permissions' => $machine->permissions,
                     'is_active' => $machine->is_active,
                     'last_validated_at' => $machine->last_validated_at?->toISOString(),
                     'last_error' => $machine->last_error,

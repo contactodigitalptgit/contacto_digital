@@ -97,6 +97,10 @@ Route::middleware(['auth', 'active.client', 'admin'])
             ->name('events.tpas.manage');
         Route::put('events/{event}/gerir-tpa', [EventZoneSoftIntegrationController::class, 'syncMachines'])
             ->name('events.tpas.sync');
+        Route::post('events/{event}/gerir-tpa/{machine}/session-status', [EventZoneSoftIntegrationController::class, 'sessionStatus'])
+            ->name('events.tpas.session-status');
+        Route::post('events/{event}/gerir-tpa/{machine}/sync-sales', [EventZoneSoftIntegrationController::class, 'syncSales'])
+            ->name('events.tpas.sync-sales');
         Route::post('events/{event}/reports', [EventController::class, 'storeReport'])
             ->name('events.reports.store');
         Route::get('events/{event}/integrations', [EventZoneSoftIntegrationController::class, 'show'])
