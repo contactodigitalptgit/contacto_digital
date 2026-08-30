@@ -92,6 +92,12 @@ class EventController extends Controller
                                 'error' => is_string($latestImportSummary['error'] ?? null)
                                     ? $latestImportSummary['error']
                                     : null,
+                                'failed_machines' => $this->normalizeMachineIssues(
+                                    $latestImportSummary['failed_machines'] ?? [],
+                                ),
+                                'machine_warnings' => $this->normalizeMachineIssues(
+                                    $latestImportSummary['machine_warnings'] ?? [],
+                                ),
                             ] : null,
                         ];
                     });
@@ -100,6 +106,41 @@ class EventController extends Controller
                 ->orderBy('name')
                 ->get(['id', 'name', 'business_name']),
         ]);
+    }
+
+    /**
+     * @param  mixed  $issues
+     * @return list<array{machine_id:int,store_id:int,store_label:?string,zs_client_id:string,message:string}>
+     */
+    private function normalizeMachineIssues(mixed $issues): array
+    {
+        if (! is_array($issues)) {
+            return [];
+        }
+
+        return array_values(array_filter(array_map(function (mixed $issue): ?array {
+            if (! is_array($issue)) {
+                return null;
+            }
+
+            $machineId = isset($issue['machine_id']) ? (int) $issue['machine_id'] : 0;
+            $storeId = isset($issue['store_id']) ? (int) $issue['store_id'] : 0;
+            $zsClientId = trim((string) ($issue['zs_client_id'] ?? ''));
+            $message = trim((string) ($issue['message'] ?? ''));
+            $storeLabel = isset($issue['store_label']) ? trim((string) $issue['store_label']) : '';
+
+            if ($machineId <= 0 || $storeId <= 0 || $zsClientId === '' || $message === '') {
+                return null;
+            }
+
+            return [
+                'machine_id' => $machineId,
+                'store_id' => $storeId,
+                'store_label' => $storeLabel !== '' ? $storeLabel : null,
+                'zs_client_id' => $zsClientId,
+                'message' => $message,
+            ];
+        }, $issues)));
     }
 
     public function create(): Response

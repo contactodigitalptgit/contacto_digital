@@ -5,6 +5,7 @@ namespace Tests\Feature\Admin;
 use App\Models\Client;
 use App\Models\ClientZoneSoftMachine;
 use App\Models\Event;
+use App\Models\EventReportImport;
 use App\Models\User;
 use App\Models\ZoneSoftApplication;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -201,6 +202,90 @@ class AdminManagementTest extends TestCase
                 ->component('Admin/Events/Index')
                 ->where('events.0.id', $event->id)
                 ->where('events.0.available_machine_count', 1));
+    }
+
+    public function test_admin_events_index_exposes_failed_machine_details_for_sync_errors(): void
+    {
+        $admin = User::factory()->create([
+            'role' => 'admin',
+        ]);
+
+        $clientUser = User::factory()->create([
+            'role' => 'client',
+        ]);
+
+        $client = Client::create([
+            'user_id' => $clientUser->id,
+            'name' => 'Cliente Sync',
+            'business_name' => null,
+            'address' => 'Rua Sync',
+            'phone' => '+351 921111111',
+            'is_active' => true,
+        ]);
+
+        $event = Event::create([
+            'client_id' => $client->id,
+            'title' => 'Evento Sync',
+            'event_date' => now()->addDay(),
+            'report_ends_at' => now()->addDays(2),
+            'is_active' => true,
+        ]);
+
+        EventReportImport::create([
+            'event_id' => $event->id,
+            'uploaded_by_user_id' => $admin->id,
+            'import_strategy' => 'replace',
+            'original_filename' => 'zonesoft-api',
+            'stored_path' => 'zonesoft://sync',
+            'mime_type' => 'application/json',
+            'file_hash' => hash('sha256', 'admin-events-failed-sync-'.$event->id),
+            'headers' => ['source' => 'zonesoft_api'],
+            'summary' => [
+                'source' => 'zonesoft_api',
+                'error' => 'A sincronizacao nao foi publicada porque ficou incompleta: 2 maquina(s) falharam e 1 maquina(s) tiveram documentos com erro. Falharam: Bar A (Store 101), Bar B (Store 102). Documentos com erro: VIP C (Store 103)',
+                'failed_machines' => [
+                    [
+                        'machine_id' => 11,
+                        'store_id' => 101,
+                        'store_label' => 'Bar A',
+                        'zs_client_id' => 'CLIENT-101',
+                        'message' => 'Unauthorized',
+                    ],
+                    [
+                        'machine_id' => 12,
+                        'store_id' => 102,
+                        'store_label' => 'Bar B',
+                        'zs_client_id' => 'CLIENT-102',
+                        'message' => 'Timeout',
+                    ],
+                ],
+                'machine_warnings' => [
+                    [
+                        'machine_id' => 13,
+                        'store_id' => 103,
+                        'store_label' => 'VIP C',
+                        'zs_client_id' => 'CLIENT-103',
+                        'message' => 'Falha parcial em 1 documento(s). Primeiro erro: FS / A2026 / 502: Unauthorized',
+                    ],
+                ],
+            ],
+            'imported_rows_count' => 0,
+            'is_active' => false,
+            'status' => 'failed',
+        ]);
+
+        $this
+            ->actingAs($admin)
+            ->get(route('admin.events.index'))
+            ->assertOk()
+            ->assertInertia(fn (AssertableInertia $page) => $page
+                ->component('Admin/Events/Index')
+                ->where('events.0.id', $event->id)
+                ->where('events.0.report_summary.status', 'failed')
+                ->where('events.0.report_summary.failed_machines.0.store_label', 'Bar A')
+                ->where('events.0.report_summary.failed_machines.1.message', 'Timeout')
+                ->where('events.0.report_summary.machine_warnings.0.store_id', 103)
+                ->where('events.0.report_summary.machine_warnings.0.zs_client_id', 'CLIENT-103'));
     }
 
     public function test_admin_client_dashboard_redirects_to_latest_active_event(): void

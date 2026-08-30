@@ -11,6 +11,14 @@ interface ClientOption {
     business_name: string | null;
 }
 
+interface EventMachineIssue {
+    machine_id: number;
+    store_id: number;
+    store_label: string | null;
+    zs_client_id: string;
+    message: string;
+}
+
 interface EventReportSummary {
     active_syncs_count: number;
     active_rows_count: number;
@@ -20,6 +28,8 @@ interface EventReportSummary {
     status: 'processing' | 'completed' | 'failed' | null;
     started_at: string | null;
     error: string | null;
+    failed_machines: EventMachineIssue[];
+    machine_warnings: EventMachineIssue[];
 }
 
 interface EventItem {
@@ -123,6 +133,18 @@ const formatMoney = (value: number) =>
         style: 'currency',
         currency: 'EUR',
     }).format(value);
+
+const hasSyncIssues = (summary: EventReportSummary | null): summary is EventReportSummary =>
+    summary !== null
+    && (summary.failed_machines.length > 0 || summary.machine_warnings.length > 0);
+
+const formatMachineIssueTitle = (issue: EventMachineIssue) =>
+    issue.store_label?.trim() ? `${issue.store_label} (Store ${issue.store_id})` : `Store ${issue.store_id}`;
+
+const previewMachineIssues = (issues: EventMachineIssue[], limit = 3) => issues.slice(0, limit);
+
+const remainingMachineIssues = (issues: EventMachineIssue[], limit = 3) =>
+    Math.max(issues.length - limit, 0);
 
 const openCreateEventModal = () => {
     createEventForm.reset();
@@ -358,6 +380,49 @@ const deleteEvent = async (event: EventItem) => {
                                 >
                                     {{ event.report_summary.error }}
                                 </p>
+                                <div
+                                    v-if="event.report_summary?.status === 'failed' && hasSyncIssues(event.report_summary)"
+                                    class="mt-2 space-y-2 text-sm text-amber-200"
+                                >
+                                    <div v-if="event.report_summary.failed_machines.length > 0">
+                                        <p class="font-semibold text-amber-100">
+                                            Maquinas com falha
+                                        </p>
+                                        <ul class="mt-1 space-y-1">
+                                            <li
+                                                v-for="issue in previewMachineIssues(event.report_summary.failed_machines, 2)"
+                                                :key="`mobile-failed-${event.id}-${issue.machine_id}`"
+                                            >
+                                                <strong>{{ formatMachineIssueTitle(issue) }}</strong>: {{ issue.message }}
+                                            </li>
+                                        </ul>
+                                        <p
+                                            v-if="remainingMachineIssues(event.report_summary.failed_machines, 2) > 0"
+                                            class="mt-1 text-xs text-amber-300"
+                                        >
+                                            +{{ remainingMachineIssues(event.report_summary.failed_machines, 2) }} maquina(s) com falha.
+                                        </p>
+                                    </div>
+                                    <div v-if="event.report_summary.machine_warnings.length > 0">
+                                        <p class="font-semibold text-amber-100">
+                                            Documentos com erro
+                                        </p>
+                                        <ul class="mt-1 space-y-1">
+                                            <li
+                                                v-for="issue in previewMachineIssues(event.report_summary.machine_warnings, 2)"
+                                                :key="`mobile-warning-${event.id}-${issue.machine_id}`"
+                                            >
+                                                <strong>{{ formatMachineIssueTitle(issue) }}</strong>: {{ issue.message }}
+                                            </li>
+                                        </ul>
+                                        <p
+                                            v-if="remainingMachineIssues(event.report_summary.machine_warnings, 2) > 0"
+                                            class="mt-1 text-xs text-amber-300"
+                                        >
+                                            +{{ remainingMachineIssues(event.report_summary.machine_warnings, 2) }} maquina(s) com documentos com erro.
+                                        </p>
+                                    </div>
+                                </div>
                                 <p
                                     v-if="!event.report_summary"
                                     class="admin-event-report-empty"
@@ -572,6 +637,49 @@ const deleteEvent = async (event: EventItem) => {
                                     >
                                         {{ event.report_summary.error }}
                                     </p>
+                                    <div
+                                        v-if="event.report_summary?.status === 'failed' && hasSyncIssues(event.report_summary)"
+                                        class="mt-2 space-y-2 text-sm text-amber-200"
+                                    >
+                                        <div v-if="event.report_summary.failed_machines.length > 0">
+                                            <p class="font-semibold text-amber-100">
+                                                Maquinas com falha
+                                            </p>
+                                            <ul class="mt-1 space-y-1">
+                                                <li
+                                                    v-for="issue in previewMachineIssues(event.report_summary.failed_machines)"
+                                                    :key="`desktop-failed-${event.id}-${issue.machine_id}`"
+                                                >
+                                                    <strong>{{ formatMachineIssueTitle(issue) }}</strong>: {{ issue.message }}
+                                                </li>
+                                            </ul>
+                                            <p
+                                                v-if="remainingMachineIssues(event.report_summary.failed_machines) > 0"
+                                                class="mt-1 text-xs text-amber-300"
+                                            >
+                                                +{{ remainingMachineIssues(event.report_summary.failed_machines) }} maquina(s) com falha.
+                                            </p>
+                                        </div>
+                                        <div v-if="event.report_summary.machine_warnings.length > 0">
+                                            <p class="font-semibold text-amber-100">
+                                                Documentos com erro
+                                            </p>
+                                            <ul class="mt-1 space-y-1">
+                                                <li
+                                                    v-for="issue in previewMachineIssues(event.report_summary.machine_warnings)"
+                                                    :key="`desktop-warning-${event.id}-${issue.machine_id}`"
+                                                >
+                                                    <strong>{{ formatMachineIssueTitle(issue) }}</strong>: {{ issue.message }}
+                                                </li>
+                                            </ul>
+                                            <p
+                                                v-if="remainingMachineIssues(event.report_summary.machine_warnings) > 0"
+                                                class="mt-1 text-xs text-amber-300"
+                                            >
+                                                +{{ remainingMachineIssues(event.report_summary.machine_warnings) }} maquina(s) com documentos com erro.
+                                            </p>
+                                        </div>
+                                    </div>
                                     <p
                                         v-if="!event.report_summary"
                                         class="admin-event-report-empty"
@@ -1199,6 +1307,39 @@ const deleteEvent = async (event: EventItem) => {
                     >
                         {{ selectedReportEvent.report_summary.error }}
                     </p>
+                    <div
+                        v-if="selectedReportEvent.report_summary.status === 'failed' && hasSyncIssues(selectedReportEvent.report_summary)"
+                        class="mt-3 space-y-3 text-sm text-amber-200"
+                    >
+                        <div v-if="selectedReportEvent.report_summary.failed_machines.length > 0">
+                            <p class="font-semibold text-amber-100">
+                                Maquinas com falha
+                            </p>
+                            <ul class="mt-1 space-y-1">
+                                <li
+                                    v-for="issue in selectedReportEvent.report_summary.failed_machines"
+                                    :key="`modal-failed-${selectedReportEvent.id}-${issue.machine_id}`"
+                                >
+                                    <strong>{{ formatMachineIssueTitle(issue) }}</strong>
+                                    <span class="text-slate-300"> · Client ID {{ issue.zs_client_id }}</span>: {{ issue.message }}
+                                </li>
+                            </ul>
+                        </div>
+                        <div v-if="selectedReportEvent.report_summary.machine_warnings.length > 0">
+                            <p class="font-semibold text-amber-100">
+                                Documentos com erro
+                            </p>
+                            <ul class="mt-1 space-y-1">
+                                <li
+                                    v-for="issue in selectedReportEvent.report_summary.machine_warnings"
+                                    :key="`modal-warning-${selectedReportEvent.id}-${issue.machine_id}`"
+                                >
+                                    <strong>{{ formatMachineIssueTitle(issue) }}</strong>
+                                    <span class="text-slate-300"> · Client ID {{ issue.zs_client_id }}</span>: {{ issue.message }}
+                                </li>
+                            </ul>
+                        </div>
+                    </div>
                 </div>
 
                 <div class="dash-modal-grid">

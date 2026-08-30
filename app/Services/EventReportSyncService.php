@@ -508,6 +508,7 @@ class EventReportSyncService
                     'machine_id' => $machine->id,
                     'zs_client_id' => $machine->zs_client_id,
                     'store_id' => $machine->store_id,
+                    'store_label' => $machine->store_label,
                     'message' => $warningMessage,
                 ];
             }
@@ -1627,8 +1628,8 @@ class EventReportSyncService
     }
 
     /**
-     * @param  list<array{machine_id:int,zs_client_id:string,store_id:int,message:string}>  $failedMachines
-     * @param  list<array{machine_id:int,zs_client_id:string,store_id:int,message:string}>  $machineWarnings
+     * @param  list<array{machine_id:int,zs_client_id:string,store_id:int,store_label:?string,message:string}>  $failedMachines
+     * @param  list<array{machine_id:int,zs_client_id:string,store_id:int,store_label:?string,message:string}>  $machineWarnings
      * @param  array{documents_count:int,api_requests_count:int,machine_duration_ms:int,machine_timings:list<array<string, int|string|null>>}  $metrics
      * @return array<string, mixed>
      */
@@ -1738,7 +1739,7 @@ class EventReportSyncService
     }
 
     /**
-     * @return array{machine_id:int,zs_client_id:string,store_id:int,message:string}
+     * @return array{machine_id:int,zs_client_id:string,store_id:int,store_label:?string,message:string}
      */
     private function persistMachineFailure(
         ClientZoneSoftMachine $machine,
@@ -1751,12 +1752,13 @@ class EventReportSyncService
             'machine_id' => $machine->id,
             'zs_client_id' => $machine->zs_client_id,
             'store_id' => $machine->store_id,
+            'store_label' => $machine->store_label,
             'message' => $message,
         ];
     }
 
     /**
-     * @param  list<array{machine_id:int,zs_client_id:string,store_id:int,message:string}>  $failedMachines
+     * @param  list<array{machine_id:int,zs_client_id:string,store_id:int,store_label:?string,message:string}>  $failedMachines
      */
     private function buildMachineFailureMessage(array $failedMachines): string
     {
@@ -1767,24 +1769,72 @@ class EventReportSyncService
         $machine = $failedMachines[0];
 
         return sprintf(
-            'Nenhum Client ID ativo conseguiu sincronizar. Verifique o Client ID %s (Store %d): %s',
+            'Nenhum Client ID ativo conseguiu sincronizar. Verifique %s (Client ID %s): %s',
+            $this->formatMachineSummary($machine),
             $machine['zs_client_id'],
-            $machine['store_id'],
             $machine['message'],
         );
     }
 
     /**
-     * @param  list<array{machine_id:int,zs_client_id:string,store_id:int,message:string}>  $failedMachines
-     * @param  list<array{machine_id:int,zs_client_id:string,store_id:int,message:string}>  $machineWarnings
+     * @param  list<array{machine_id:int,zs_client_id:string,store_id:int,store_label:?string,message:string}>  $failedMachines
+     * @param  list<array{machine_id:int,zs_client_id:string,store_id:int,store_label:?string,message:string}>  $machineWarnings
      */
     private function buildIncompleteSyncMessage(array $failedMachines, array $machineWarnings): string
     {
-        return sprintf(
+        $message = sprintf(
             'A sincronizacao nao foi publicada porque ficou incompleta: %d maquina(s) falharam e %d maquina(s) tiveram documentos com erro.',
             count($failedMachines),
             count($machineWarnings),
         );
+
+        $details = [];
+
+        if ($failedMachines !== []) {
+            $details[] = 'Falharam: '.$this->formatMachineListPreview($failedMachines);
+        }
+
+        if ($machineWarnings !== []) {
+            $details[] = 'Documentos com erro: '.$this->formatMachineListPreview($machineWarnings);
+        }
+
+        if ($details === []) {
+            return $message;
+        }
+
+        return $message.' '.implode(' ', $details);
+    }
+
+    /**
+     * @param  array{store_id:int,store_label:?string}  $machine
+     */
+    private function formatMachineSummary(array $machine): string
+    {
+        $storeLabel = trim((string) ($machine['store_label'] ?? ''));
+
+        if ($storeLabel !== '') {
+            return sprintf('%s (Store %d)', $storeLabel, $machine['store_id']);
+        }
+
+        return sprintf('Store %d', $machine['store_id']);
+    }
+
+    /**
+     * @param  list<array{store_id:int,store_label:?string}>  $machines
+     */
+    private function formatMachineListPreview(array $machines): string
+    {
+        $preview = array_slice(array_map(
+            fn (array $machine): string => $this->formatMachineSummary($machine),
+            $machines,
+        ), 0, 3);
+        $remaining = count($machines) - count($preview);
+
+        if ($remaining > 0) {
+            $preview[] = sprintf('+%d mais', $remaining);
+        }
+
+        return implode(', ', $preview);
     }
 
     private function ensureSyncIsProcessing(EventReportImport $syncLog): void

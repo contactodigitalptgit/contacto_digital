@@ -2188,12 +2188,16 @@ class EventReportImportTest extends TestCase
             'https://api.zonesoft.org/v3/salesday/getInstances' => $this->fakeSalesdayResponse(),
         ]);
 
-        $this
+        $response = $this
             ->actingAs($admin)
             ->from(route('admin.events.index'))
             ->post(route('admin.events.reports.store', $event))
             ->assertRedirect(route('admin.events.index'))
             ->assertSessionHasErrors('integration');
+
+        $response->assertSessionHasErrors([
+            'integration' => 'A sincronizacao nao foi publicada porque ficou incompleta: 0 maquina(s) falharam e 1 maquina(s) tiveram documentos com erro. Documentos com erro: Foodtruck (Store 1)',
+        ]);
 
         $import = EventReportImport::query()->latest('id')->firstOrFail();
 
@@ -2203,6 +2207,7 @@ class EventReportImportTest extends TestCase
         $this->assertSame(1, $import->summary['machines_count'] ?? null);
         $this->assertCount(0, $import->summary['failed_machines'] ?? []);
         $this->assertCount(1, $import->summary['machine_warnings'] ?? []);
+        $this->assertSame('Foodtruck', $import->summary['machine_warnings'][0]['store_label'] ?? null);
         $this->assertDatabaseMissing('event_report_rows', [
             'event_id' => $event->id,
             'event_report_import_id' => $import->id,
