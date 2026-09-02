@@ -1586,12 +1586,12 @@ class EventDashboardController extends Controller
     ): \Generator {
         if ($latestImport !== null) {
             $baseQuery = EventReportPaymentDocument::query()
-                ->where('event_report_import_id', $latestImport->id);
+                ->where('event_id', $latestImport->event_id);
 
             if ($baseQuery->exists()) {
                 $query = $this->applyPaymentDocumentFilters(
                     EventReportPaymentDocument::query()
-                        ->where('event_report_import_id', $latestImport->id),
+                        ->where('event_id', $latestImport->event_id),
                     $filters,
                 );
 

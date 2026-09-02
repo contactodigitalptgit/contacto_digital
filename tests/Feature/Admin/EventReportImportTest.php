@@ -993,14 +993,23 @@ class EventReportImportTest extends TestCase
                 'status' => 'completed',
             ]);
 
+            // event_report_rows/event_report_payment_documents are now the
+            // durable, current state of the event (PERF-101) — these rows
+            // represent what an earlier sync already wrote, matched by
+            // natural key exactly like a real upsert would compute it, so
+            // the incremental cycle below can update/reconcile them in
+            // place instead of copying them.
+            $unchangedRowId = null;
+
             foreach ([
                 ['100', '5.0000', '700', 'Documento alterado'],
                 ['101', '3.0000', '701', 'Documento inalterado'],
                 ['103', '2.0000', '703', 'Documento cancelado'],
             ] as $index => [$documentNumber, $total, $productCode, $description]) {
-                EventReportRow::create([
+                $row = EventReportRow::create([
                     'event_id' => $event->id,
                     'event_report_import_id' => $previousImport->id,
+                    'machine_id' => $machine->id,
                     'source_sheet' => 'zonesoft:'.$machine->zs_client_id,
                     'source_row_number' => $index + 1,
                     'store_code' => '1',
@@ -1010,6 +1019,7 @@ class EventReportImportTest extends TestCase
                     'doc_type' => 'FS',
                     'document_series' => 'A2026',
                     'document_number' => $documentNumber,
+                    'line_key' => 'id:'.$documentNumber,
                     'value' => $total,
                     'total' => $total,
                     'discount' => '0.0000',
@@ -1019,9 +1029,14 @@ class EventReportImportTest extends TestCase
                     'raw_row' => [
                         'machine_id' => $machine->id,
                         'machine_client_id' => $machine->zs_client_id,
-                        'id' => $index + 1,
+                        'id' => (int) $documentNumber,
                     ],
                 ]);
+
+                if ($documentNumber === '101') {
+                    $unchangedRowId = $row->id;
+                }
+
                 EventReportPaymentDocument::create([
                     'event_id' => $event->id,
                     'event_report_import_id' => $previousImport->id,
@@ -1040,9 +1055,13 @@ class EventReportImportTest extends TestCase
                     'payment_code' => '3',
                     'total' => $total,
                     'is_unallocated' => false,
-                    'dedupe_key' => hash('sha256', 'previous-'.$documentNumber),
+                    'dedupe_key' => hash('sha256', implode('|', [
+                        $machine->zs_client_id, '1', 'FS', 'A2026', $documentNumber, 'header', '3',
+                    ])),
                 ]);
             }
+
+            $unchangedRowUpdatedAt = EventReportRow::query()->findOrFail($unchangedRowId)->updated_at;
 
             $expectFullRefresh = false;
             Http::fake([
@@ -1104,6 +1123,10 @@ class EventReportImportTest extends TestCase
                 '2026-08-14T11:00:00+01:00',
                 $import->summary['last_full_document_sync_at'] ?? null,
             );
+            // PERF-101: doc 100 changed (updated in place, same row id — the
+            // whole point of the natural-key upsert), doc 102 is new, doc
+            // 103 was cancelled (line reconciled away). event_report_import_id
+            // now points at *this* import for every row it actually touched.
             $this->assertDatabaseHas('event_report_rows', [
                 'event_report_import_id' => $import->id,
                 'document_number' => '100',
@@ -1112,22 +1135,27 @@ class EventReportImportTest extends TestCase
             ]);
             $this->assertDatabaseHas('event_report_rows', [
                 'event_report_import_id' => $import->id,
-                'document_number' => '101',
-                'description' => 'Documento inalterado',
-                'total' => 3,
-            ]);
-            $this->assertDatabaseHas('event_report_rows', [
-                'event_report_import_id' => $import->id,
                 'document_number' => '102',
                 'description' => 'Documento novo',
                 'total' => 4,
             ]);
             $this->assertDatabaseMissing('event_report_rows', [
-                'event_report_import_id' => $import->id,
+                'event_id' => $event->id,
                 'document_number' => '103',
             ]);
-            $this->assertSame(3, $import->paymentDocuments()->count());
-            $this->assertSame(14.0, (float) $import->paymentDocuments()->sum('total'));
+
+            // doc 101 was never part of this incremental fetch (no
+            // `lastupdate` change) — it must be left completely untouched:
+            // same row id, same event_report_import_id, same updated_at.
+            // This is the "zero writes for unchanged data" guarantee.
+            $unchangedRow = EventReportRow::query()->findOrFail($unchangedRowId);
+            $this->assertSame($previousImport->id, $unchangedRow->event_report_import_id);
+            $this->assertSame('101', $unchangedRow->document_number);
+            $this->assertSame('Documento inalterado', $unchangedRow->description);
+            $this->assertTrue($unchangedRow->updated_at->equalTo($unchangedRowUpdatedAt));
+
+            $this->assertSame(3, EventReportPaymentDocument::query()->where('event_id', $event->id)->count());
+            $this->assertSame(14.0, (float) EventReportPaymentDocument::query()->where('event_id', $event->id)->sum('total'));
             $this->assertFalse($previousImport->fresh()->is_active);
             Http::assertSentCount(1);
 
@@ -1723,7 +1751,7 @@ class EventReportImportTest extends TestCase
         $application = $this->makeApplication();
         $event = $this->makeEvent($client);
 
-        ClientZoneSoftMachine::create([
+        $machine = ClientZoneSoftMachine::create([
             'client_id' => $client->id,
             'event_id' => $event->id,
             'zonesoft_application_id' => $application->id,
@@ -1755,6 +1783,7 @@ class EventReportImportTest extends TestCase
         EventReportRow::create([
             'event_id' => $event->id,
             'event_report_import_id' => $previousImport->id,
+            'machine_id' => $machine->id,
             'source_sheet' => 'zonesoft:test',
             'source_row_number' => 1,
             'store_code' => '1',
@@ -1764,6 +1793,7 @@ class EventReportImportTest extends TestCase
             'doc_type' => 'FS',
             'document_series' => 'OLD',
             'document_number' => '499',
+            'line_key' => 'legacy:1',
             'value' => '1.0000',
             'total' => '1.2000',
             'discount' => '0.0000',
@@ -1824,8 +1854,13 @@ class EventReportImportTest extends TestCase
         $this->assertFalse($previousImport->is_active);
         $this->assertSame(2, EventReportImport::query()->count());
         $this->assertSame(1, EventReportImport::query()->where('is_active', true)->count());
+        // The full-mode fetch only returned document 600 for this machine —
+        // PERF-101's reconcileVanishedDocuments() must drop the old
+        // series-OLD/499 document since it no longer exists upstream.
         $this->assertDatabaseMissing('event_report_rows', [
-            'event_report_import_id' => $previousImport->id,
+            'event_id' => $event->id,
+            'document_series' => 'OLD',
+            'document_number' => '499',
         ]);
 
         $response = $this
@@ -1899,6 +1934,7 @@ class EventReportImportTest extends TestCase
             EventReportRow::create([
                 'event_id' => $event->id,
                 'event_report_import_id' => $previousImport->id,
+                'machine_id' => $machine->id,
                 'source_sheet' => 'zonesoft:INCREMENTAL-CLIENT-ID',
                 'source_row_number' => 1,
                 'store_code' => '1',
@@ -1908,6 +1944,7 @@ class EventReportImportTest extends TestCase
                 'doc_type' => 'FS',
                 'document_series' => 'A2026',
                 'document_number' => '100',
+                'line_key' => 'id:1',
                 'value' => '5.0000',
                 'total' => '5.0000',
                 'discount' => '0.0000',
@@ -2352,16 +2389,12 @@ class EventReportImportTest extends TestCase
             'is_active' => false,
             'status' => 'processing',
         ]);
-        EventReportRow::create([
-            'event_id' => $event->id,
-            'event_report_import_id' => $processingImport->id,
-            'source_sheet' => 'zonesoft:staged-test',
-            'source_row_number' => 1,
-            'document_number' => 'STAGED-1',
-            'total' => '2.7500',
-            'raw_row' => ['staged' => true],
-        ]);
 
+        // PERF-101: event_report_rows/event_report_payment_documents are
+        // only ever written inside the finalization transaction, so a
+        // processing import that never got that far has nothing staged to
+        // clean up — there is no reachable state anymore where a row is
+        // tied to a still-processing import.
         (new SyncEventReportJob($processingImport->id, $event->id))
             ->failed(new \RuntimeException('Worker stopped'));
 
@@ -2370,10 +2403,7 @@ class EventReportImportTest extends TestCase
         $this->assertSame('failed', $processingImport->status);
         $this->assertFalse($processingImport->is_active);
         $this->assertSame('Worker stopped', $processingImport->summary['error'] ?? null);
-        $this->assertDatabaseMissing('event_report_rows', [
-            'event_report_import_id' => $processingImport->id,
-            'document_number' => 'STAGED-1',
-        ]);
+        $this->assertSame(0, EventReportRow::query()->where('event_id', $event->id)->count());
     }
 
     public function test_sync_job_uses_the_database_worker_with_outbound_access(): void
@@ -2384,72 +2414,147 @@ class EventReportImportTest extends TestCase
         $this->assertSame(900, config('queue.connections.database.retry_after'));
     }
 
-    public function test_superseded_cleanup_preserves_rows_being_staged_by_a_new_sync(): void
+    /**
+     * PERF-101 replaces the old copy-then-sweep design (where a superseded
+     * import's rows were deleted by a dedicated cleanup pass) with direct
+     * upsert into a durable, event-scoped table. The equivalent guarantee to
+     * protect now is stronger: a sync that fails partway through must never
+     * touch a single row of the data that was already published — not "the
+     * old snapshot gets swept eventually", but "nothing not part of this
+     * cycle's delta is written or deleted at all".
+     */
+    public function test_failed_partial_sync_leaves_previously_published_rows_completely_untouched(): void
     {
         [$admin, $client] = $this->makeAdminClientContext();
+        $application = $this->makeApplication();
         $event = $this->makeEvent($client);
-        $activeImport = $this->makeActiveReportImport($event, $admin);
-        $supersededImport = EventReportImport::create([
+        $previousImport = $this->makeActiveReportImport($event, $admin);
+
+        $validMachine = ClientZoneSoftMachine::create([
+            'client_id' => $client->id,
             'event_id' => $event->id,
-            'uploaded_by_user_id' => $admin->id,
-            'import_strategy' => 'replace',
-            'original_filename' => 'zonesoft-api',
-            'stored_path' => 'zonesoft://old-sync',
-            'mime_type' => 'application/json',
-            'file_hash' => hash('sha256', 'old-sync'),
-            'headers' => ['source' => 'zonesoft_api'],
-            'summary' => ['source' => 'zonesoft_api'],
-            'imported_rows_count' => 1,
-            'imported_at' => now()->subMinute(),
-            'is_active' => false,
-            'status' => 'completed',
+            'zonesoft_application_id' => $application->id,
+            'zs_client_id' => 'VALID-CLIENT-ID',
+            'license' => 'Z11JSMZIYP',
+            'store_id' => 1,
+            'store_label' => 'Loja 1',
+            'permissions' => 'API + All document interfaces',
+            'is_active' => true,
+            'last_validated_at' => now(),
         ]);
-        $processingImport = EventReportImport::create([
+
+        $invalidMachine = ClientZoneSoftMachine::create([
+            'client_id' => $client->id,
             'event_id' => $event->id,
-            'uploaded_by_user_id' => $admin->id,
-            'import_strategy' => 'replace',
-            'original_filename' => 'zonesoft-api',
-            'stored_path' => 'zonesoft://new-sync',
-            'mime_type' => 'application/json',
-            'file_hash' => hash('sha256', 'new-sync'),
-            'headers' => ['source' => 'zonesoft_api'],
-            'summary' => ['source' => 'zonesoft_api'],
-            'imported_rows_count' => 0,
-            'is_active' => false,
-            'status' => 'processing',
+            'zonesoft_application_id' => $application->id,
+            'zs_client_id' => 'INVALID-CLIENT-ID',
+            'license' => 'Z11JSMZIYP',
+            'store_id' => 2,
+            'store_label' => 'Loja 2',
+            'permissions' => 'API + All document interfaces',
+            'is_active' => true,
+            'last_validated_at' => now(),
         ]);
 
-        foreach ([
-            [$activeImport, 'ACTIVE-1'],
-            [$supersededImport, 'OLD-1'],
-            [$processingImport, 'STAGING-1'],
-        ] as [$import, $documentNumber]) {
-            EventReportRow::create([
-                'event_id' => $event->id,
-                'event_report_import_id' => $import->id,
-                'source_sheet' => 'zonesoft:cleanup-test',
-                'source_row_number' => 1,
-                'document_number' => $documentNumber,
-                'total' => '1.0000',
-                'raw_row' => ['cleanup_test' => true],
-            ]);
-        }
-
-        $cleanup = new \ReflectionMethod(EventReportSyncService::class, 'cleanupSupersededRows');
-        $cleanup->invoke(app(EventReportSyncService::class), $event->id, $activeImport->id);
-
-        $this->assertDatabaseHas('event_report_rows', [
-            'event_report_import_id' => $activeImport->id,
-            'document_number' => 'ACTIVE-1',
+        $existingRow = EventReportRow::create([
+            'event_id' => $event->id,
+            'event_report_import_id' => $previousImport->id,
+            'machine_id' => $validMachine->id,
+            'source_sheet' => 'zonesoft:VALID-CLIENT-ID',
+            'source_row_number' => 1,
+            'store_code' => '1',
+            'store_name' => 'Loja 1',
+            'sale_date' => '2026-06-19',
+            'sale_datetime' => '2026-06-19 12:00:00',
+            'doc_type' => 'FS',
+            'document_series' => 'A2026',
+            'document_number' => '900',
+            'line_key' => 'id:900',
+            'value' => '1.0000',
+            'total' => '1.0000',
+            'discount' => '0.0000',
+            'quantity' => '1.0000',
+            'product_code' => '700',
+            'description' => 'Ja publicado',
+            'raw_row' => ['machine_id' => $validMachine->id, 'id' => 900],
         ]);
+        $existingRowUpdatedAt = $existingRow->updated_at;
+
+        Http::fake([
+            'https://api.zonesoft.org/v3/documents/getDocumentsHeaders' => function ($request) {
+                if (($request->header('X-ZS-CLIENT-ID')[0] ?? null) === 'INVALID-CLIENT-ID') {
+                    return Http::response([
+                        'Response' => [
+                            'StatusCode' => 401,
+                            'StatusMessage' => 'Unauthorized',
+                            'Content' => ['document' => null],
+                        ],
+                    ], 200);
+                }
+
+                return Http::response([
+                    'Response' => [
+                        'StatusCode' => 200,
+                        'StatusMessage' => 'OK',
+                        'Content' => [
+                            'document' => [
+                                ['numero' => 901, 'doc' => 'FS', 'serie' => 'A2026'],
+                            ],
+                        ],
+                    ],
+                ], 200);
+            },
+            'https://api.zonesoft.org/v3/sales/getInstancesFromDocument' => Http::response([
+                'Response' => [
+                    'StatusCode' => 200,
+                    'StatusMessage' => 'OK',
+                    'Content' => [
+                        'sale' => [[
+                            'id' => 901,
+                            'loja' => 1,
+                            'numero' => 901,
+                            'doc' => 'FS',
+                            'serie' => 'A2026',
+                            'data' => '2026-06-20',
+                            'datahora' => '2026-06-20 12:00:00',
+                            'codigo' => 730,
+                            'descricao' => 'Documento novo desta tentativa',
+                            'qtd' => 1,
+                            'valor' => 2.4336,
+                            'desconto' => 0,
+                            'desconto2' => 0,
+                            'total' => 2.75,
+                        ]],
+                    ],
+                ],
+            ], 200),
+            'https://api.zonesoft.org/v3/salesday/getInstances' => $this->fakeSalesdayResponse(),
+        ]);
+
+        $this
+            ->actingAs($admin)
+            ->from(route('admin.events.index'))
+            ->post(route('admin.events.reports.store', $event))
+            ->assertRedirect(route('admin.events.index'))
+            ->assertSessionHasErrors('integration');
+
+        $import = EventReportImport::query()->latest('id')->firstOrFail();
+        $this->assertSame('failed', $import->status);
+
+        // The valid machine's document (901) must never have been written —
+        // the whole cycle failed because the other machine did, and nothing
+        // is written until every required machine has succeeded.
         $this->assertDatabaseMissing('event_report_rows', [
-            'event_report_import_id' => $supersededImport->id,
-            'document_number' => 'OLD-1',
+            'event_id' => $event->id,
+            'document_number' => '901',
         ]);
-        $this->assertDatabaseHas('event_report_rows', [
-            'event_report_import_id' => $processingImport->id,
-            'document_number' => 'STAGING-1',
-        ]);
+
+        // The row that was already durably there before this attempt must
+        // be byte-for-byte untouched: same id, same updated_at, same values.
+        $existingRow->refresh();
+        $this->assertTrue($existingRow->updated_at->equalTo($existingRowUpdatedAt));
+        $this->assertSame('Ja publicado', $existingRow->description);
+        $this->assertSame(1, EventReportRow::query()->where('event_id', $event->id)->count());
     }
 
     /**
