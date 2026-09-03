@@ -1,6 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# IMPORTANTE: este ficheiro NAO e sincronizado automaticamente para o
+# servidor pelo pipeline de deploy (deploy-production.yml so envia
+# Dockerfile/compose.yaml/nginx/proxy/seed/app-runtime). O script que
+# corre de verdade e o alvo do "command=" na chave SSH de deploy em
+# /root/.ssh/authorized_keys no servidor — hoje
+# /usr/local/sbin/deploy-contacto-digital-portal. Qualquer alteracao
+# aqui tem de ser copiada manualmente para la (scp + validar sintaxe +
+# chmod 755) para ter efeito. Descoberto da forma dificil: um fix aqui
+# (PERF-501) nao teve nenhum efeito ate perceber isto.
 project_dir="/srv/projects/contacto-digital"
 backup_root="/srv/backups/contacto-digital"
 proxy_conf_dir="/srv/proxy/conf"
