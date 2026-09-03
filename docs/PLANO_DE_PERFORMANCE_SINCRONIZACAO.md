@@ -580,16 +580,36 @@ Critério de aceite:
 ### Fase 3 — Reduzir o que se pede à ZoneSoft
 
 #### PERF-301 — Sonda de movimento antes de sincronizar
-**Prioridade:** P2 · **Estado:** Não iniciado · **Dependências:** PERF-002
+**Prioridade:** P2 · **Estado:** Bloqueado — os dois endpoints propostos não servem, precisa de redesenho · **Dependências:** PERF-002
 
 Num evento ao vivo, a maior parte das 200 TPAs não regista vendas em qualquer
 janela de 60 segundos. Perguntar "houve movimento?" é muito mais barato do que
 pedir documentos.
 
-Ações:
+**Achado ao investigar (`IntegrationManual.pdf`, p.139/152) antes de
+implementar — nenhum dos dois endpoints originalmente propostos serve:**
 
-- avaliar `salesday/getInstances` (totais diários por caixa) e
-  `signeddocumentscount/getInstance` como sondas;
+- `salesday/getInstance(s)` exige um `caixa` (ID da caixa registadora/
+  operador) como argumento obrigatório — o nosso modelo de dados não
+  rastreia IDs de caixa por máquina, só Client ID + loja
+  (`client_zonesoft_machines`). Usar isto exigiria expandir o modelo de
+  dados primeiro (descobrir e guardar quais `caixa` pertencem a cada
+  máquina), não é uma sonda simples de acrescentar.
+- `signeddocumentscount/getInstance` é um contador **mensal e global por
+  Client ID** ("number of documents... created by the API for the
+  year/month"), pensado para a própria ZoneSoft controlar faturação/uso
+  da API — não tem relação nenhuma com "esta loja teve movimento agora".
+
+Nenhum dos dois dá o sinal por-máquina-por-ciclo que este item precisa.
+Fica bloqueado até se desenhar uma abordagem que sirva de verdade —
+possivelmente perguntando à própria ZoneSoft (PERF-002) qual o mecanismo
+recomendado para isto, já que os dois candidatos óbvios do manual não
+encaixam.
+
+Ações (a rever depois de resolver o bloqueio acima):
+
+- se `salesday` for mesmo o caminho, primeiro descobrir e persistir os
+  `caixa` de cada máquina (via alguma listagem ainda não identificada);
 - se os totais de uma máquina não mudaram desde o último ciclo, saltar o fetch
   de documentos dessa máquina;
 - garantir que a sonda nunca substitui a leitura final obrigatória no fim do evento.
@@ -956,17 +976,32 @@ container) ficam como follow-up de reforço, não bloqueiam o que já está
 em produção.
 
 #### PERF-502 — Reduzir o intervalo e empurrar as atualizações
-**Prioridade:** P2 · **Estado:** Não iniciado · **Dependências:** PERF-101, PERF-201, PERF-501
+**Prioridade:** P2 · **Estado:** Parcialmente implementado — intervalo reduzido, WebSockets fica para depois · **Dependências:** PERF-101, PERF-201, PERF-501
+
+`EVENT_REPORT_SYNC_INTERVAL_MINUTES`/`EVENT_REPORT_SYNC_MINIMUM_INTERVAL_MINUTES`
+baixados de 15/10 para **2/2** em produção (2026-09-03, a dois dias de um
+evento ao vivo — passo moderado em vez do alvo original de 1 minuto,
+decisão deliberada por ser a primeira vez que este intervalo muda com
+tráfego real). O custo por ciclo já é proporcional ao delta desde
+PERF-101/102; confirmado sem erros nos ciclos do scheduler depois da
+mudança. Reforça a necessidade do PERF-302 (retenção de
+`event_report_imports`, já implementado) — a ~7.5x mais registos de
+auditoria por dia.
 
 Ações:
 
-- baixar `EVENT_REPORT_SYNC_INTERVAL_MINUTES` de 15 para 1 em eventos ativos,
-  **apenas** depois de o custo por ciclo passar a ser proporcional ao delta e de
-  o limite do fornecedor estar confirmado;
-- manter intervalo mais largo em eventos sem movimento recente;
-- avaliar Laravel Reverb (WebSockets) para empurrar agregados atualizados para os
-  dashboards abertos, eliminando o refresh manual;
-- manter a garantia da leitura final obrigatória no fim do evento.
+- ~~baixar `EVENT_REPORT_SYNC_INTERVAL_MINUTES` de 15 para 1~~ — feito
+  para 2 (ver acima); baixar mais fica para depois de validar contra um
+  evento real;
+- manter intervalo mais largo em eventos sem movimento recente — não
+  implementado, fica como próximo passo;
+- Laravel Reverb (WebSockets) para empurrar agregados atualizados para os
+  dashboards abertos — **não implementado deliberadamente**: é
+  infraestrutura nova (mais uma, depois de Postgres) a dois dias de um
+  evento ao vivo, sem urgência real (o polling/refresh manual já existe e
+  funciona);
+- a garantia da leitura final obrigatória no fim do evento já existe
+  (`EventReportAutoSyncService`, testada) — inalterada por esta mudança.
 
 Critério de aceite:
 
