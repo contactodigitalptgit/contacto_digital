@@ -855,12 +855,70 @@ apertado em recursos):
     dela — não há nada para reverter até à fase 3 realmente trocar
     `DB_CONNECTION` em produção. Fica para lá.
 
-**Fase 3 (por fazer) — corte de produção, pedido explícito antes de
-começar:** ligar `postgres` ao `app` (`depends_on`, `DB_CONNECTION`),
-TLS, utilizador de menor privilégio, janela de indisponibilidade
-coordenada com o utilizador. É o único passo que corre mesmo no servidor
-de produção apertado em recursos — confirmar explicitamente nessa altura,
-independentemente de o VPS já ter sido redimensionado ou não.
+**Fase 3 — primeira tentativa falhou de forma segura (incidente real,
+revertido, zero perda de dados), causa raiz corrigida, script atómico
+escrito para a próxima tentativa.**
+
+Com a autorização explícita do utilizador para avançar mesmo sem o
+resize do VPS, chegámos a arrancar o Postgres em produção (isolado,
+estável — ~40MB de 384MB de limite, sem impacto no resto do sistema) e a
+confirmar ligação da app ao Postgres. O corte real foi feito
+manualmente, passo a passo, colando comandos no terminal SSH — e é aqui
+que correu mal:
+
+**O que aconteceu:** o passo "criar schema no Postgres"
+(`migrate --database=pgsql --force`) parou a meio — a migração
+`2026_08_29_180000_retain_only_fesnima_production_data` (uma limpeza
+*única* já executada há semanas contra o SQLite de produção real,
+já povoado) tem um "guard" que verifica dados específicos antes de
+limpar; contra um Postgres **vazio** (schema a ser criado do zero), o
+guard não reconheceu nada e abortou corretamente — mas isso impediu as
+migrações seguintes de correr, incluindo as que criam
+`event_report_row_aggregates`/`event_report_ticket_aggregates`. O passo
+seguinte (migrar os dados) também parou sozinho, exatamente como
+desenhado (`SqliteToPostgresMigrator` recusou continuar com uma tabela
+em falta no destino). **O erro humano foi continuar para os passos
+seguintes — incluindo o corte de `DB_CONNECTION` — apesar de dois passos
+anteriores terem falhado**, porque a sequência era uma lista de comandos
+independentes, sem nada a impedir fisicamente continuar depois de uma
+falha.
+
+**Consequência:** a app serviu tráfego real durante alguns minutos
+apontada para um Postgres com schema incompleto (sem as tabelas de
+agregados, das quais o dashboard depende para praticamente toda leitura
+normal). Sem eventos ativos no momento (verificado antes de começar), o
+que limitou o impacto real a quem tentasse abrir o portal admin/cliente
+nesse intervalo.
+
+**Recuperação:** reversão imediata — `.env.production` restaurado a
+partir do backup automático feito antes do corte, `app`/`worker`/
+`scheduler` reiniciados. **O ficheiro SQLite nunca foi escrito durante
+toda a tentativa** (o mecanismo só lê dele) — confirmado depois:
+contagens de linhas idênticas às de antes em todos os eventos, tabelas
+de agregados intactas. Zero perda de dados.
+
+**Correções aplicadas:**
+
+1. `database/migrations/2026_08_29_180000_retain_only_fesnima_production_data.php`
+   — o guard agora trata "base genuinamente vazia" (a criar o schema do
+   zero) como um no-op seguro, distinto de "base populada mas com dados
+   errados" (que continua a abortar, como deve ser — essa é a proteção
+   real). Testado (`test_cleanup_is_a_no_op_against_a_genuinely_empty_database`).
+2. `deploy/cutover-to-postgres.sh` (novo) — a sequência de 7 passos deixa
+   de ser uma lista de comandos manuais e passa a ser **um único script
+   atómico**, com `set -euo pipefail` e um `trap` que desfaz
+   automaticamente tudo o que já tinha corrido perante qualquer falha em
+   qualquer passo (restaura `.env.production`, reinicia os serviços,
+   tira a app do modo de manutenção) — o mesmo princípio já usado em
+   `deploy/server-deploy.sh`. Inclui uma verificação explícita de schema
+   completo (todas as tabelas esperadas existem no destino) como último
+   portão antes do "ponto sem retorno" (mudar `DB_CONNECTION`).
+
+**Próxima tentativa:** correr `deploy/cutover-to-postgres.sh` no
+servidor, pedido explícito do utilizador antes de começar (mesma
+confirmação de sempre — nenhum evento ativo no momento). Continua a ser
+o único passo desta fase que corre mesmo no servidor de produção
+apertado em recursos.
 
 #### PERF-502 — Reduzir o intervalo e empurrar as atualizações
 **Prioridade:** P2 · **Estado:** Não iniciado · **Dependências:** PERF-101, PERF-201, PERF-501

@@ -64,4 +64,31 @@ class RetainOnlyFesnimaProductionDataTest extends TestCase
         $this->assertDatabaseCount('event_zonesoft_machines', 1);
         $this->assertDatabaseHas('event_zonesoft_machines', ['event_id' => 8]);
     }
+
+    /**
+     * PERF-501: found rehearsing the real cutover — bootstrapping a brand
+     * new destination schema from scratch (`migrate --database=pgsql`
+     * before the data copy step) replays every migration in history,
+     * including this one, against a genuinely empty database. The guard
+     * used to treat that identically to "populated with the wrong data"
+     * and abort, which stopped every migration after it from running too
+     * (including the ones creating the aggregate tables) — this is what
+     * must never happen again.
+     */
+    public function test_cleanup_is_a_no_op_against_a_genuinely_empty_database(): void
+    {
+        $originalEnvironment = $this->app->environment();
+        $this->app['env'] = 'production';
+
+        try {
+            $migration = require database_path('migrations/2026_08_29_180000_retain_only_fesnima_production_data.php');
+            $migration->up();
+        } finally {
+            $this->app['env'] = $originalEnvironment;
+        }
+
+        $this->assertDatabaseCount('clients', 0);
+        $this->assertDatabaseCount('events', 0);
+        $this->assertDatabaseCount('users', 0);
+    }
 }

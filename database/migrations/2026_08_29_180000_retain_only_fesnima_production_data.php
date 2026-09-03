@@ -15,6 +15,20 @@ return new class extends Migration
             return;
         }
 
+        // PERF-501: this ran once already against the real, already-populated
+        // production SQLite database (that's what the guard below is
+        // checking against). Bootstrapping a brand-new destination schema
+        // from scratch (e.g. `migrate --database=pgsql` before the data
+        // copy step) replays every migration in history against an EMPTY
+        // database — there is nothing to guard or clean up yet, and the
+        // eventual copy of the (already-cleaned) SQLite data will produce
+        // the same "only Fesnima" result on its own. Only skip when
+        // genuinely empty; a populated destination that still doesn't
+        // match the guard is exactly the case this must keep aborting on.
+        if ((int) DB::table('clients')->count() === 0 && (int) DB::table('events')->count() === 0) {
+            return;
+        }
+
         $fesnima = DB::table('clients')->find(self::FESNIMA_CLIENT_ID);
         $event = DB::table('events')->find(self::FESNIMA_EVENT_ID);
 
