@@ -71,7 +71,7 @@ class SqliteToPostgresMigrator
     ) {}
 
     /**
-     * @return array<string, array{copied:int, source_count:int, destination_count:int}>
+     * @return array<string, array{copied:int, source_count:int, destination_count:int, dropped_columns:list<string>, skipped_reason:?string}>
      */
     public function migrate(?callable $onTableStart = null): array
     {
@@ -143,7 +143,7 @@ class SqliteToPostgresMigrator
     }
 
     /**
-     * @return array{copied:int, source_count:int, destination_count:int}
+     * @return array{copied:int, source_count:int, destination_count:int, dropped_columns:list<string>, skipped_reason:?string}
      */
     private function migrateTable(string $table): array
     {
@@ -151,15 +151,47 @@ class SqliteToPostgresMigrator
         $destination = DB::connection($this->destinationConnection);
 
         if (! Schema::connection($this->destinationConnection)->hasTable($table)) {
+            $sourceCount = (int) $source->table($table)->count();
+
+            // A table nobody remembered to remove and that never held data
+            // (found this exact case rehearsing against a real production
+            // copy: an empty, differently-named leftover pivot table with
+            // no trace in the migration history) is safe to skip loudly.
+            // A table with actual rows and no destination equivalent is a
+            // real migration gap — stop and make it someone's decision,
+            // never a silent loss.
+            if ($sourceCount === 0) {
+                return [
+                    'copied' => 0,
+                    'source_count' => 0,
+                    'destination_count' => 0,
+                    'dropped_columns' => [],
+                    'skipped_reason' => 'tabela nao existe no destino, mas esta vazia na origem — ignorada',
+                ];
+            }
+
             throw new \RuntimeException(sprintf(
-                "A tabela '%s' existe na origem (SQLite) mas nao no destino (Postgres) — corra ".
-                "'php artisan migrate --database=%s' no destino antes de migrar os dados.",
+                "A tabela '%s' existe na origem (SQLite) com %d linha(s) mas nao no destino (Postgres) — ".
+                'isto e um gap real de migracao, nao um artefacto vazio. Investigar antes de continuar '.
+                "(ou corra 'php artisan migrate --database=%s' no destino se a tabela devia existir la).",
                 $table,
+                $sourceCount,
                 $this->destinationConnection,
             ));
         }
 
         $columns = $this->sourceColumns($table);
+        $destinationColumns = Schema::connection($this->destinationConnection)->getColumnListing($table);
+        // A column present in the source but not in the migrated
+        // destination schema means the source's table drifted from what
+        // the current migration history actually creates (e.g. a column
+        // added once outside a migration, or one an old migration created
+        // that was later removed without a matching down()). Never insert
+        // blind into a schema that doesn't have the column — drop it from
+        // the copied payload, but report it, so this is a decision someone
+        // sees and consciously accepts rather than a silent loss.
+        $droppedColumns = array_values(array_diff($columns, $destinationColumns));
+        $columns = array_values(array_intersect($columns, $destinationColumns));
         $booleanColumns = $this->destinationBooleanColumns($table);
 
         // Idempotent: safe to re-run a rehearsal without manually truncating
@@ -171,25 +203,33 @@ class SqliteToPostgresMigrator
         $copied = 0;
         $orderedQuery = $source->table($table);
 
-        foreach ($columns as $column) {
+        foreach ($this->sourceColumns($table) as $column) {
             $orderedQuery->orderBy($column);
         }
 
-        $orderedQuery->chunk($this->chunkSize, function (Collection $rows) use ($destination, $table, $booleanColumns, &$copied): void {
-            $payload = $rows
-                ->map(fn ($row) => $this->normalizeRowForPostgres((array) $row, $booleanColumns))
-                ->all();
+        $orderedQuery->chunk(
+            $this->chunkSize,
+            function (Collection $rows) use ($destination, $table, $columns, $booleanColumns, &$copied): void {
+                $payload = $rows
+                    ->map(fn ($row) => $this->normalizeRowForPostgres(
+                        array_intersect_key((array) $row, array_flip($columns)),
+                        $booleanColumns,
+                    ))
+                    ->all();
 
-            if ($payload !== []) {
-                $destination->table($table)->insert($payload);
-                $copied += count($payload);
-            }
-        });
+                if ($payload !== []) {
+                    $destination->table($table)->insert($payload);
+                    $copied += count($payload);
+                }
+            },
+        );
 
         return [
             'copied' => $copied,
             'source_count' => (int) $source->table($table)->count(),
             'destination_count' => (int) $destination->table($table)->count(),
+            'dropped_columns' => $droppedColumns,
+            'skipped_reason' => null,
         ];
     }
 

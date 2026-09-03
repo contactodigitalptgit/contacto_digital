@@ -744,7 +744,7 @@ Critério de aceite:
 ### Fase 5 — Infraestrutura e frescura
 
 #### PERF-501 — PostgreSQL e Redis
-**Prioridade:** P1 · **Estado:** Fase 1 implementada (preparação, sem tocar em produção) · **Referência:** CR-201, CR-202
+**Prioridade:** P1 · **Estado:** Fases 1 e 2 concluídas (preparação e ensaio, sem tocar em produção) · **Referência:** CR-201, CR-202
 
 Este é o teto físico do sistema. O SQLite admite **um escritor de cada vez**. Com
 200 máquinas, sincronizações concorrentes e clientes a abrir dashboards, nenhuma
@@ -815,15 +815,52 @@ comportamento em produção):
    ajustes de teste. É um sinal forte de que a aplicação já está pronta
    para Postgres.
 
-**Fases 2 e 3 (bloqueadas até ao VPS ser redimensionado, não iniciadas):**
+**Fase 2 — implementada e concluída com sucesso** (decisão do utilizador:
+avançar sem esperar pelo resize do VPS, mas sem correr nada no próprio
+servidor de produção — o ensaio foi feito inteiramente localmente, com uma
+cópia dos dados, para não arriscar a estabilidade de um servidor já
+apertado em recursos):
 
-- Fase 2: ensaiar a migração real contra uma **cópia** dos dados de
-  produção (nunca produção diretamente) — duas vezes, conforme o critério
-  de aceite do CR-201;
-- Fase 3: corte de produção — ligar `postgres` ao `app` (`depends_on`,
-  `DB_CONNECTION`), janela de indisponibilidade coordenada com o
-  utilizador, TLS, utilizador de menor privilégio, confirmação explícita
-  antes de qualquer alteração real ao servidor.
+- cópia consistente da base de produção obtida via `VACUUM INTO` (a mesma
+  técnica já usada nos backups de deploy), transferida para a máquina
+  local só depois de confirmação explícita do utilizador (é uma
+  transferência de dados reais de produção), apagada de imediato do `/tmp`
+  do servidor e, no fim do ensaio, apagada também localmente;
+- **duas ligações completas ensaiadas** (critério de aceite do CR-201:
+  "migração ensaiada pelo menos duas vezes") contra os dados reais — todas
+  as tabelas e as duas somas de controlo bateram 100% nas duas vezes
+  (`event_report_rows.total` e `event_report_payment_documents.total`:
+  328053.35 dos dois lados). ~12 segundos de duração cada — folga
+  confortável para uma janela de manutenção real;
+- ensaiada também a idempotência (voltar a correr o comando sem limpar o
+  schema de destino primeiro) — mesmo resultado, confirma que é seguro
+  repetir o comando se algo interromper uma corrida real a meio;
+- **dois achados de dados reais, nenhum a mudar código de produção:**
+  1. `events.machines_configured_at` — coluna que existe na base de
+     produção mas nenhuma migração no histórico atual cria, sem nenhuma
+     referência no código nem em `git log --all -S`, sempre `NULL` nos 3
+     eventos existentes. Corrigido tornando o migrador robusto a isto de
+     forma genérica: filtra cada linha para as colunas que o destino
+     realmente tem, e avisa alto quais foram ignoradas — em vez de
+     assumir que origem e destino têm sempre as mesmas colunas.
+  2. `event_zonesoft_machine` (singular — não confundir com a tabela real
+     `event_zonesoft_machines`, plural) — tabela órfã, vazia, sem
+     nenhuma referência no histórico do repositório. Corrigido: uma
+     tabela sem equivalente no destino só é ignorada (com aviso) se
+     estiver **vazia** na origem; se tivesse linhas, o comando teria
+     parado — um gap de migração real nunca é ignorado silenciosamente,
+     só um artefacto vazio.
+  - "Rollback ensaiado" (outro critério de aceite do CR-201) não se aplica
+    ainda a esta fase: o mecanismo nunca escreve na origem SQLite, só lê
+    dela — não há nada para reverter até à fase 3 realmente trocar
+    `DB_CONNECTION` em produção. Fica para lá.
+
+**Fase 3 (por fazer) — corte de produção, pedido explícito antes de
+começar:** ligar `postgres` ao `app` (`depends_on`, `DB_CONNECTION`),
+TLS, utilizador de menor privilégio, janela de indisponibilidade
+coordenada com o utilizador. É o único passo que corre mesmo no servidor
+de produção apertado em recursos — confirmar explicitamente nessa altura,
+independentemente de o VPS já ter sido redimensionado ou não.
 
 #### PERF-502 — Reduzir o intervalo e empurrar as atualizações
 **Prioridade:** P2 · **Estado:** Não iniciado · **Dependências:** PERF-101, PERF-201, PERF-501

@@ -110,6 +110,12 @@ Artisan::command(
         });
 
         foreach ($results as $table => $result) {
+            if ($result['skipped_reason'] !== null) {
+                $this->warn("  {$table}: IGNORADA — {$result['skipped_reason']}");
+
+                continue;
+            }
+
             $status = $result['source_count'] === $result['destination_count'] ? 'OK' : 'DIVERGE';
 
             if ($status === 'DIVERGE') {
@@ -124,6 +130,13 @@ Artisan::command(
                 $result['copied'],
                 $status,
             ));
+
+            if ($result['dropped_columns'] !== []) {
+                $this->warn(sprintf(
+                    '    AVISO: coluna(s) da origem sem equivalente no destino, nao copiadas: %s',
+                    implode(', ', $result['dropped_columns']),
+                ));
+            }
         }
 
         $this->line('');
