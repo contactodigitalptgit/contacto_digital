@@ -11,6 +11,8 @@ timestamp="$(date +%Y%m%d-%H%M%S)"
 backup_dir="${backup_root}/${timestamp}"
 database_path="${project_dir}/shared/database/contacto_digital_bd.sqlite"
 database_backup_temp="${project_dir}/shared/database/.pre-deploy-${timestamp}.sqlite"
+runtime_database_path="${project_dir}/shared/database/contacto_runtime.sqlite"
+runtime_backup_temp="${project_dir}/shared/database/.pre-runtime-${timestamp}.sqlite"
 requested_sha="${SSH_ORIGINAL_COMMAND:-unknown}"
 migration_services_stopped=0
 worker_stop_timeout_seconds="${WORKER_STOP_TIMEOUT_SECONDS:-900}"
@@ -24,6 +26,7 @@ fi
 cleanup() {
   rm -rf "${release_dir}"
   rm -f "${database_backup_temp}"
+  rm -f "${runtime_backup_temp}"
 
   if [ "${migration_services_stopped}" -eq 1 ] && [ -f "${project_dir}/compose.yaml" ]; then
     echo "Deployment stopped. Keep maintenance mode and workers stopped until the failure is investigated. Backup: ${backup_dir}" >&2
@@ -78,11 +81,21 @@ docker exec contacto_digital_portal_app php -r '
   if ((int) $pdo->query("SELECT COUNT(*) FROM event_report_imports WHERE status = '\''processing'\''")->fetchColumn() > 0) {
     throw new RuntimeException("A sync is still processing; investigate before deploying.");
   }
-  $pdo->exec("VACUUM INTO ".$pdo->quote($target));
-  $backup = new PDO("sqlite:".$target);
-  if ($backup->query("PRAGMA integrity_check")->fetchAll(PDO::FETCH_COLUMN) !== ["ok"]
-      || $backup->query("PRAGMA foreign_key_check")->fetchAll() !== []) {
-    throw new RuntimeException("Database backup failed integrity validation.");
+  $sources = [$source => $target];
+  $runtime = "/var/www/shared/database/contacto_runtime.sqlite";
+  if (is_file($runtime)) {
+    $sources[$runtime] = "/var/www/shared/database/'"$(basename "${runtime_backup_temp}")"'";
+  }
+  foreach ($sources as $database => $destination) {
+    $connection = new PDO("sqlite:".$database);
+    $connection->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+    $connection->exec("PRAGMA busy_timeout=30000");
+    $connection->exec("VACUUM INTO ".$connection->quote($destination));
+    $backup = new PDO("sqlite:".$destination);
+    if ($backup->query("PRAGMA integrity_check")->fetchAll(PDO::FETCH_COLUMN) !== ["ok"]
+        || $backup->query("PRAGMA foreign_key_check")->fetchAll() !== []) {
+      throw new RuntimeException("Database backup failed integrity validation.");
+    }
   }
 '
 test -s "${database_backup_temp}"
@@ -90,6 +103,15 @@ install -m 0600 "${database_backup_temp}" "${backup_dir}/contacto_digital_bd.sql
 sha256sum "${backup_dir}/contacto_digital_bd.sqlite"
 echo "Verified database backup: ${backup_dir}/contacto_digital_bd.sqlite"
 rm -f "${database_backup_temp}"
+if [ -s "${runtime_backup_temp}" ]; then
+  install -m 0600 "${runtime_backup_temp}" "${backup_dir}/contacto_runtime.sqlite"
+  sha256sum "${backup_dir}/contacto_runtime.sqlite"
+  rm -f "${runtime_backup_temp}"
+fi
+
+if [ ! -f "${runtime_database_path}" ]; then
+  install -o 33 -g 33 -m 0660 /dev/null "${runtime_database_path}"
+fi
 
 install -d -m 0755 \
   "${project_dir}" \
@@ -110,7 +132,7 @@ chown -R 33:33 \
 find "${project_dir}/shared/storage" -type d -exec chmod 0775 {} \;
 find "${project_dir}/shared/storage" -type f -exec chmod 0664 {} \;
 find "${project_dir}/shared/database" -type d -exec chmod 0775 {} \;
-find "${project_dir}/shared/database" -type f -exec chmod 0664 {} \;
+find "${project_dir}/shared/database" -type f -exec chmod 0660 {} \;
 
 if [ -f "${project_dir}/Dockerfile" ]; then
   cp -a "${project_dir}/Dockerfile" "${backup_dir}/Dockerfile"
@@ -154,7 +176,7 @@ chown -R 33:33 \
 find "${project_dir}/shared/storage" -type d -exec chmod 0775 {} \;
 find "${project_dir}/shared/storage" -type f -exec chmod 0664 {} \;
 find "${project_dir}/shared/database" -type d -exec chmod 0775 {} \;
-find "${project_dir}/shared/database" -type f -exec chmod 0664 {} \;
+find "${project_dir}/shared/database" -type f -exec chmod 0660 {} \;
 
 install -m 0644 "${release_dir}/proxy/portal.contactodigital.pt.conf" "${proxy_conf_file}"
 

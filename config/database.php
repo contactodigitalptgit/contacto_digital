@@ -43,6 +43,17 @@ return [
             'transaction_mode' => env('DB_TRANSACTION_MODE', 'IMMEDIATE'),
         ],
 
+        'sqlite_runtime' => [
+            'driver' => 'sqlite',
+            'database' => env('SQLITE_RUNTIME_DATABASE'),
+            'prefix' => '',
+            'foreign_key_constraints' => true,
+            'busy_timeout' => 15000,
+            'journal_mode' => 'WAL',
+            'synchronous' => 'NORMAL',
+            'transaction_mode' => 'IMMEDIATE',
+        ],
+
         'mysql' => [
             'driver' => 'mysql',
             'url' => env('DB_URL'),

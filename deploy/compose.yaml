@@ -5,6 +5,8 @@ services:
       dockerfile: Dockerfile
     image: contacto-digital-portal-app:latest
     container_name: contacto_digital_portal_app
+    environment:
+      SQLITE_RUNTIME_DATABASE: /var/www/shared/database/contacto_runtime.sqlite
     env_file:
       - .env.production
     dns:
@@ -47,6 +49,8 @@ services:
   worker:
     image: contacto-digital-portal-app:latest
     container_name: contacto_digital_portal_worker
+    environment:
+      SQLITE_RUNTIME_DATABASE: /var/www/shared/database/contacto_runtime.sqlite
     depends_on:
       - app
     command: php -d memory_limit=384M artisan queue:work --sleep=3 --tries=1 --timeout=0
@@ -69,6 +73,8 @@ services:
   scheduler:
     image: contacto-digital-portal-app:latest
     container_name: contacto_digital_portal_scheduler
+    environment:
+      SQLITE_RUNTIME_DATABASE: /var/www/shared/database/contacto_runtime.sqlite
     depends_on:
       - app
     command: php artisan schedule:work --no-interaction
