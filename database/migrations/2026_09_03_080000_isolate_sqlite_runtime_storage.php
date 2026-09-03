@@ -9,14 +9,22 @@ return new class extends Migration
 {
     public function up(): void
     {
+        // PERF-501: this whole migration is a workaround for SQLite's
+        // single-writer limitation (moving sessions/cache into a separate
+        // file so sync writes stop blocking HTTP session reads) — it has
+        // nothing to do on a non-sqlite destination, which doesn't have
+        // that limitation at all. Nothing to isolate there.
+        if (DB::connection()->getDriverName() !== 'sqlite') {
+            return;
+        }
+
         $path = config('database.connections.sqlite_runtime.database');
 
         if (! $path) {
             return;
         }
 
-        if (DB::connection()->getDriverName() !== 'sqlite'
-            || ! is_file($path)
+        if (! is_file($path)
             || realpath($path) === realpath(DB::connection()->getDatabaseName())) {
             throw new RuntimeException('Runtime storage requires a separate, pre-created SQLite file.');
         }

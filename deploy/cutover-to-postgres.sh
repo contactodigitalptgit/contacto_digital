@@ -41,11 +41,17 @@ cleanup() {
   if [ "${cutover_committed}" -eq 1 ] && [ -f "${env_backup_file}" ]; then
     echo "A reverter .env.production e a reiniciar com a configuracao anterior (sqlite)..." >&2
     cp "${env_backup_file}" "${env_file}"
-    docker compose --env-file "${env_file}" -f compose.yaml up -d --no-deps app worker scheduler || true
+    docker compose --env-file "${env_file}" -f compose.yaml up -d --no-deps app || true
     sleep 3
   fi
 
   if [ "${maintenance_entered}" -eq 1 ]; then
+    # worker/scheduler were stopped in step 2 regardless of how far past
+    # that the failure happened — always bring them back, not only on the
+    # post-cutover revert path (found this gap: a failure between steps 2
+    # and 7 left them stopped after the app itself was already healthy
+    # again).
+    docker compose --env-file "${env_file}" -f compose.yaml up -d --no-deps worker scheduler || true
     docker exec contacto_digital_portal_app php artisan up || true
   fi
 
@@ -95,10 +101,13 @@ docker exec contacto_digital_portal_app php artisan down --retry=60
 maintenance_entered=1
 
 echo "--- 3. backup final e consistente do sqlite, com verificacao de integridade ---"
-docker exec contacto_digital_portal_app php -r '
+docker exec -e CUTOVER_TIMESTAMP="${timestamp}" contacto_digital_portal_app php -r '
 umask(0077);
 $src = getenv("SQLITE_DATABASE");
-$dst = "/var/www/shared/database/pre-postgres-cutover.sqlite";
+// Timestamped so re-running after an earlier aborted attempt never
+// collides with a leftover file from that attempt (VACUUM INTO refuses
+// to overwrite an existing destination).
+$dst = "/var/www/shared/database/pre-postgres-cutover-".getenv("CUTOVER_TIMESTAMP").".sqlite";
 $pdo = new PDO("sqlite:".$src);
 $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 $pdo->exec("PRAGMA busy_timeout=30000");
