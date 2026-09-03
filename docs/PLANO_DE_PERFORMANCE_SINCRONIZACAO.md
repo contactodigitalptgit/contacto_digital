@@ -744,7 +744,7 @@ Critério de aceite:
 ### Fase 5 — Infraestrutura e frescura
 
 #### PERF-501 — PostgreSQL e Redis
-**Prioridade:** P1 · **Estado:** Fases 1 e 2 concluídas (preparação e ensaio, sem tocar em produção) · **Referência:** CR-201, CR-202
+**Prioridade:** P1 · **Estado:** Implementado — corte para PostgreSQL concluído em produção (Redis/CR-202 fica para depois) · **Referência:** CR-201, CR-202
 
 Este é o teto físico do sistema. O SQLite admite **um escritor de cada vez**. Com
 200 máquinas, sincronizações concorrentes e clientes a abrir dashboards, nenhuma
@@ -914,11 +914,46 @@ de agregados intactas. Zero perda de dados.
    completo (todas as tabelas esperadas existem no destino) como último
    portão antes do "ponto sem retorno" (mudar `DB_CONNECTION`).
 
-**Próxima tentativa:** correr `deploy/cutover-to-postgres.sh` no
-servidor, pedido explícito do utilizador antes de começar (mesma
-confirmação de sempre — nenhum evento ativo no momento). Continua a ser
-o único passo desta fase que corre mesmo no servidor de produção
-apertado em recursos.
+**Segunda tentativa — sucesso, com `deploy/cutover-to-postgres.sh`.** Duas
+falhas apanhadas e corrigidas antes do corte real completar:
+
+1. Ficheiro de backup do sqlite colidia com o deixado pela primeira
+   tentativa (`VACUUM INTO` recusa-se a escrever por cima de um ficheiro
+   já existente) — corrigido com nome com timestamp.
+2. `2026_09_03_080000_isolate_sqlite_runtime_storage` — outro contorno
+   específico do SQLite (mover sessions/cache para um ficheiro separado)
+   que assumia sempre `sqlite`, tal como a `retain_only_fesnima...` da
+   primeira tentativa — mesmo tratamento: no-op quando a ligação não é
+   sqlite.
+
+Também corrigido: o `trap` de reversão só reiniciava `worker`/`scheduler`
+no cenário pós-corte — uma falha entre entrar em manutenção e o corte em
+si deixava-os parados mesmo com a app já saudável de novo. Cada falha
+fez o script abortar e reverter sozinho, exatamente como desenhado, sem
+perder nada — confirmado.
+
+**Corte concluído com sucesso** (2026-09-03, servidor ainda em 1,9GB
+RAM / 1 CPU, sem o resize): todas as 27 migrações, todas as tabelas e as
+duas somas de controlo bateram 100% (328053.35€ dos dois lados),
+verificação de schema completo antes do ponto sem retorno. `DB_CONNECTION=pgsql`
+em produção, `worker`/`scheduler`/`app` saudáveis, scheduler já correu
+uma vez contra o Postgres sem erros, memória do servidor estável
+(~495MB usados, sem sinais de aperto). Contagens e somas de agregados
+verificadas depois do corte, via a app já ligada ao Postgres: idênticas
+às de antes.
+
+O ficheiro SQLite original fica intacto em disco como via de emergência
+(`pdo_sqlite` mantido no Dockerfile) — reverter, se alguma vez for
+preciso, é `cp .env.production.bak-cutover-<timestamp> .env.production`
+mais reiniciar os serviços, exatamente como o próprio script já provou
+fazer sozinho perante uma falha.
+
+**Por fazer, fase separada, sem urgência:** Redis (CR-202) — a decisão
+tomada no início desta fase (Postgres primeiro, Redis depois de
+estabilizar) mantém-se. TLS na ligação Postgres e utilizador de menor
+privilégio dedicado (hoje usa o utilizador criado no arranque do
+container) ficam como follow-up de reforço, não bloqueiam o que já está
+em produção.
 
 #### PERF-502 — Reduzir o intervalo e empurrar as atualizações
 **Prioridade:** P2 · **Estado:** Não iniciado · **Dependências:** PERF-101, PERF-201, PERF-501
