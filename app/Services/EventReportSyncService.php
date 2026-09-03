@@ -2286,11 +2286,14 @@ class EventReportSyncService
         // Without normalizing both sides, a day/hour comparison against
         // this column would silently exclude every row on date_to filters.
         $dayExpression = 'COALESCE(DATE(sale_date), DATE(sale_datetime))';
+        // Hourly charts use civil time, while date filters use the operational sale_date.
+        $calendarDayExpression = 'DATE(sale_datetime)';
 
         $rowGroups = DB::table('event_report_rows')
             ->where('event_id', $eventId)
             ->where('machine_id', $machineId)
             ->selectRaw("{$dayExpression} as agg_sale_date")
+            ->selectRaw("{$calendarDayExpression} as agg_sale_calendar_date")
             ->selectRaw("{$hourExpression} as agg_sale_hour")
             ->addSelect(['store_code', 'store_name', 'doc_type', 'product_code', 'description'])
             ->selectRaw('COUNT(*) as rows_count')
@@ -2301,6 +2304,7 @@ class EventReportSyncService
             ->selectRaw('COALESCE(SUM(CASE WHEN total = 0 THEN quantity ELSE 0 END), 0) as offered_quantity_total')
             ->selectRaw('COALESCE(SUM(CASE WHEN total != 0 THEN quantity ELSE 0 END), 0) as sold_quantity_total')
             ->groupByRaw($dayExpression)
+            ->groupByRaw($calendarDayExpression)
             ->groupByRaw($hourExpression)
             ->groupBy('store_code', 'store_name', 'doc_type', 'product_code', 'description')
             ->get();
@@ -2309,9 +2313,11 @@ class EventReportSyncService
             ->where('event_id', $eventId)
             ->where('machine_id', $machineId)
             ->selectRaw("{$dayExpression} as agg_sale_date")
+            ->selectRaw("{$calendarDayExpression} as agg_sale_calendar_date")
             ->selectRaw("{$hourExpression} as agg_sale_hour")
             ->addSelect(['store_code', 'store_name', 'doc_type', 'document_series', 'document_number'])
             ->groupByRaw($dayExpression)
+            ->groupByRaw($calendarDayExpression)
             ->groupByRaw($hourExpression)
             ->groupBy('store_code', 'store_name', 'doc_type', 'document_series', 'document_number')
             ->get();
@@ -2324,6 +2330,7 @@ class EventReportSyncService
                 'event_id' => $eventId,
                 'machine_id' => $machineId,
                 'sale_date' => $row->agg_sale_date,
+                'sale_calendar_date' => $row->agg_sale_calendar_date,
                 'sale_hour' => $row->agg_sale_hour,
                 'store_code' => $row->store_code,
                 'store_name' => $row->store_name,
@@ -2347,6 +2354,7 @@ class EventReportSyncService
                 'event_id' => $eventId,
                 'machine_id' => $machineId,
                 'sale_date' => $row->agg_sale_date,
+                'sale_calendar_date' => $row->agg_sale_calendar_date,
                 'sale_hour' => $row->agg_sale_hour,
                 'store_code' => $row->store_code,
                 'store_name' => $row->store_name,

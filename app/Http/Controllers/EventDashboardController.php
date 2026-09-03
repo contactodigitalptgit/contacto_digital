@@ -1273,26 +1273,28 @@ class EventDashboardController extends Controller
 
         $rows = $this->applyAggregateFilters($this->aggregateRowsBaseQuery($eventId), $filters)
             ->whereNotNull('sale_hour')
-            ->select('sale_date', 'sale_hour')
+            ->whereNotNull('sale_calendar_date')
+            ->select('sale_calendar_date', 'sale_hour')
             ->selectRaw('COALESCE(SUM(total_sum), 0) as sales_total')
-            ->groupBy('sale_date', 'sale_hour')
-            ->orderBy('sale_date')
+            ->groupBy('sale_calendar_date', 'sale_hour')
+            ->orderBy('sale_calendar_date')
             ->orderBy('sale_hour')
             ->get();
 
         $ticketsByHour = $this->applyAggregateFilters($this->aggregateTicketsBaseQuery($eventId), $filters)
             ->whereNotNull('sale_hour')
-            ->select('sale_date', 'sale_hour')
+            ->whereNotNull('sale_calendar_date')
+            ->select('sale_calendar_date', 'sale_hour')
             ->selectRaw('COUNT(*) as tickets_count')
-            ->groupBy('sale_date', 'sale_hour')
+            ->groupBy('sale_calendar_date', 'sale_hour')
             ->get()
             ->mapWithKeys(fn (object $row): array => [
-                $row->sale_date->toDateString().'|'.$row->sale_hour => (int) $row->tickets_count,
+                $row->sale_calendar_date->toDateString().'|'.$row->sale_hour => (int) $row->tickets_count,
             ]);
 
         return $rows
             ->map(function (EventReportRowAggregate $row) use ($ticketsByHour): array {
-                $date = $row->sale_date->toDateString();
+                $date = $row->sale_calendar_date->toDateString();
                 $hour = (int) $row->sale_hour;
 
                 return [

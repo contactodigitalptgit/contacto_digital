@@ -7,7 +7,9 @@ use App\Models\Event;
 use App\Models\EventReportImport;
 use App\Models\EventReportRow;
 use App\Models\User;
-use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Foundation\Testing\RefreshDatabaseState;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Tests\TestCase;
 
 /**
@@ -24,7 +26,49 @@ use Tests\TestCase;
  */
 class NaturalKeyMigrationSafetyCheckTest extends TestCase
 {
-    use RefreshDatabase;
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        // No test transaction: the migration must supply its own rollback.
+        $this->artisan('migrate:fresh')->assertExitCode(0);
+        $this->beforeApplicationDestroyed(function (): void {
+            RefreshDatabaseState::$migrated = false;
+        });
+    }
+
+    public function test_up_rolls_back_schema_and_deleted_rows_without_an_outer_transaction(): void
+    {
+        [$event] = $this->makeEventWithActiveImport(claimedRowsCount: 5, actualRowsCount: 3);
+        $oldImport = $event->reportImports()->first()->replicate();
+        $oldImport->is_active = false;
+        $oldImport->save();
+        $oldRow = EventReportRow::where('event_id', $event->id)->first()->replicate();
+        $oldRow->event_report_import_id = $oldImport->id;
+        $oldRow->save();
+
+        $migration = require database_path('migrations/2026_09_02_120000_add_natural_key_to_event_report_rows_and_payment_documents.php');
+        $migration->down();
+        $beforeRows = DB::table('event_report_rows')->orderBy('id')->get()->toJson();
+        $this->assertSame(0, DB::transactionLevel());
+
+        try {
+            $migration->up();
+            $this->fail('The migration must abort on the incorrect expected count.');
+        } catch (\RuntimeException $exception) {
+            $this->assertStringContainsString('event #'.$event->id, $exception->getMessage());
+            $this->assertStringContainsString('expected 5 rows', $exception->getMessage());
+            $this->assertStringContainsString('but 3 remain', $exception->getMessage());
+        }
+
+        $this->assertSame(0, DB::transactionLevel());
+        $this->assertSame($beforeRows, DB::table('event_report_rows')->orderBy('id')->get()->toJson());
+        $this->assertFalse(Schema::hasColumn('event_report_rows', 'machine_id'));
+        $this->assertFalse(Schema::hasColumn('event_report_rows', 'line_key'));
+        $this->assertTrue(Schema::hasIndex('event_report_payment_documents', 'event_payment_documents_import_dedupe_unique'));
+        $this->assertFalse(Schema::hasIndex('event_report_payment_documents', 'event_payment_documents_event_dedupe_unique'));
+        $this->assertSame(1, (int) DB::scalar('PRAGMA foreign_keys'));
+    }
 
     public function test_safety_check_throws_when_row_count_does_not_match_imported_rows_count(): void
     {

@@ -17,6 +17,7 @@ class EventReportRowAggregate extends Model
         'event_id',
         'machine_id',
         'sale_date',
+        'sale_calendar_date',
         'sale_hour',
         'store_code',
         'store_name',
@@ -39,6 +40,7 @@ class EventReportRowAggregate extends Model
     {
         return [
             'sale_date' => 'date',
+            'sale_calendar_date' => 'date',
             'sale_hour' => 'integer',
             'rows_count' => 'integer',
             'quantity_total' => 'decimal:4',

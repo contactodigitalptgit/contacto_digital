@@ -36,11 +36,21 @@ return new class extends Migration
 {
     public function up(): void
     {
+        if (! in_array(DB::connection()->getDriverName(), ['sqlite', 'pgsql'], true)) {
+            throw new \RuntimeException('PERF-401 requires transactional DDL. No changes were made.');
+        }
+
+        DB::transaction(fn () => $this->createAndBackfillAggregates());
+    }
+
+    private function createAndBackfillAggregates(): void
+    {
         Schema::create('event_report_row_aggregates', function (Blueprint $table): void {
             $table->id();
             $table->foreignId('event_id')->constrained()->cascadeOnDelete();
             $table->foreignId('machine_id')->nullable()->constrained('client_zonesoft_machines')->nullOnDelete();
             $table->date('sale_date')->nullable();
+            $table->date('sale_calendar_date')->nullable();
             $table->unsignedTinyInteger('sale_hour')->nullable();
             $table->string('store_code')->nullable();
             $table->string('store_name')->nullable();
@@ -57,7 +67,7 @@ return new class extends Migration
             $table->timestamps();
 
             $table->unique([
-                'event_id', 'machine_id', 'sale_date', 'sale_hour',
+                'event_id', 'machine_id', 'sale_date', 'sale_calendar_date', 'sale_hour',
                 'store_code', 'store_name', 'doc_type', 'product_code', 'description',
             ], 'event_report_row_aggregates_grain_unique');
             $table->index(['event_id', 'machine_id'], 'event_report_row_aggregates_event_machine_index');
@@ -68,6 +78,7 @@ return new class extends Migration
             $table->foreignId('event_id')->constrained()->cascadeOnDelete();
             $table->foreignId('machine_id')->nullable()->constrained('client_zonesoft_machines')->nullOnDelete();
             $table->date('sale_date')->nullable();
+            $table->date('sale_calendar_date')->nullable();
             $table->unsignedTinyInteger('sale_hour')->nullable();
             $table->string('store_code')->nullable();
             $table->string('store_name')->nullable();
@@ -124,6 +135,8 @@ return new class extends Migration
         // DATE() around sale_date too — see the matching comment in
         // EventReportSyncService::refreshRowAggregatesForMachine().
         $dayExpression = 'COALESCE(DATE(sale_date), DATE(sale_datetime))';
+        // Keep the civil day for hourly charts separately from the operational day used by filters.
+        $calendarDayExpression = 'DATE(sale_datetime)';
         $timestamp = now();
 
         foreach ($pairs as $pair) {
@@ -133,6 +146,7 @@ return new class extends Migration
 
             $rowGroups = $baseQuery()
                 ->selectRaw("{$dayExpression} as agg_sale_date")
+                ->selectRaw("{$calendarDayExpression} as agg_sale_calendar_date")
                 ->selectRaw("{$hourExpression} as agg_sale_hour")
                 ->addSelect(['store_code', 'store_name', 'doc_type', 'product_code', 'description'])
                 ->selectRaw('COUNT(*) as rows_count')
@@ -143,6 +157,7 @@ return new class extends Migration
                 ->selectRaw('COALESCE(SUM(CASE WHEN total = 0 THEN quantity ELSE 0 END), 0) as offered_quantity_total')
                 ->selectRaw('COALESCE(SUM(CASE WHEN total != 0 THEN quantity ELSE 0 END), 0) as sold_quantity_total')
                 ->groupByRaw($dayExpression)
+                ->groupByRaw($calendarDayExpression)
                 ->groupByRaw($hourExpression)
                 ->groupBy('store_code', 'store_name', 'doc_type', 'product_code', 'description')
                 ->get();
@@ -152,6 +167,7 @@ return new class extends Migration
                     'event_id' => $pair->event_id,
                     'machine_id' => $pair->machine_id,
                     'sale_date' => $row->agg_sale_date,
+                    'sale_calendar_date' => $row->agg_sale_calendar_date,
                     'sale_hour' => $row->agg_sale_hour,
                     'store_code' => $row->store_code,
                     'store_name' => $row->store_name,
@@ -172,9 +188,11 @@ return new class extends Migration
 
             $ticketGroups = $baseQuery()
                 ->selectRaw("{$dayExpression} as agg_sale_date")
+                ->selectRaw("{$calendarDayExpression} as agg_sale_calendar_date")
                 ->selectRaw("{$hourExpression} as agg_sale_hour")
                 ->addSelect(['store_code', 'store_name', 'doc_type', 'document_series', 'document_number'])
                 ->groupByRaw($dayExpression)
+                ->groupByRaw($calendarDayExpression)
                 ->groupByRaw($hourExpression)
                 ->groupBy('store_code', 'store_name', 'doc_type', 'document_series', 'document_number')
                 ->get();
@@ -184,6 +202,7 @@ return new class extends Migration
                     'event_id' => $pair->event_id,
                     'machine_id' => $pair->machine_id,
                     'sale_date' => $row->agg_sale_date,
+                    'sale_calendar_date' => $row->agg_sale_calendar_date,
                     'sale_hour' => $row->agg_sale_hour,
                     'store_code' => $row->store_code,
                     'store_name' => $row->store_name,

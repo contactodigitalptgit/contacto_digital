@@ -26,8 +26,7 @@ cleanup() {
   rm -f "${database_backup_temp}"
 
   if [ "${migration_services_stopped}" -eq 1 ] && [ -f "${project_dir}/compose.yaml" ]; then
-    cd "${project_dir}"
-    docker compose --env-file .env.production -f compose.yaml up -d --no-deps worker scheduler >/dev/null 2>&1 || true
+    echo "Deployment stopped. Keep maintenance mode and workers stopped until the failure is investigated. Backup: ${backup_dir}" >&2
   fi
 }
 trap cleanup EXIT
@@ -54,6 +53,44 @@ if find "${release_dir}" -type l -print -quit | grep -q .; then
 fi
 
 install -d -m 0750 "${backup_dir}"
+
+if [ ! -f "${project_dir}/.env.production" ] || [ ! -s "${database_path}" ]; then
+  echo "Missing production configuration or database; refusing to deploy without a backup." >&2
+  exit 1
+fi
+
+cd "${project_dir}"
+docker compose --env-file .env.production -f compose.yaml config --quiet
+migration_services_stopped=1
+docker compose --env-file .env.production -f compose.yaml stop scheduler
+docker compose --env-file .env.production -f compose.yaml stop \
+  --timeout "${worker_stop_timeout_seconds}" worker
+docker exec contacto_digital_portal_app php artisan down --retry=60
+
+# Back up the live database before replacing any runtime files or schema.
+docker exec contacto_digital_portal_app php -r '
+  umask(0077);
+  $source = getenv("DB_DATABASE");
+  $target = "/var/www/shared/database/'"$(basename "${database_backup_temp}")"'";
+  $pdo = new PDO("sqlite:".$source);
+  $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+  $pdo->exec("PRAGMA busy_timeout=30000");
+  if ((int) $pdo->query("SELECT COUNT(*) FROM event_report_imports WHERE status = '\''processing'\''")->fetchColumn() > 0) {
+    throw new RuntimeException("A sync is still processing; investigate before deploying.");
+  }
+  $pdo->exec("VACUUM INTO ".$pdo->quote($target));
+  $backup = new PDO("sqlite:".$target);
+  if ($backup->query("PRAGMA integrity_check")->fetchAll(PDO::FETCH_COLUMN) !== ["ok"]
+      || $backup->query("PRAGMA foreign_key_check")->fetchAll() !== []) {
+    throw new RuntimeException("Database backup failed integrity validation.");
+  }
+'
+test -s "${database_backup_temp}"
+install -m 0600 "${database_backup_temp}" "${backup_dir}/contacto_digital_bd.sqlite"
+sha256sum "${backup_dir}/contacto_digital_bd.sqlite"
+echo "Verified database backup: ${backup_dir}/contacto_digital_bd.sqlite"
+rm -f "${database_backup_temp}"
+
 install -d -m 0755 \
   "${project_dir}" \
   "${project_dir}/nginx" \
@@ -129,25 +166,10 @@ fi
 cd "${project_dir}"
 
 docker compose --env-file .env.production -f compose.yaml config --quiet
-migration_services_stopped=1
-docker compose --env-file .env.production -f compose.yaml stop scheduler
-docker compose --env-file .env.production -f compose.yaml stop \
-  --timeout "${worker_stop_timeout_seconds}" worker
-
-if [ -f "${database_path}" ]; then
-  docker compose --env-file .env.production -f compose.yaml run --rm --no-deps app php -r '
-    $source = getenv("DB_DATABASE");
-    $target = "/var/www/shared/database/'"$(basename "${database_backup_temp}")"'";
-    $pdo = new PDO("sqlite:".$source);
-    $pdo->exec("VACUUM INTO ".$pdo->quote($target));
-  '
-  install -m 0640 "${database_backup_temp}" "${backup_dir}/contacto_digital_bd.sqlite"
-  rm -f "${database_backup_temp}"
-fi
-
 docker compose --env-file .env.production -f compose.yaml build app
 docker compose --env-file .env.production -f compose.yaml run --rm --no-deps app php artisan migrate --force
 docker compose --env-file .env.production -f compose.yaml up -d --no-deps app web worker scheduler
+docker exec contacto_digital_portal_app php artisan up
 migration_services_stopped=0
 
 if docker ps --format '{{.Names}}' | grep -qx proxy_nginx; then

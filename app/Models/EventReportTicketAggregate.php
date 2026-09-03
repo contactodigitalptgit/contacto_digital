@@ -18,6 +18,7 @@ class EventReportTicketAggregate extends Model
         'event_id',
         'machine_id',
         'sale_date',
+        'sale_calendar_date',
         'sale_hour',
         'store_code',
         'store_name',
@@ -33,6 +34,7 @@ class EventReportTicketAggregate extends Model
     {
         return [
             'sale_date' => 'date',
+            'sale_calendar_date' => 'date',
             'sale_hour' => 'integer',
         ];
     }

@@ -209,6 +209,52 @@ class EventDashboardTest extends TestCase
                         && (float) collect($hours)->first()['sales_total'] === 8.25)));
     }
 
+    public function test_hourly_aggregates_preserve_civil_dates_with_operational_date_filters(): void
+    {
+        [$admin, , $event] = $this->makeDashboardContext();
+        $this->seedSyncedRows($event, $admin);
+
+        $row = EventReportRow::where('event_id', $event->id)->where('document_number', '1')->firstOrFail();
+        $row->update(['sale_datetime' => '2026-03-14 00:05:00']);
+        $nextDay = $row->replicate();
+        $nextDay->fill([
+            'source_row_number' => 100,
+            'document_number' => '100',
+            'sale_datetime' => '2026-03-15 00:05:00',
+            'total' => '5.5000',
+        ])->save();
+
+        app(EventReportSyncService::class)->refreshRowAggregates($event->id, [$row->machine_id]);
+        $migration = require database_path('migrations/2026_09_03_070000_create_event_report_row_aggregates_tables.php');
+
+        // Both the ongoing sync and the deployment backfill must preserve the chart's dates.
+        foreach (['sync', 'backfill'] as $source) {
+            if ($source === 'backfill') {
+                $migration->down();
+                $migration->up();
+            }
+
+            foreach (['', '&total_min=0'] as $rowFilter) {
+                $this->actingAs($admin)
+                    ->get(route('admin.events.dashboard', $event).'?date_from=2026-03-14&date_to=2026-03-14&hour_from=0&hour_to=0'.$rowFilter)
+                    ->assertOk()
+                    ->assertInertia(fn (AssertableInertia $page) => $page
+                        ->where('summary.total_sales', 8.25)
+                        ->where('summary.tickets_count', 2)
+                        ->loadDeferredProps('dashboard-analytics', fn (AssertableInertia $details) => $details
+                            ->has('hourlySales', 2)
+                            ->where('hourlySales.0.date', '2026-03-14')
+                            ->where('hourlySales.0.hour', 0)
+                            ->where('hourlySales.0.sales_total', 2.75)
+                            ->where('hourlySales.0.tickets_count', 1)
+                            ->where('hourlySales.1.date', '2026-03-15')
+                            ->where('hourlySales.1.hour', 0)
+                            ->where('hourlySales.1.sales_total', 5.5)
+                            ->where('hourlySales.1.tickets_count', 1)));
+            }
+        }
+    }
+
     public function test_admin_performance_can_filter_multiple_zones_together(): void
     {
         [$admin, , $event] = $this->makeDashboardContext();

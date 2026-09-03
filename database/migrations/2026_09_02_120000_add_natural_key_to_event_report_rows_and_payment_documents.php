@@ -2,6 +2,7 @@
 
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
 /**
@@ -38,6 +39,16 @@ return new class extends Migration
 {
     public function up(): void
     {
+        if (! in_array(DB::connection()->getDriverName(), ['sqlite', 'pgsql'], true)) {
+            throw new \RuntimeException('PERF-101 requires transactional DDL. No changes were made.');
+        }
+
+        // Laravel does not automatically wrap SQLite migrations in a transaction.
+        DB::transaction(fn () => $this->migrateCurrentState());
+    }
+
+    private function migrateCurrentState(): void
+    {
         Schema::table('event_report_rows', function (Blueprint $table): void {
             $table->foreignId('machine_id')
                 ->nullable()
@@ -65,8 +76,7 @@ return new class extends Migration
             );
         });
 
-        // Backfill: production only ever holds the Fesnima event today (see
-        // 2026_08_29_180000_retain_only_fesnima_production_data.php).
+        // Backfill is scoped independently to every event in production.
         //
         // Discovered while rehearsing this migration locally against real
         // synced data (Cavado/Cavado 2): cleanupSupersededRows() is
@@ -97,10 +107,8 @@ return new class extends Migration
         // dataset. Per docs/PADRAO_DE_IMPLEMENTACAO_SEGURA.md §12, it must
         // be rehearsed there before this migration ever runs in production.
         //
-        // Safety net: this migration runs inside a DB transaction on
-        // sqlite/pgsql (Laravel's default for drivers with transactional
-        // DDL — confirm this holds for whatever driver production actually
-        // uses before relying on it). verifyDeletionMatchedExpectations()
+        // Safety net: up() explicitly wraps schema changes and backfill
+        // in a transaction on sqlite/pgsql. verifyDeletionMatchedExpectations()
         // below THROWS if the row/payment-document count left behind for
         // any event doesn't exactly match that event's own
         // imported_rows_count / summary.payment_documents_count — numbers
