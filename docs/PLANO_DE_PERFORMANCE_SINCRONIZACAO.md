@@ -386,7 +386,43 @@ Critério de aceite:
 ### Fase 2 — Paralelismo real
 
 #### PERF-201 — Trocar o fork por máquina por I/O assíncrono
-**Prioridade:** P0 · **Estado:** Não iniciado · **Dependências:** PERF-001
+**Prioridade:** P0 · **Estado:** Implementado · **Dependências:** PERF-001
+
+Implementado em `app/Services/EventReportSyncService.php` e
+`app/Services/ZoneSoft/ZoneSoftApiClient.php` (branch
+`perf/101-incremental-natural-key`). `ProcessFactory`/`SerializableClosure`/
+`invoke-serialized-closure` e todo o mecanismo de ficheiros temporários por
+máquina foram removidos por completo. A paginação de documentos passou a
+correr em `fetchDocumentsAcrossMachines()`: por ronda, agrupa um pedido
+"próxima página" por cada máquina ainda ativa e despacha-os todos juntos
+num único `ZoneSoftApiClient::postManyAcrossRequests()` (generalização do
+`postMany()` já existente, com o mesmo `Http::pool($callback,
+$concurrency)`), até nenhuma máquina ter mais páginas. A lógica de negócio
+por máquina (`syncMachinePayload()`) manteve-se — só foi reorganizada para
+`buildMachineResultFromDocuments()`, partilhada entre o caminho novo e o
+caminho de retry serial existente, que não mudou.
+
+**Achado ao generalizar `postMany()`:** o `fetchDocuments()` original nunca
+repetia um 401 (Não Autorizado); o `postMany()` sempre repetiu (fallback
+bloqueante com `retryUnauthorized=true`). Generalizar sem reparar nisso
+teria feito cada máquina com credencial inválida gastar ~1,5 s extra por
+ciclo antes de falhar — a 21 das 22 máquinas locais do evento Cavado (ver
+achado da sessão anterior sobre sessões fechadas), isso seriam ~31 s
+desperdiçados por ciclo. Corrigido tornando `retryUnauthorized`
+parametrizável por pedido; `postMany()` mantém `true` (o seu comportamento
+de sempre), a paginação de documentos usa `false` (o comportamento original
+de `fetchDocuments()`).
+
+**Validado contra a API real** (não só `Http::fake`): correu um `sync()`
+completo do evento Cavado (22 máquinas) contra `api.zonesoft.org`. A única
+máquina com sessão válida (loja 1) foi buscada e processada corretamente
+via pool; as outras 21 falharam com 401 em bloco, rápido — ciclo completo
+em **10,15 s**, sem nenhum arranque de processo. Confirmado que a
+sincronização falhada não escreveu nada (`event_report_rows`/
+`event_report_payment_documents` do evento ficaram exatamente iguais a
+antes: 4.392 linhas / 3.351 documentos de pagamento).
+
+Critério de aceite do plano original:
 
 O trabalho é limitado por rede. Um único processo PHP consegue manter dezenas de
 pedidos HTTPS em voo através do pool Guzzle que o `ZoneSoftApiClient::postMany()`

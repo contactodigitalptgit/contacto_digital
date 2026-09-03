@@ -96,27 +96,65 @@ class ZoneSoftApiClient
         array $entityPayloads,
         int $concurrency = 2,
     ): array {
-        if ($entityPayloads === []) {
+        $requests = [];
+
+        foreach ($entityPayloads as $key => $entityPayload) {
+            $requests[$key] = [
+                'application' => $application,
+                'zsClientId' => $zsClientId,
+                'interface' => $interface,
+                'action' => $action,
+                'entityName' => $entityName,
+                'payload' => $entityPayload,
+                // Matches this method's original, pre-generalization
+                // behaviour: a 401 from the pool gets one blocking retry.
+                'retryUnauthorized' => true,
+            ];
+        }
+
+        return $this->postManyAcrossRequests($requests, $concurrency);
+    }
+
+    /**
+     * Same pooling + retry-fallback behaviour as postMany(), generalized to
+     * requests that don't all share the same application/client/endpoint —
+     * used by EventReportSyncService to paginate documents for many
+     * machines concurrently in a single process (PERF-201), instead of one
+     * OS process per machine.
+     *
+     * @param  array<int|string, array{application:ZoneSoftApplication,zsClientId:string,interface:string,action:string,entityName:string,payload:array<string, mixed>,requestTimeoutSeconds?:int|null,retryUnauthorized?:bool}>  $requests
+     * @return array<int|string, array<string, mixed>|ZoneSoftApiException>
+     */
+    public function postManyAcrossRequests(array $requests, int $concurrency): array
+    {
+        if ($requests === []) {
             return [];
         }
 
         $bodies = [];
+        $endpoints = [];
 
-        foreach ($entityPayloads as $key => $entityPayload) {
-            $bodies[$key] = $this->encodeBody($entityName, $entityPayload);
+        foreach ($requests as $key => $request) {
+            $bodies[$key] = $this->encodeBody($request['entityName'], $request['payload']);
+            $endpoints[$key] = $this->resolveEndpoint($request['application'], $request['interface'], $request['action']);
         }
 
-        $endpoint = $this->resolveEndpoint($application, $interface, $action);
-        $responses = Http::pool(function (Pool $pool) use ($application, $zsClientId, $bodies, $endpoint): void {
-            foreach ($bodies as $key => $body) {
-                $this->pendingRequest($application, $zsClientId, $body, $pool->as((string) $key))
-                    ->send('POST', $endpoint);
+        $responses = Http::pool(function (Pool $pool) use ($requests, $bodies, $endpoints): void {
+            foreach ($requests as $key => $request) {
+                $this->pendingRequest(
+                    $request['application'],
+                    $request['zsClientId'],
+                    $bodies[$key],
+                    $pool->as((string) $key),
+                    $request['requestTimeoutSeconds'] ?? null,
+                )->send('POST', $endpoints[$key]);
             }
         }, max(1, $concurrency));
         $results = [];
 
-        foreach ($entityPayloads as $key => $entityPayload) {
+        foreach ($requests as $key => $request) {
             $response = $responses[(string) $key] ?? $responses[$key] ?? null;
+            $retryUnauthorized = $request['retryUnauthorized'] ?? true;
 
             try {
                 if ($response instanceof Response) {
@@ -135,7 +173,10 @@ class ZoneSoftApiClient
 
                 throw new ZoneSoftApiException('A ZoneSoft nao devolveu uma resposta valida.', 0);
             } catch (ZoneSoftApiException $exception) {
-                if (! $exception->isTransient() && $exception->statusCode() !== 401) {
+                $shouldRetryOnceBlocking = $exception->isTransient()
+                    || ($retryUnauthorized && $exception->statusCode() === 401);
+
+                if (! $shouldRetryOnceBlocking) {
                     $results[$key] = $exception;
 
                     continue;
@@ -143,13 +184,13 @@ class ZoneSoftApiClient
 
                 try {
                     $results[$key] = $this->post(
-                        $application,
-                        $zsClientId,
-                        $interface,
-                        $action,
-                        $entityName,
-                        $entityPayload,
-                        true,
+                        $request['application'],
+                        $request['zsClientId'],
+                        $request['interface'],
+                        $request['action'],
+                        $request['entityName'],
+                        $request['payload'],
+                        $retryUnauthorized,
                     );
                 } catch (ZoneSoftApiException $retryException) {
                     $results[$key] = $retryException;

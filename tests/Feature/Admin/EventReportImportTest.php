@@ -1603,6 +1603,193 @@ class EventReportImportTest extends TestCase
         ]);
     }
 
+    /**
+     * PERF-201: dispatch no longer forks one OS process per machine — every
+     * machine is fetched concurrently in this same process via Http::pool().
+     * Fifteen machines all succeeding here, with no Process/ProcessFactory
+     * mock anywhere in this test, is itself the proof: if the old
+     * invoke-serialized-closure mechanism were still in play, this would
+     * try to spawn real child processes inside `php artisan test` and
+     * either hang or fail.
+     */
+    public function test_sync_dispatches_many_machines_concurrently_without_process_forking(): void
+    {
+        config(['event-reports.zonesoft.complete_documents' => true]);
+
+        [$admin, $client] = $this->makeAdminClientContext();
+        $application = $this->makeApplication();
+        $event = $this->makeEvent($client);
+
+        $machineCount = 15;
+
+        for ($storeId = 1; $storeId <= $machineCount; $storeId++) {
+            ClientZoneSoftMachine::create([
+                'client_id' => $client->id,
+                'event_id' => $event->id,
+                'zonesoft_application_id' => $application->id,
+                'zs_client_id' => 'CLIENT-ID-'.$storeId,
+                'license' => 'Z11JSMZIYP',
+                'store_id' => $storeId,
+                'store_label' => 'Loja '.$storeId,
+                'permissions' => 'API + All document interfaces',
+                'is_active' => true,
+                'last_validated_at' => now(),
+            ]);
+        }
+
+        Http::fake([
+            'https://api.zonesoft.org/v3/documents/getInstances' => function ($request) {
+                $clientId = $request->header('X-ZS-CLIENT-ID')[0] ?? '';
+                $storeId = (int) str_replace('CLIENT-ID-', '', $clientId);
+
+                return Http::response([
+                    'Response' => [
+                        'StatusCode' => 200,
+                        'StatusMessage' => 'OK',
+                        'Content' => [
+                            'document' => [[
+                                'loja' => $storeId,
+                                'numero' => 100 + $storeId,
+                                'doc' => 'FS',
+                                'serie' => 'A2026',
+                                'data' => '2026-06-20',
+                                'datahora' => '2026-06-20 12:00:00',
+                                'pagamento' => 3,
+                                'total' => 1.0,
+                                'pago' => 1,
+                                'vendas' => [[
+                                    'id' => $storeId,
+                                    'loja' => $storeId,
+                                    'numero' => 100 + $storeId,
+                                    'doc' => 'FS',
+                                    'serie' => 'A2026',
+                                    'data' => '2026-06-20',
+                                    'datahora' => '2026-06-20 12:00:00',
+                                    'codigo' => 700 + $storeId,
+                                    'descricao' => 'Produto '.$storeId,
+                                    'qtd' => 1,
+                                    'valor' => 1.0,
+                                    'total' => 1.0,
+                                ]],
+                            ]],
+                        ],
+                    ],
+                ], 200);
+            },
+        ]);
+
+        $import = app(EventReportSyncService::class)->sync($event, $admin);
+
+        $this->assertSame('completed', $import->status);
+        $this->assertSame($machineCount, $import->summary['machines_count'] ?? null);
+        $this->assertSame($machineCount, $import->imported_rows_count);
+        Http::assertSentCount($machineCount);
+
+        for ($storeId = 1; $storeId <= $machineCount; $storeId++) {
+            $this->assertDatabaseHas('event_report_rows', [
+                'event_id' => $event->id,
+                'document_number' => (string) (100 + $storeId),
+                'product_code' => (string) (700 + $storeId),
+            ]);
+        }
+    }
+
+    /**
+     * PERF-201's paginator pools one "next page" request per still-active
+     * machine per round instead of one process per machine. This confirms
+     * the round-based logic itself: a single machine whose document list
+     * spans three pages (two full pages at the 250 limit, one short page)
+     * gets all three rounds fetched and combined correctly.
+     */
+    public function test_document_pagination_across_multiple_rounds_combines_all_pages(): void
+    {
+        config(['event-reports.zonesoft.complete_documents' => true]);
+
+        [$admin, $client] = $this->makeAdminClientContext();
+        $application = $this->makeApplication();
+        $event = $this->makeEvent($client);
+
+        ClientZoneSoftMachine::create([
+            'client_id' => $client->id,
+            'event_id' => $event->id,
+            'zonesoft_application_id' => $application->id,
+            'zs_client_id' => 'PAGINATED-CLIENT',
+            'license' => 'Z11JSMZIYP',
+            'store_id' => 1,
+            'store_label' => 'Loja Paginada',
+            'permissions' => 'API + All document interfaces',
+            'is_active' => true,
+            'last_validated_at' => now(),
+        ]);
+
+        $totalDocuments = 510;
+        $requestedOffsets = [];
+
+        Http::fake([
+            'https://api.zonesoft.org/v3/documents/getInstances' => function ($request) use (&$requestedOffsets, $totalDocuments) {
+                $offset = (int) ($request->data()['document']['offset'] ?? 0);
+                $limit = (int) ($request->data()['document']['limit'] ?? 250);
+                $requestedOffsets[] = $offset;
+
+                $count = max(0, min($limit, $totalDocuments - $offset));
+                $documents = [];
+
+                for ($i = 0; $i < $count; $i++) {
+                    $numero = $offset + $i + 1;
+                    $documents[] = [
+                        'loja' => 1,
+                        'numero' => $numero,
+                        'doc' => 'FS',
+                        'serie' => 'A2026',
+                        'data' => '2026-06-20',
+                        'datahora' => '2026-06-20 12:00:00',
+                        'pagamento' => 3,
+                        'total' => 1.0,
+                        'pago' => 1,
+                        'vendas' => [[
+                            'id' => $numero,
+                            'loja' => 1,
+                            'numero' => $numero,
+                            'doc' => 'FS',
+                            'serie' => 'A2026',
+                            'data' => '2026-06-20',
+                            'datahora' => '2026-06-20 12:00:00',
+                            'codigo' => 700,
+                            'descricao' => 'Produto',
+                            'qtd' => 1,
+                            'valor' => 1.0,
+                            'total' => 1.0,
+                        ]],
+                    ];
+                }
+
+                return Http::response([
+                    'Response' => [
+                        'StatusCode' => 200,
+                        'StatusMessage' => 'OK',
+                        'Content' => [
+                            'document' => $documents,
+                        ],
+                    ],
+                ], 200);
+            },
+        ]);
+
+        $import = app(EventReportSyncService::class)->sync($event, $admin);
+
+        $this->assertSame('completed', $import->status);
+        $this->assertSame($totalDocuments, $import->imported_rows_count);
+        $this->assertSame([0, 250, 500], $requestedOffsets);
+        $this->assertDatabaseHas('event_report_rows', [
+            'event_id' => $event->id,
+            'document_number' => '1',
+        ]);
+        $this->assertDatabaseHas('event_report_rows', [
+            'event_id' => $event->id,
+            'document_number' => (string) $totalDocuments,
+        ]);
+    }
+
     public function test_admin_cannot_start_sync_when_event_already_has_processing_import(): void
     {
         [$admin, $client] = $this->makeAdminClientContext();
