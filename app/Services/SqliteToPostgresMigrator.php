@@ -85,7 +85,56 @@ class SqliteToPostgresMigrator
             $results[$table] = $this->migrateTable($table);
         }
 
+        // Found running this against real production: every table's
+        // serial/bigserial sequence stays wherever it was BEFORE this
+        // ran (Postgres sequences are not touched by inserting explicit
+        // id values, only by nextval()) — after copying rows with real
+        // ids, the sequence for e.g. event_report_imports was still at 3
+        // while the table's real max id was 689. Left alone, the very
+        // next Eloquent ::create() on any migrated table would ask
+        // Postgres for id 4 — colliding with an existing row, or worse,
+        // silently succeeding into a gap and leaving future inserts to
+        // eventually collide unpredictably. This must run every time,
+        // not just be a one-off manual fix.
+        if (DB::connection($this->destinationConnection)->getDriverName() === 'pgsql') {
+            $this->syncPostgresSequences(array_keys($results));
+        }
+
         return $results;
+    }
+
+    /**
+     * @param  list<string>  $tables
+     */
+    private function syncPostgresSequences(array $tables): void
+    {
+        $destination = DB::connection($this->destinationConnection);
+
+        foreach ($tables as $table) {
+            if (! Schema::connection($this->destinationConnection)->hasColumn($table, 'id')) {
+                continue;
+            }
+
+            $sequenceExists = $destination->selectOne(
+                'select to_regclass(?) as seq',
+                [$table.'_id_seq'],
+            );
+
+            if (! $sequenceExists || ! $sequenceExists->seq) {
+                continue;
+            }
+
+            $maxId = $destination->table($table)->max('id');
+
+            if ($maxId === null) {
+                continue;
+            }
+
+            $destination->statement(
+                sprintf("select setval('%s_id_seq', ?, true)", $table),
+                [$maxId],
+            );
+        }
     }
 
     /**
