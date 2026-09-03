@@ -7,6 +7,8 @@ use App\Models\Event;
 use App\Models\EventReportImport;
 use App\Models\EventReportPaymentDocument;
 use App\Models\EventReportRow;
+use App\Models\EventReportRowAggregate;
+use App\Models\EventReportTicketAggregate;
 use App\Models\User;
 use App\Services\ZoneSoft\ZoneSoftApiClient;
 use App\Services\ZoneSoft\ZoneSoftApiException;
@@ -230,6 +232,15 @@ class EventReportSyncService
                     $machineSync['pending_rows'],
                     $machineSync['pending_payment_documents'],
                     $machineSync['document_fetch_mode'] === 'full',
+                );
+
+                // PERF-401 (fatia 1): keep the dashboard's pre-aggregated
+                // tables in step with the delta this cycle just published —
+                // scoped to only the machines actually touched, so this is
+                // O(that machine's rows), never O(dataset).
+                $this->refreshRowAggregates(
+                    $event->id,
+                    $this->touchedMachineIds($machineSync['pending_rows'], $machineSync['pending_reconciliations']),
                 );
 
                 $summary = $this->buildSummaryFromCurrentState(
@@ -2205,6 +2216,162 @@ class EventReportSyncService
                 ->where('document_number', $documentNumber)
                 ->delete();
         }
+    }
+
+    /**
+     * Every machine_id this cycle actually touched — rows it upserted plus
+     * any it ran reconciliation for (a machine can have only deletions,
+     * e.g. every document cancelled, with zero pending rows) — is exactly
+     * the set of machines whose aggregate footprint can possibly be stale.
+     *
+     * @param  list<array<string, mixed>>  $pendingRows
+     * @param  list<array{machine_id:int,document_keys:list<array<string,string>>}>  $pendingReconciliations
+     * @return list<int>
+     */
+    private function touchedMachineIds(array $pendingRows, array $pendingReconciliations): array
+    {
+        $machineIds = [];
+
+        foreach ($pendingRows as $row) {
+            if (isset($row['machine_id'])) {
+                $machineIds[(int) $row['machine_id']] = true;
+            }
+        }
+
+        foreach ($pendingReconciliations as $reconciliation) {
+            $machineIds[(int) $reconciliation['machine_id']] = true;
+        }
+
+        return array_keys($machineIds);
+    }
+
+    /**
+     * PERF-401 (fatia 1): rebuilds event_report_row_aggregates/
+     * event_report_ticket_aggregates for exactly the machines this cycle
+     * touched — delete this machine's existing aggregate footprint, then
+     * re-derive it from its current event_report_rows in one GROUP BY
+     * pass. Bounded by that machine's row count, never the whole event.
+     *
+     * Public: in production the only writer of event_report_rows is this
+     * service's own upsertRows()/reconcileFetchedDocuments() (called from
+     * inside run()'s publish transaction, which already calls this). It's
+     * exposed here so anything else that legitimately writes rows directly
+     * — a test fixture seeding data without going through a full sync, or
+     * a future maintenance command — can keep the aggregate tables
+     * consistent instead of leaving them silently stale.
+     *
+     * A null machine_id is accepted (and refreshed like any other bucket)
+     * because rows created directly rather than through a real sync — test
+     * fixtures, mainly — can legitimately have no machine attached; the
+     * real sync pipeline itself never produces a null machine_id.
+     *
+     * @param  list<int|null>  $machineIds
+     */
+    public function refreshRowAggregates(int $eventId, array $machineIds): void
+    {
+        foreach ($machineIds as $machineId) {
+            $this->refreshRowAggregatesForMachine($eventId, $machineId);
+        }
+    }
+
+    private function refreshRowAggregatesForMachine(int $eventId, ?int $machineId): void
+    {
+        $timestamp = now();
+        $hourExpression = $this->sqlHourOfSaleDatetimeExpression();
+        // DATE() around sale_date too, not just sale_datetime: Eloquent's
+        // bare 'date' cast (EventReportRow::casts()) only truncates the
+        // time component when *reading* the attribute back as Carbon — it
+        // still writes the column using $dateFormat ('Y-m-d H:i:s' unless
+        // overridden), so sale_date can be stored with a "00:00:00" suffix.
+        // Without normalizing both sides, a day/hour comparison against
+        // this column would silently exclude every row on date_to filters.
+        $dayExpression = 'COALESCE(DATE(sale_date), DATE(sale_datetime))';
+
+        $rowGroups = DB::table('event_report_rows')
+            ->where('event_id', $eventId)
+            ->where('machine_id', $machineId)
+            ->selectRaw("{$dayExpression} as agg_sale_date")
+            ->selectRaw("{$hourExpression} as agg_sale_hour")
+            ->addSelect(['store_code', 'store_name', 'doc_type', 'product_code', 'description'])
+            ->selectRaw('COUNT(*) as rows_count')
+            ->selectRaw('COALESCE(SUM(quantity), 0) as quantity_total')
+            ->selectRaw('COALESCE(SUM(value), 0) as value_total')
+            ->selectRaw('COALESCE(SUM(discount), 0) as discount_total')
+            ->selectRaw('COALESCE(SUM(total), 0) as total_sum')
+            ->selectRaw('COALESCE(SUM(CASE WHEN total = 0 THEN quantity ELSE 0 END), 0) as offered_quantity_total')
+            ->selectRaw('COALESCE(SUM(CASE WHEN total != 0 THEN quantity ELSE 0 END), 0) as sold_quantity_total')
+            ->groupByRaw($dayExpression)
+            ->groupByRaw($hourExpression)
+            ->groupBy('store_code', 'store_name', 'doc_type', 'product_code', 'description')
+            ->get();
+
+        $ticketGroups = DB::table('event_report_rows')
+            ->where('event_id', $eventId)
+            ->where('machine_id', $machineId)
+            ->selectRaw("{$dayExpression} as agg_sale_date")
+            ->selectRaw("{$hourExpression} as agg_sale_hour")
+            ->addSelect(['store_code', 'store_name', 'doc_type', 'document_series', 'document_number'])
+            ->groupByRaw($dayExpression)
+            ->groupByRaw($hourExpression)
+            ->groupBy('store_code', 'store_name', 'doc_type', 'document_series', 'document_number')
+            ->get();
+
+        EventReportRowAggregate::query()->where('event_id', $eventId)->where('machine_id', $machineId)->delete();
+        EventReportTicketAggregate::query()->where('event_id', $eventId)->where('machine_id', $machineId)->delete();
+
+        foreach ($rowGroups->chunk(self::STAGING_INSERT_BATCH_SIZE) as $chunk) {
+            EventReportRowAggregate::query()->insert($chunk->map(fn (object $row): array => [
+                'event_id' => $eventId,
+                'machine_id' => $machineId,
+                'sale_date' => $row->agg_sale_date,
+                'sale_hour' => $row->agg_sale_hour,
+                'store_code' => $row->store_code,
+                'store_name' => $row->store_name,
+                'doc_type' => $row->doc_type,
+                'product_code' => $row->product_code,
+                'description' => $row->description,
+                'rows_count' => (int) $row->rows_count,
+                'quantity_total' => $row->quantity_total,
+                'value_total' => $row->value_total,
+                'discount_total' => $row->discount_total,
+                'total_sum' => $row->total_sum,
+                'offered_quantity_total' => $row->offered_quantity_total,
+                'sold_quantity_total' => $row->sold_quantity_total,
+                'created_at' => $timestamp,
+                'updated_at' => $timestamp,
+            ])->all());
+        }
+
+        foreach ($ticketGroups->chunk(self::STAGING_INSERT_BATCH_SIZE) as $chunk) {
+            EventReportTicketAggregate::query()->insert($chunk->map(fn (object $row): array => [
+                'event_id' => $eventId,
+                'machine_id' => $machineId,
+                'sale_date' => $row->agg_sale_date,
+                'sale_hour' => $row->agg_sale_hour,
+                'store_code' => $row->store_code,
+                'store_name' => $row->store_name,
+                'doc_type' => $row->doc_type,
+                'document_series' => $row->document_series,
+                'document_number' => $row->document_number,
+                'created_at' => $timestamp,
+                'updated_at' => $timestamp,
+            ])->all());
+        }
+    }
+
+    /**
+     * Same per-driver HOUR(sale_datetime) extraction
+     * EventDashboardController::buildHourlySales() already used — kept
+     * driver-aware for the same three targets (sqlite locally/CI, mysql/
+     * mariadb and pgsql for CR-201/PERF-501).
+     */
+    private function sqlHourOfSaleDatetimeExpression(): string
+    {
+        return match (DB::connection()->getDriverName()) {
+            'pgsql' => 'CAST(EXTRACT(HOUR FROM sale_datetime) AS INTEGER)',
+            'mysql', 'mariadb' => 'HOUR(sale_datetime)',
+            default => "CAST(strftime('%H', sale_datetime) AS INTEGER)",
+        };
     }
 
     /**

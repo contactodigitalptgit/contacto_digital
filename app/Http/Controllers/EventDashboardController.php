@@ -6,6 +6,8 @@ use App\Models\Event;
 use App\Models\EventReportImport;
 use App\Models\EventReportPaymentDocument;
 use App\Models\EventReportRow;
+use App\Models\EventReportRowAggregate;
+use App\Models\EventReportTicketAggregate;
 use App\Services\DashboardConfigurationService;
 use App\Services\EventReportAutoSyncService;
 use App\Services\EventReportSyncService;
@@ -145,6 +147,7 @@ class EventDashboardController extends Controller
         $dashboardConfiguration = $this->dashboardConfiguration->resolve($event);
 
         $filters = $this->normalizeFilters($request);
+        $usesRowLevelFilters = $this->usesRowLevelFilters($filters);
         $dashboardCacheVersion = $this->dashboardCacheVersion($event);
         $rememberDashboardValue = fn (
             string $fragment,
@@ -175,13 +178,21 @@ class EventDashboardController extends Controller
         $documentTypes = null;
         $resolveDocumentTypes = function () use (
             &$documentTypes,
+            $event,
+            $filters,
+            $usesRowLevelFilters,
             $makeFilteredRowsQuery,
             $rememberDashboardValue,
         ): array {
             if ($documentTypes === null) {
                 $documentTypes = $rememberDashboardValue(
                     'document-types',
-                    fn (): array => $this->buildDocumentTypes($makeFilteredRowsQuery()),
+                    fn (): array => $this->buildDocumentTypes(
+                        $event->id,
+                        $filters,
+                        $usesRowLevelFilters,
+                        $usesRowLevelFilters ? $makeFilteredRowsQuery() : null,
+                    ),
                 );
             }
 
@@ -260,15 +271,18 @@ class EventDashboardController extends Controller
             'filterOptions' => Inertia::defer(fn (): array => $rememberDashboardValue(
                 'filter-options',
                 fn (): array => [
-                    'barGroups' => $this->buildBarGroupOptions($makeBaseRowsQuery()),
-                    'stores' => $this->buildStoreOptions($makeBaseRowsQuery()),
-                    'products' => $this->buildProductOptions($makeBaseRowsQuery()),
+                    'barGroups' => $this->buildBarGroupOptions($event->id),
+                    'stores' => $this->buildStoreOptions($event->id),
+                    'products' => $this->buildProductOptions($event->id),
                 ],
                 false,
             ), 'dashboard-operational'),
             'summary' => fn (): array => $rememberDashboardValue(
                 'summary',
                 fn (): array => $this->buildSummary(
+                    $event->id,
+                    $filters,
+                    $usesRowLevelFilters,
                     $makeBaseRowsQuery(),
                     $makeFilteredRowsQuery(),
                     (int) $event->processing_report_imports_count,
@@ -279,29 +293,61 @@ class EventDashboardController extends Controller
             ),
             'barGroups' => Inertia::defer(fn (): array => $rememberDashboardValue(
                 'bar-groups',
-                fn (): array => $this->buildBarGroups($makeFilteredRowsQuery()),
+                fn (): array => $this->buildBarGroups(
+                    $event->id,
+                    $filters,
+                    $usesRowLevelFilters,
+                    $usesRowLevelFilters ? $makeFilteredRowsQuery() : null,
+                ),
             ), 'dashboard-operational'),
             'zoneDevices' => Inertia::defer(fn (): array => $rememberDashboardValue(
                 'zone-devices',
-                fn (): array => $this->buildZoneDevices($makeFilteredRowsQuery()),
+                fn (): array => $this->buildZoneDevices(
+                    $event->id,
+                    $filters,
+                    $usesRowLevelFilters,
+                    $usesRowLevelFilters ? $makeFilteredRowsQuery() : null,
+                ),
             ), 'dashboard-operational'),
             'topStores' => Inertia::defer(fn (): array => $rememberDashboardValue(
                 'top-stores',
-                fn (): array => $this->buildTopStores($makeFilteredRowsQuery()),
+                fn (): array => $this->buildTopStores(
+                    $event->id,
+                    $filters,
+                    $usesRowLevelFilters,
+                    $usesRowLevelFilters ? $makeFilteredRowsQuery() : null,
+                ),
             ), 'dashboard-operational'),
             'topProducts' => Inertia::defer(fn (): array => $rememberDashboardValue(
                 'top-products',
-                fn (): array => $this->buildTopProducts($makeFilteredProductRowsQuery()),
+                fn (): array => $this->buildTopProducts(
+                    $event->id,
+                    $filters,
+                    $usesRowLevelFilters,
+                    $event->show_zt_card,
+                    $usesRowLevelFilters ? $makeFilteredProductRowsQuery() : null,
+                ),
             ), 'dashboard-products'),
             'productBreakdowns' => Inertia::defer(fn (): array => $rememberDashboardValue(
                 'product-breakdowns',
-                fn (): array => $this->buildProductBreakdowns($makeFilteredProductRowsQuery()),
+                fn (): array => $this->buildProductBreakdowns(
+                    $event->id,
+                    $filters,
+                    $usesRowLevelFilters,
+                    $event->show_zt_card,
+                    $usesRowLevelFilters ? $makeFilteredProductRowsQuery() : null,
+                ),
             ), 'dashboard-products'),
             'dailySales' => fn (): array => $resolveDailyBreakdowns(),
             'dailyBreakdowns' => fn (): array => $resolveDailyBreakdowns(),
             'hourlySales' => Inertia::defer(fn (): array => $rememberDashboardValue(
                 'hourly-sales',
-                fn (): array => $this->buildHourlySales($makeFilteredRowsQuery()),
+                fn (): array => $this->buildHourlySales(
+                    $event->id,
+                    $filters,
+                    $usesRowLevelFilters,
+                    $usesRowLevelFilters ? $makeFilteredRowsQuery() : null,
+                ),
             ), 'dashboard-analytics'),
             'documentTypes' => Inertia::optional(fn (): array => $resolveDocumentTypes()),
             'paymentSummary' => fn (): array => $rememberDashboardValue(
@@ -325,7 +371,6 @@ class EventDashboardController extends Controller
                 'comparison',
                 fn (): array => $this->buildComparison(
                     $event,
-                    $makeBaseRowsQuery(),
                     $latestActiveImportSummary,
                 ),
                 false,
@@ -589,11 +634,123 @@ class EventDashboardController extends Controller
     }
 
     /**
+     * PERF-401 (fatia 1): true when a request filter can't be answered
+     * correctly from the pre-aggregated tables. total_min/total_max need
+     * individual-row precision (a pre-summed bucket can't tell whether any
+     * one of its rows crossed the threshold). product needs tickets_count
+     * scoped to "tickets that contain this product", which
+     * event_report_ticket_aggregates can't express (it has no product
+     * dimension — a ticket can span several products). Whenever this is
+     * true, every aggregate-capable builder below falls back to querying
+     * event_report_rows directly, exactly as it did before this file had
+     * aggregate tables at all.
+     *
+     * @param  array<string, mixed>  $filters
+     */
+    private function usesRowLevelFilters(array $filters): bool
+    {
+        return $filters['total_min'] !== '' || $filters['total_max'] !== '' || $filters['product'] !== '';
+    }
+
+    private function aggregateRowsBaseQuery(int $eventId): Builder
+    {
+        return EventReportRowAggregate::query()
+            ->where('event_id', $eventId)
+            ->where(fn (Builder $builder) => $builder
+                ->whereNull('doc_type')
+                ->orWhereNotIn('doc_type', self::NON_SALES_DOCUMENT_TYPES));
+    }
+
+    private function aggregateProductRowsBaseQuery(int $eventId, bool $includeZt): Builder
+    {
+        $query = EventReportRowAggregate::query()
+            ->where('event_id', $eventId)
+            ->where(fn (Builder $builder) => $builder->whereNull('doc_type')->orWhere('doc_type', '!=', 'CM'));
+
+        if (! $includeZt) {
+            $query->where(fn (Builder $builder) => $builder->whereNull('doc_type')->orWhere('doc_type', '!=', 'ZT'));
+        }
+
+        return $query;
+    }
+
+    private function aggregateTicketsBaseQuery(int $eventId): Builder
+    {
+        return EventReportTicketAggregate::query()
+            ->where('event_id', $eventId)
+            ->where(fn (Builder $builder) => $builder
+                ->whereNull('doc_type')
+                ->orWhereNotIn('doc_type', self::NON_SALES_DOCUMENT_TYPES));
+    }
+
+    /**
+     * bar_groups/store/date/hour only — the two filters that disqualify the
+     * aggregate path entirely (total_min/max, product) never reach here,
+     * see usesRowLevelFilters().
+     *
+     * @param  array<string, mixed>  $filters
+     */
+    private function applyAggregateFilters(Builder $query, array $filters): Builder
+    {
+        if ($filters['bar_groups'] !== []) {
+            $this->applyBarGroupsFilter($query, $filters['bar_groups']);
+        }
+
+        if ($filters['store'] !== '') {
+            $query->where('store_name', $filters['store']);
+        }
+
+        if ($filters['date_from'] !== '') {
+            $query->where('sale_date', '>=', $filters['date_from']);
+        }
+
+        if ($filters['date_to'] !== '') {
+            $query->where('sale_date', '<=', $filters['date_to']);
+        }
+
+        $this->applyAggregateHourFilter($query, $filters['hour_from'], $filters['hour_to']);
+
+        return $query;
+    }
+
+    /**
+     * Same wraparound semantics as applyHourFilter() (used for the
+     * row-level fallback), but sale_hour is already a plain integer column
+     * on the aggregate tables — no driver-specific HOUR() extraction
+     * needed here, that work already happened once at write time.
+     */
+    private function applyAggregateHourFilter(Builder $query, string $hourFrom, string $hourTo): void
+    {
+        if ($hourFrom === '' && $hourTo === '') {
+            return;
+        }
+
+        $query->whereNotNull('sale_hour')
+            ->where(function (Builder $hourQuery) use ($hourFrom, $hourTo): void {
+                if ($hourFrom !== '' && $hourTo !== '' && (int) $hourFrom > (int) $hourTo) {
+                    $hourQuery
+                        ->where('sale_hour', '>=', (int) $hourFrom)
+                        ->orWhere('sale_hour', '<=', (int) $hourTo);
+
+                    return;
+                }
+
+                if ($hourFrom !== '') {
+                    $hourQuery->where('sale_hour', '>=', (int) $hourFrom);
+                }
+
+                if ($hourTo !== '') {
+                    $hourQuery->where('sale_hour', '<=', (int) $hourTo);
+                }
+            });
+    }
+
+    /**
      * @return array<int, array<string, mixed>>
      */
-    private function buildBarGroupOptions(Builder $query): array
+    private function buildBarGroupOptions(int $eventId): array
     {
-        return collect($this->buildBarGroups($query))
+        return collect($this->buildBarGroups($eventId, $this->emptyFilters(), false, null))
             ->map(fn (array $group): array => [
                 'value' => (string) $group['label'],
                 'label' => (string) $group['label'],
@@ -605,19 +762,24 @@ class EventDashboardController extends Controller
     }
 
     /**
+     * PERF-401 (fatia 1): always reads event_report_row_aggregates —
+     * called only with the unfiltered base query (filterOptions ignores
+     * request filters by design), so there's no total_min/max/product
+     * fallback case to consider here at all.
+     *
      * @return array<int, array<string, mixed>>
      */
-    private function buildStoreOptions(Builder $query): array
+    private function buildStoreOptions(int $eventId): array
     {
-        return $query
-            ->select('store_name')
-            ->selectRaw('COUNT(*) as rows_count')
+        return $this->aggregateRowsBaseQuery($eventId)
             ->whereNotNull('store_name')
             ->where('store_name', '!=', '')
+            ->select('store_name')
+            ->selectRaw('SUM(rows_count) as rows_count')
             ->groupBy('store_name')
             ->orderBy('store_name')
             ->get()
-            ->map(fn (EventReportRow $row): array => [
+            ->map(fn (EventReportRowAggregate $row): array => [
                 'value' => (string) $row->store_name,
                 'label' => (string) $row->store_name,
                 'rows_count' => (int) $row->rows_count,
@@ -629,18 +791,18 @@ class EventDashboardController extends Controller
     /**
      * @return array<int, array<string, mixed>>
      */
-    private function buildProductOptions(Builder $query): array
+    private function buildProductOptions(int $eventId): array
     {
-        return $query
-            ->select('product_code', 'description')
-            ->selectRaw('COUNT(*) as rows_count')
+        return $this->aggregateRowsBaseQuery($eventId)
             ->whereNotNull('product_code')
             ->where('product_code', '!=', '')
+            ->select('product_code', 'description')
+            ->selectRaw('SUM(rows_count) as rows_count')
             ->groupBy('product_code', 'description')
             ->orderBy('description')
             ->orderBy('product_code')
             ->get()
-            ->map(fn (EventReportRow $row): array => [
+            ->map(fn (EventReportRowAggregate $row): array => [
                 'value' => (string) $row->product_code,
                 'label' => trim(sprintf(
                     '%s%s',
@@ -654,28 +816,51 @@ class EventDashboardController extends Controller
     }
 
     /**
+     * @param  array<string, mixed>  $filters
      * @return array<string, mixed>
      */
     private function buildSummary(
-        Builder $baseRowsQuery,
-        Builder $filteredRowsQuery,
+        int $eventId,
+        array $filters,
+        bool $usesRowLevelFilters,
+        ?Builder $baseRowsQuery,
+        ?Builder $filteredRowsQuery,
         int $processingImportsCount,
         ?string $lastSyncedAt,
         int $machinesCount,
         array $documentTypes,
     ): array {
-        $totals = (clone $filteredRowsQuery)
-            ->selectRaw('COUNT(*) as rows_count')
-            ->selectRaw('COALESCE(SUM(total), 0) as total_sales')
-            ->selectRaw('COALESCE(SUM(value), 0) as total_value')
-            ->selectRaw('COALESCE(SUM(discount), 0) as total_discount')
-            ->selectRaw('COALESCE(SUM(quantity), 0) as total_quantity')
-            ->selectRaw("COUNT(DISTINCT CASE WHEN store_name IS NOT NULL AND store_name != '' THEN store_name END) as stores_count")
-            ->selectRaw("COUNT(DISTINCT CASE WHEN product_code IS NOT NULL AND product_code != '' THEN product_code END) as products_count")
-            ->first();
+        if ($usesRowLevelFilters) {
+            $totals = (clone $filteredRowsQuery)
+                ->selectRaw('COUNT(*) as rows_count')
+                ->selectRaw('COALESCE(SUM(total), 0) as total_sales')
+                ->selectRaw('COALESCE(SUM(value), 0) as total_value')
+                ->selectRaw('COALESCE(SUM(discount), 0) as total_discount')
+                ->selectRaw('COALESCE(SUM(quantity), 0) as total_quantity')
+                ->selectRaw("COUNT(DISTINCT CASE WHEN store_name IS NOT NULL AND store_name != '' THEN store_name END) as stores_count")
+                ->selectRaw("COUNT(DISTINCT CASE WHEN product_code IS NOT NULL AND product_code != '' THEN product_code END) as products_count")
+                ->first();
+            $totalRows = (int) ((clone $baseRowsQuery)->count());
+            $eventTotalSales = (float) ((clone $baseRowsQuery)->sum('total') ?? 0);
+            $barGroupsCount = count($this->buildBarGroups($eventId, $filters, true, clone $filteredRowsQuery));
+        } else {
+            $aggFiltered = $this->applyAggregateFilters($this->aggregateRowsBaseQuery($eventId), $filters);
+            $totals = (clone $aggFiltered)
+                ->selectRaw('COALESCE(SUM(rows_count), 0) as rows_count')
+                ->selectRaw('COALESCE(SUM(total_sum), 0) as total_sales')
+                ->selectRaw('COALESCE(SUM(value_total), 0) as total_value')
+                ->selectRaw('COALESCE(SUM(discount_total), 0) as total_discount')
+                ->selectRaw('COALESCE(SUM(quantity_total), 0) as total_quantity')
+                ->selectRaw("COUNT(DISTINCT CASE WHEN store_name IS NOT NULL AND store_name != '' THEN store_name END) as stores_count")
+                ->selectRaw("COUNT(DISTINCT CASE WHEN product_code IS NOT NULL AND product_code != '' THEN product_code END) as products_count")
+                ->first();
+            $totalRows = (int) ($this->aggregateRowsBaseQuery($eventId)->sum('rows_count') ?? 0);
+            $eventTotalSales = (float) ($this->aggregateRowsBaseQuery($eventId)->sum('total_sum') ?? 0);
+            $barGroupsCount = count($this->buildBarGroups($eventId, $filters, false, null));
+        }
+
         $filteredRowsCount = (int) ($totals?->rows_count ?? 0);
         $totalSales = (float) ($totals?->total_sales ?? 0);
-        $eventTotalSales = (float) ((clone $baseRowsQuery)->sum('total') ?? 0);
         $ticketsCount = array_sum(array_map(
             fn (array $documentType): int => (int) ($documentType['tickets_count'] ?? 0),
             $documentTypes,
@@ -683,9 +868,9 @@ class EventDashboardController extends Controller
 
         return [
             'processing_imports_count' => $processingImportsCount,
-            'total_rows' => (int) ((clone $baseRowsQuery)->count()),
+            'total_rows' => $totalRows,
             'filtered_rows' => $filteredRowsCount,
-            'bar_groups_count' => count($this->buildBarGroups(clone $filteredRowsQuery)),
+            'bar_groups_count' => $barGroupsCount,
             'total_sales' => $totalSales,
             'event_total_sales' => $eventTotalSales,
             'total_value' => (float) ($totals?->total_value ?? 0),
@@ -704,24 +889,66 @@ class EventDashboardController extends Controller
     }
 
     /**
+     * @param  array<string, mixed>  $filters
      * @return array<int, array<string, mixed>>
      */
-    private function buildBarGroups(Builder $query): array
+    private function buildBarGroups(int $eventId, array $filters, bool $usesRowLevelFilters, ?Builder $rowQuery): array
     {
-        $ticketExpression = $this->ticketSqlExpression($query);
+        if ($usesRowLevelFilters) {
+            $ticketExpression = $this->ticketSqlExpression($rowQuery);
 
-        /** @var Collection<int, EventReportRow> $stores */
-        $stores = $query
+            $stores = $rowQuery
+                ->select('store_name', 'store_code')
+                ->selectRaw('COUNT(*) as rows_count')
+                ->selectRaw("COUNT(DISTINCT {$ticketExpression}) as tickets_count")
+                ->selectRaw('COALESCE(SUM(quantity), 0) as quantity_total')
+                ->selectRaw('COALESCE(SUM(total), 0) as sales_total')
+                ->groupBy('store_name', 'store_code')
+                ->get()
+                ->map(fn (EventReportRow $row): object => (object) [
+                    'store_name' => $row->store_name,
+                    'rows_count' => (int) $row->rows_count,
+                    'tickets_count' => (int) $row->tickets_count,
+                    'quantity_total' => (float) $row->quantity_total,
+                    'sales_total' => (float) $row->sales_total,
+                ]);
+
+            return $this->summarizeStoreGroups($stores);
+        }
+
+        $storeSales = $this->applyAggregateFilters($this->aggregateRowsBaseQuery($eventId), $filters)
             ->select('store_name', 'store_code')
-            ->selectRaw('COUNT(*) as rows_count')
-            ->selectRaw("COUNT(DISTINCT {$ticketExpression}) as tickets_count")
-            ->selectRaw('COALESCE(SUM(quantity), 0) as quantity_total')
-            ->selectRaw('COALESCE(SUM(total), 0) as sales_total')
+            ->selectRaw('COALESCE(SUM(rows_count), 0) as rows_count')
+            ->selectRaw('COALESCE(SUM(quantity_total), 0) as quantity_total')
+            ->selectRaw('COALESCE(SUM(total_sum), 0) as sales_total')
             ->groupBy('store_name', 'store_code')
             ->get();
+        $ticketCounts = $this->aggregateTicketCountsByStore($eventId, $filters);
 
+        $stores = $storeSales->map(fn (EventReportRowAggregate $row): object => (object) [
+            'store_name' => $row->store_name,
+            'rows_count' => (int) $row->rows_count,
+            'tickets_count' => $ticketCounts->get($this->storeKey($row->store_name, $row->store_code), 0),
+            'quantity_total' => (float) $row->quantity_total,
+            'sales_total' => (float) $row->sales_total,
+        ]);
+
+        return $this->summarizeStoreGroups($stores);
+    }
+
+    /**
+     * Shared by both buildBarGroups() branches — groups a flat list of
+     * per-(store_name, store_code) totals into bar-group labels via
+     * resolveBarGroupLabel(). Each $row needs store_name, tickets_count,
+     * quantity_total, sales_total, rows_count properties.
+     *
+     * @param  Collection<int, object>  $stores
+     * @return array<int, array<string, mixed>>
+     */
+    private function summarizeStoreGroups(Collection $stores): array
+    {
         return $stores
-            ->groupBy(fn (EventReportRow $row): string => $this->resolveBarGroupLabel($row->store_name))
+            ->groupBy(fn (object $row): string => $this->resolveBarGroupLabel($row->store_name))
             ->map(function (Collection $groupStores, string $label): array {
                 $members = $groupStores
                     ->pluck('store_name')
@@ -752,70 +979,176 @@ class EventDashboardController extends Controller
     }
 
     /**
+     * @param  array<string, mixed>  $filters
+     * @return Collection<string, int> tickets_count keyed by "store_name|store_code"
+     */
+    private function aggregateTicketCountsByStore(int $eventId, array $filters): Collection
+    {
+        return $this->applyAggregateFilters($this->aggregateTicketsBaseQuery($eventId), $filters)
+            ->select('store_name', 'store_code')
+            ->selectRaw('COUNT(*) as tickets_count')
+            ->groupBy('store_name', 'store_code')
+            ->get()
+            ->mapWithKeys(fn (object $row): array => [
+                $this->storeKey($row->store_name, $row->store_code) => (int) $row->tickets_count,
+            ]);
+    }
+
+    private function storeKey(?string $storeName, ?string $storeCode): string
+    {
+        return ($storeName ?? '').'|'.($storeCode ?? '');
+    }
+
+    /**
      * @return array<int, array<string, mixed>>
      */
-    private function buildTopStores(Builder $query): array
+    /**
+     * @param  array<string, mixed>  $filters
+     * @return array<int, array<string, mixed>>
+     */
+    private function buildTopStores(int $eventId, array $filters, bool $usesRowLevelFilters, ?Builder $rowQuery): array
     {
-        return $query
+        if ($usesRowLevelFilters) {
+            return $rowQuery
+                ->select('store_name', 'store_code')
+                ->selectRaw('COUNT(*) as rows_count')
+                ->selectRaw('COALESCE(SUM(quantity), 0) as quantity_total')
+                ->selectRaw('COALESCE(SUM(total), 0) as sales_total')
+                ->groupBy('store_name', 'store_code')
+                ->orderByDesc('sales_total')
+                ->get()
+                ->map(fn (EventReportRow $row): array => [
+                    'label' => $row->store_name ?: 'Sem loja',
+                    'code' => $row->store_code,
+                    'rows_count' => (int) $row->rows_count,
+                    'quantity_total' => (float) ($row->quantity_total ?? 0),
+                    'sales_total' => (float) ($row->sales_total ?? 0),
+                ])
+                ->values()
+                ->all();
+        }
+
+        return $this->applyAggregateFilters($this->aggregateRowsBaseQuery($eventId), $filters)
             ->select('store_name', 'store_code')
-            ->selectRaw('COUNT(*) as rows_count')
-            ->selectRaw('COALESCE(SUM(quantity), 0) as quantity_total')
-            ->selectRaw('COALESCE(SUM(total), 0) as sales_total')
+            ->selectRaw('COALESCE(SUM(rows_count), 0) as rows_count')
+            ->selectRaw('COALESCE(SUM(quantity_total), 0) as quantity_total')
+            ->selectRaw('COALESCE(SUM(total_sum), 0) as sales_total')
             ->groupBy('store_name', 'store_code')
             ->orderByDesc('sales_total')
             ->get()
-            ->map(fn (EventReportRow $row): array => [
+            ->map(fn (EventReportRowAggregate $row): array => [
                 'label' => $row->store_name ?: 'Sem loja',
                 'code' => $row->store_code,
                 'rows_count' => (int) $row->rows_count,
-                'quantity_total' => (float) ($row->quantity_total ?? 0),
-                'sales_total' => (float) ($row->sales_total ?? 0),
+                'quantity_total' => (float) $row->quantity_total,
+                'sales_total' => (float) $row->sales_total,
             ])
             ->values()
             ->all();
     }
 
     /**
+     * @param  array<string, mixed>  $filters
      * @return array<int, array<string, mixed>>
      */
-    private function buildTopProducts(Builder $query): array
+    private function buildTopProducts(int $eventId, array $filters, bool $usesRowLevelFilters, bool $includeZt, ?Builder $rowQuery): array
     {
         $productCode = "CASE WHEN doc_type = 'ZT' THEN 'ZT-CARD' ELSE product_code END";
         $productDescription = "CASE WHEN doc_type = 'ZT' THEN 'Contactless' ELSE description END";
 
-        return $query
+        if ($usesRowLevelFilters) {
+            return $rowQuery
+                ->selectRaw("{$productCode} as product_code")
+                ->selectRaw("{$productDescription} as description")
+                ->selectRaw('COUNT(*) as rows_count')
+                ->selectRaw('COALESCE(SUM(quantity), 0) as quantity_total')
+                ->selectRaw('COALESCE(SUM(CASE WHEN total = 0 THEN quantity ELSE 0 END), 0) as offered_quantity')
+                ->selectRaw('COALESCE(SUM(CASE WHEN total != 0 THEN quantity ELSE 0 END), 0) as sold_quantity')
+                ->selectRaw('COALESCE(SUM(total), 0) as sales_total')
+                ->groupByRaw("{$productCode}, {$productDescription}")
+                ->orderByDesc('quantity_total')
+                ->orderByDesc('sales_total')
+                ->limit(12)
+                ->get()
+                ->map(fn (EventReportRow $row): array => [
+                    'label' => $row->description ?: 'Produto sem descricao',
+                    'code' => $row->product_code,
+                    'rows_count' => (int) $row->rows_count,
+                    'quantity_total' => (float) ($row->quantity_total ?? 0),
+                    'offered_quantity' => (float) ($row->offered_quantity ?? 0),
+                    'sold_quantity' => (float) ($row->sold_quantity ?? 0),
+                    'category' => 'Sem categoria',
+                    'sales_total' => (float) ($row->sales_total ?? 0),
+                ])
+                ->values()
+                ->all();
+        }
+
+        return $this->applyAggregateFilters($this->aggregateProductRowsBaseQuery($eventId, $includeZt), $filters)
             ->selectRaw("{$productCode} as product_code")
             ->selectRaw("{$productDescription} as description")
-            ->selectRaw('COUNT(*) as rows_count')
-            ->selectRaw('COALESCE(SUM(quantity), 0) as quantity_total')
-            ->selectRaw('COALESCE(SUM(CASE WHEN total = 0 THEN quantity ELSE 0 END), 0) as offered_quantity')
-            ->selectRaw('COALESCE(SUM(CASE WHEN total != 0 THEN quantity ELSE 0 END), 0) as sold_quantity')
-            ->selectRaw('COALESCE(SUM(total), 0) as sales_total')
+            ->selectRaw('COALESCE(SUM(rows_count), 0) as rows_count')
+            ->selectRaw('COALESCE(SUM(quantity_total), 0) as quantity_total')
+            ->selectRaw('COALESCE(SUM(offered_quantity_total), 0) as offered_quantity')
+            ->selectRaw('COALESCE(SUM(sold_quantity_total), 0) as sold_quantity')
+            ->selectRaw('COALESCE(SUM(total_sum), 0) as sales_total')
             ->groupByRaw("{$productCode}, {$productDescription}")
             ->orderByDesc('quantity_total')
             ->orderByDesc('sales_total')
             ->limit(12)
             ->get()
-            ->map(fn (EventReportRow $row): array => [
+            ->map(fn (object $row): array => [
                 'label' => $row->description ?: 'Produto sem descricao',
                 'code' => $row->product_code,
                 'rows_count' => (int) $row->rows_count,
-                'quantity_total' => (float) ($row->quantity_total ?? 0),
-                'offered_quantity' => (float) ($row->offered_quantity ?? 0),
-                'sold_quantity' => (float) ($row->sold_quantity ?? 0),
+                'quantity_total' => (float) $row->quantity_total,
+                'offered_quantity' => (float) $row->offered_quantity,
+                'sold_quantity' => (float) $row->sold_quantity,
                 'category' => 'Sem categoria',
-                'sales_total' => (float) ($row->sales_total ?? 0),
+                'sales_total' => (float) $row->sales_total,
             ])
             ->values()
             ->all();
     }
 
     /**
+     * @param  array<string, mixed>  $filters
      * @return array{total: array<int, array<string, mixed>>, days: array<int, array<string, mixed>>}
      */
-    private function buildProductBreakdowns(Builder $query): array
+    private function buildProductBreakdowns(int $eventId, array $filters, bool $usesRowLevelFilters, bool $includeZt, ?Builder $rowQuery): array
     {
-        $dates = (clone $query)
+        if (! $usesRowLevelFilters) {
+            $dates = $this->applyAggregateFilters($this->aggregateProductRowsBaseQuery($eventId, $includeZt), $filters)
+                ->whereNotNull('sale_date')
+                ->select('sale_date')
+                ->distinct()
+                ->get()
+                ->pluck('sale_date')
+                ->map(fn (\Carbon\CarbonInterface $date): string => $date->toDateString())
+                ->unique()
+                ->sort()
+                ->values();
+
+            return [
+                'total' => $this->buildTopProducts($eventId, $filters, false, $includeZt, null),
+                'days' => $dates
+                    ->map(fn (string $date): array => [
+                        'date' => $date,
+                        'label' => CarbonImmutable::parse($date)->locale('pt_PT')->translatedFormat('d M'),
+                        'items' => $this->buildTopProducts(
+                            $eventId,
+                            [...$filters, 'date_from' => $date, 'date_to' => $date],
+                            false,
+                            $includeZt,
+                            null,
+                        ),
+                    ])
+                    ->values()
+                    ->all(),
+            ];
+        }
+
+        $dates = (clone $rowQuery)
             ->where(fn (Builder $dateQuery) => $dateQuery
                 ->whereNotNull('sale_datetime')
                 ->orWhereNotNull('sale_date'))
@@ -827,13 +1160,17 @@ class EventDashboardController extends Controller
             ->values();
 
         return [
-            'total' => $this->buildTopProducts(clone $query),
+            'total' => $this->buildTopProducts($eventId, $filters, true, $includeZt, clone $rowQuery),
             'days' => $dates
                 ->map(fn (string $date): array => [
                     'date' => $date,
                     'label' => CarbonImmutable::parse($date)->locale('pt_PT')->translatedFormat('d M'),
                     'items' => $this->buildTopProducts(
-                        $this->applyReportingDateFilter(clone $query, '=', $date),
+                        $eventId,
+                        $filters,
+                        true,
+                        $includeZt,
+                        $this->applyReportingDateFilter(clone $rowQuery, '=', $date),
                     ),
                 ])
                 ->values()
@@ -884,39 +1221,78 @@ class EventDashboardController extends Controller
     }
 
     /**
+     * @param  array<string, mixed>  $filters
      * @return array<int, array{date: string, label: string, hour: int, hour_label: string, sales_total: float, tickets_count: int}>
      */
-    private function buildHourlySales(Builder $query): array
+    private function buildHourlySales(int $eventId, array $filters, bool $usesRowLevelFilters, ?Builder $rowQuery): array
     {
-        $driver = $query->getModel()->getConnection()->getDriverName();
+        if ($usesRowLevelFilters) {
+            $driver = $rowQuery->getModel()->getConnection()->getDriverName();
 
-        [$dateExpression, $hourExpression] = match ($driver) {
-            'pgsql' => [
-                "TO_CHAR(sale_datetime, 'YYYY-MM-DD')",
-                'CAST(EXTRACT(HOUR FROM sale_datetime) AS INTEGER)',
-            ],
-            'mysql', 'mariadb' => [
-                "DATE_FORMAT(sale_datetime, '%Y-%m-%d')",
-                'HOUR(sale_datetime)',
-            ],
-            default => [
-                "strftime('%Y-%m-%d', sale_datetime)",
-                "CAST(strftime('%H', sale_datetime) AS INTEGER)",
-            ],
-        };
-        $ticketExpression = $this->ticketSqlExpression($query);
+            [$dateExpression, $hourExpression] = match ($driver) {
+                'pgsql' => [
+                    "TO_CHAR(sale_datetime, 'YYYY-MM-DD')",
+                    'CAST(EXTRACT(HOUR FROM sale_datetime) AS INTEGER)',
+                ],
+                'mysql', 'mariadb' => [
+                    "DATE_FORMAT(sale_datetime, '%Y-%m-%d')",
+                    'HOUR(sale_datetime)',
+                ],
+                default => [
+                    "strftime('%Y-%m-%d', sale_datetime)",
+                    "CAST(strftime('%H', sale_datetime) AS INTEGER)",
+                ],
+            };
+            $ticketExpression = $this->ticketSqlExpression($rowQuery);
 
-        return $query
-            ->whereNotNull('sale_datetime')
-            ->selectRaw("{$dateExpression} as sale_day")
-            ->selectRaw("{$hourExpression} as sale_hour")
-            ->selectRaw('COALESCE(SUM(total), 0) as sales_total')
-            ->selectRaw("COUNT(DISTINCT {$ticketExpression}) as tickets_count")
-            ->groupByRaw("{$dateExpression}, {$hourExpression}")
-            ->orderByRaw("{$dateExpression}, {$hourExpression}")
+            return $rowQuery
+                ->whereNotNull('sale_datetime')
+                ->selectRaw("{$dateExpression} as sale_day")
+                ->selectRaw("{$hourExpression} as sale_hour")
+                ->selectRaw('COALESCE(SUM(total), 0) as sales_total')
+                ->selectRaw("COUNT(DISTINCT {$ticketExpression}) as tickets_count")
+                ->groupByRaw("{$dateExpression}, {$hourExpression}")
+                ->orderByRaw("{$dateExpression}, {$hourExpression}")
+                ->get()
+                ->map(function (EventReportRow $row): array {
+                    $date = (string) $row->sale_day;
+                    $hour = (int) $row->sale_hour;
+
+                    return [
+                        'date' => $date,
+                        'label' => CarbonImmutable::parse($date)->locale('pt_PT')->translatedFormat('d M'),
+                        'hour' => $hour,
+                        'hour_label' => sprintf('%02d:00', $hour),
+                        'sales_total' => round((float) ($row->sales_total ?? 0), 4),
+                        'tickets_count' => (int) ($row->tickets_count ?? 0),
+                    ];
+                })
+                ->values()
+                ->all();
+        }
+
+        $rows = $this->applyAggregateFilters($this->aggregateRowsBaseQuery($eventId), $filters)
+            ->whereNotNull('sale_hour')
+            ->select('sale_date', 'sale_hour')
+            ->selectRaw('COALESCE(SUM(total_sum), 0) as sales_total')
+            ->groupBy('sale_date', 'sale_hour')
+            ->orderBy('sale_date')
+            ->orderBy('sale_hour')
+            ->get();
+
+        $ticketsByHour = $this->applyAggregateFilters($this->aggregateTicketsBaseQuery($eventId), $filters)
+            ->whereNotNull('sale_hour')
+            ->select('sale_date', 'sale_hour')
+            ->selectRaw('COUNT(*) as tickets_count')
+            ->groupBy('sale_date', 'sale_hour')
             ->get()
-            ->map(function (EventReportRow $row): array {
-                $date = (string) $row->sale_day;
+            ->mapWithKeys(fn (object $row): array => [
+                $row->sale_date->toDateString().'|'.$row->sale_hour => (int) $row->tickets_count,
+            ]);
+
+        return $rows
+            ->map(function (EventReportRowAggregate $row) use ($ticketsByHour): array {
+                $date = $row->sale_date->toDateString();
                 $hour = (int) $row->sale_hour;
 
                 return [
@@ -924,8 +1300,8 @@ class EventDashboardController extends Controller
                     'label' => CarbonImmutable::parse($date)->locale('pt_PT')->translatedFormat('d M'),
                     'hour' => $hour,
                     'hour_label' => sprintf('%02d:00', $hour),
-                    'sales_total' => round((float) ($row->sales_total ?? 0), 4),
-                    'tickets_count' => (int) ($row->tickets_count ?? 0),
+                    'sales_total' => round((float) $row->sales_total, 4),
+                    'tickets_count' => (int) ($ticketsByHour->get($date.'|'.$hour) ?? 0),
                 ];
             })
             ->values()
@@ -1052,25 +1428,37 @@ class EventDashboardController extends Controller
     }
 
     /**
+     * @param  array<string, mixed>  $filters
      * @return array<int, array<string, mixed>>
      */
-    private function buildZoneDevices(Builder $query): array
+    private function buildZoneDevices(int $eventId, array $filters, bool $usesRowLevelFilters, ?Builder $rowQuery): array
     {
-        /** @var Collection<int, EventReportRow> $rows */
-        $rows = $query
-            ->select('store_name', 'store_code')
-            ->selectRaw('COUNT(*) as rows_count')
-            ->selectRaw('COALESCE(SUM(quantity), 0) as quantity_total')
-            ->selectRaw('COALESCE(SUM(total), 0) as sales_total')
-            ->groupBy('store_name', 'store_code')
-            ->orderByDesc('sales_total')
-            ->get();
+        if ($usesRowLevelFilters) {
+            /** @var Collection<int, EventReportRow> $rows */
+            $rows = $rowQuery
+                ->select('store_name', 'store_code')
+                ->selectRaw('COUNT(*) as rows_count')
+                ->selectRaw('COALESCE(SUM(quantity), 0) as quantity_total')
+                ->selectRaw('COALESCE(SUM(total), 0) as sales_total')
+                ->groupBy('store_name', 'store_code')
+                ->orderByDesc('sales_total')
+                ->get();
+        } else {
+            $rows = $this->applyAggregateFilters($this->aggregateRowsBaseQuery($eventId), $filters)
+                ->select('store_name', 'store_code')
+                ->selectRaw('COALESCE(SUM(rows_count), 0) as rows_count')
+                ->selectRaw('COALESCE(SUM(quantity_total), 0) as quantity_total')
+                ->selectRaw('COALESCE(SUM(total_sum), 0) as sales_total')
+                ->groupBy('store_name', 'store_code')
+                ->orderByDesc('sales_total')
+                ->get();
+        }
 
         return $rows
-            ->groupBy(fn (EventReportRow $row): string => $this->resolveBarGroupLabel($row->store_name))
+            ->groupBy(fn (object $row): string => $this->resolveBarGroupLabel($row->store_name))
             ->map(function (Collection $zoneRows, string $label): array {
                 $items = $zoneRows
-                    ->map(fn (EventReportRow $row): array => [
+                    ->map(fn (object $row): array => [
                         'label' => $row->store_name ?: 'Sem loja',
                         'code' => $row->store_code,
                         'rows_count' => (int) ($row->rows_count ?? 0),
@@ -1093,34 +1481,71 @@ class EventDashboardController extends Controller
     }
 
     /**
+     * @param  array<string, mixed>  $filters
      * @return array<int, array<string, mixed>>
      */
-    private function buildDocumentTypes(Builder $query): array
+    private function buildDocumentTypes(int $eventId, array $filters, bool $usesRowLevelFilters, ?Builder $rowQuery): array
     {
         $documentTypeExpression = "CASE WHEN doc_type IS NULL OR TRIM(doc_type) = '' THEN 'Sem tipo' ELSE doc_type END";
-        $ticketExpression = $this->ticketSqlExpression($query);
 
-        return $query
+        if ($usesRowLevelFilters) {
+            $ticketExpression = $this->ticketSqlExpression($rowQuery);
+
+            return $rowQuery
+                ->selectRaw("{$documentTypeExpression} as document_type_label")
+                ->selectRaw("COUNT(DISTINCT {$ticketExpression}) as tickets_count")
+                ->selectRaw('COUNT(*) as rows_count')
+                ->selectRaw('COALESCE(SUM(quantity), 0) as quantity_total')
+                ->selectRaw('COALESCE(SUM(total), 0) as sales_total')
+                ->groupByRaw($documentTypeExpression)
+                ->orderByDesc('sales_total')
+                ->get()
+                ->map(function (EventReportRow $row): array {
+                    $label = (string) $row->document_type_label;
+
+                    return [
+                        'label' => $label,
+                        'code' => $label === 'Sem tipo' ? null : $label,
+                        'tickets_count' => (int) ($row->tickets_count ?? 0),
+                        'rows_count' => (int) ($row->rows_count ?? 0),
+                        'quantity_total' => round((float) ($row->quantity_total ?? 0), 4),
+                        'sales_total' => round((float) ($row->sales_total ?? 0), 4),
+                    ];
+                })
+                ->values()
+                ->all();
+        }
+
+        $rows = $this->applyAggregateFilters($this->aggregateRowsBaseQuery($eventId), $filters)
             ->selectRaw("{$documentTypeExpression} as document_type_label")
-            ->selectRaw("COUNT(DISTINCT {$ticketExpression}) as tickets_count")
-            ->selectRaw('COUNT(*) as rows_count')
-            ->selectRaw('COALESCE(SUM(quantity), 0) as quantity_total')
-            ->selectRaw('COALESCE(SUM(total), 0) as sales_total')
+            ->selectRaw('COALESCE(SUM(rows_count), 0) as rows_count')
+            ->selectRaw('COALESCE(SUM(quantity_total), 0) as quantity_total')
+            ->selectRaw('COALESCE(SUM(total_sum), 0) as sales_total')
             ->groupByRaw($documentTypeExpression)
-            ->orderByDesc('sales_total')
             ->get()
-            ->map(function (EventReportRow $row): array {
+            ->keyBy('document_type_label');
+
+        $ticketsByType = $this->applyAggregateFilters($this->aggregateTicketsBaseQuery($eventId), $filters)
+            ->selectRaw("{$documentTypeExpression} as document_type_label")
+            ->selectRaw('COUNT(*) as tickets_count')
+            ->groupByRaw($documentTypeExpression)
+            ->get()
+            ->keyBy('document_type_label');
+
+        return $rows
+            ->map(function (object $row) use ($ticketsByType): array {
                 $label = (string) $row->document_type_label;
 
                 return [
                     'label' => $label,
                     'code' => $label === 'Sem tipo' ? null : $label,
-                    'tickets_count' => (int) ($row->tickets_count ?? 0),
-                    'rows_count' => (int) ($row->rows_count ?? 0),
-                    'quantity_total' => round((float) ($row->quantity_total ?? 0), 4),
-                    'sales_total' => round((float) ($row->sales_total ?? 0), 4),
+                    'tickets_count' => (int) ($ticketsByType->get($label)->tickets_count ?? 0),
+                    'rows_count' => (int) $row->rows_count,
+                    'quantity_total' => round((float) $row->quantity_total, 4),
+                    'sales_total' => round((float) $row->sales_total, 4),
                 ];
             })
+            ->sortByDesc('sales_total')
             ->values()
             ->all();
     }
@@ -1407,7 +1832,6 @@ class EventDashboardController extends Controller
      */
     private function buildComparison(
         Event $event,
-        Builder $currentRowsQuery,
         array $currentImportSummary,
     ): array {
         $previousEvent = Event::query()
@@ -1436,18 +1860,9 @@ class EventDashboardController extends Controller
             ];
         }
 
-        $current = $this->buildComparisonSnapshot(
-            $event,
-            clone $currentRowsQuery,
-            $currentImportSummary,
-        );
+        $current = $this->buildComparisonSnapshot($event, $currentImportSummary);
         $previous = $this->buildComparisonSnapshot(
             $previousEvent,
-            $this->applySalesDocumentScope(
-                EventReportRow::query()
-                    ->where('event_id', $previousEvent->id)
-                    ->fromActiveImports(),
-            ),
             is_array($previousEvent->latestActiveReportImport->summary)
                 ? $previousEvent->latestActiveReportImport->summary
                 : [],
@@ -1504,12 +1919,19 @@ class EventDashboardController extends Controller
      * @param  array<string, mixed>  $importSummary
      * @return array<string, mixed>
      */
-    private function buildComparisonSnapshot(Event $event, Builder $rowsQuery, array $importSummary): array
+    private function buildComparisonSnapshot(Event $event, array $importSummary): array
     {
-        $documentTypes = $this->buildDocumentTypes(clone $rowsQuery);
+        // Comparisons always use empty filters (see emptyFilters() below) —
+        // never total_min/max/product — so this can always take the fast,
+        // aggregate-backed path.
+        $emptyFilters = $this->emptyFilters();
+        $documentTypes = $this->buildDocumentTypes($event->id, $emptyFilters, false, null);
         $summary = $this->buildSummary(
-            clone $rowsQuery,
-            clone $rowsQuery,
+            $event->id,
+            $emptyFilters,
+            false,
+            null,
+            null,
             0,
             $event->latestActiveReportImport?->imported_at?->toISOString(),
             (int) ($importSummary['machines_count'] ?? 0),

@@ -532,7 +532,85 @@ Critério de aceite:
 ### Fase 4 — Dashboard instantâneo
 
 #### PERF-401 — Agregados materializados
-**Prioridade:** P1 · **Estado:** Não iniciado · **Dependências:** PERF-101
+**Prioridade:** P1 · **Estado:** Implementado (fatia 1) · **Dependências:** PERF-101
+
+Implementado em `app/Http/Controllers/EventDashboardController.php` e
+`app/Services/EventReportSyncService.php` (branch
+`perf/101-incremental-natural-key`). **Âmbito reduzido conscientemente**:
+"materializar tudo" tal como descrito acima equivale, na prática, ao
+PERF-101+PERF-201 juntos, e parte é genuinamente incompatível com
+pré-agregação sem perder precisão — ver justificação abaixo. Implementada
+a fatia que cobre o volume real (linhas de venda) e entrega o ganho
+prometido sem tocar na parte financeiramente mais delicada.
+
+**O que foi feito:** duas tabelas novas —
+`event_report_row_aggregates` (grão dia × hora × loja × produto ×
+tipo de documento, por `machine_id`) e `event_report_ticket_aggregates`
+(um registo por documento distinto, só para `COUNT(*)` = `tickets_count`,
+evitando o `COUNT(DISTINCT ...)` caro de hoje). Mantidas dentro da mesma
+transação de publicação do PERF-101 (`EventReportSyncService::refreshRowAggregates()`),
+por máquina tocada no ciclo — `O(linhas da máquina)`, nunca `O(dataset)`.
+Os 8 métodos do `EventDashboardController` que liam `event_report_rows`
+diretamente (`buildSummary`, `buildBarGroups`, `buildTopStores`,
+`buildTopProducts`, `buildProductBreakdowns`, `buildDocumentTypes`,
+`buildHourlySales`, mais as opções de filtro) passam a ler as tabelas
+agregadas — exceto quando `total_min`/`total_max`/`product` estão ativos
+no filtro (ver achado abaixo), caso em que caem para a query original
+sobre `event_report_rows`, inalterada.
+
+**Porque é que `total_min`/`total_max`/`product` não podem usar o caminho
+rápido:** `total_min`/`total_max` filtram pelo total de **uma linha
+individual**; um balde já somado não tem essa granularidade — aplicar o
+filtro depois de somar dá um resultado errado, não só mais lento.
+`product` precisa de `tickets_count` restrito a "bilhetes que contêm este
+produto", e a tabela de bilhetes não tem dimensão de produto (um bilhete
+pode ter vários produtos). A opção escolhida: estes três filtros continuam
+a usar a query direta sobre `event_report_rows` (o comportamento de hoje,
+sem alteração), só o caminho sem estes filtros — a esmagadora maioria do
+tráfego — é que fica rápido.
+
+**Achado ao implementar:** ao juntar contagens de bilhetes por grupo de
+bar (`buildBarGroups`/`buildZoneDevices`), descobri que o mesmo
+`store_code` pode ter várias variantes de `store_name` (POS 1, POS 2 —
+`normalizeSaleRow()` já acrescenta ` - POS N`). Contar bilhetes só por
+`store_code` e atribuir o mesmo total a cada variante de `store_name`
+teria duplicado a contagem ao somar por grupo de bar. Corrigido incluindo
+`store_name` no grão de `event_report_ticket_aggregates`.
+
+**Achado mais sério, só visível a correr os testes:** o cast `date` do
+Eloquent (`EventReportRow::casts()`) só trunca a hora ao *ler* o atributo
+— ao gravar, continua a usar o formato completo (`sale_date` fica gravado
+como `"2026-03-14 00:00:00"`, não `"2026-03-14"`). Sem normalizar os dois
+lados com `DATE(...)` ao calcular o dia do agregado, um filtro `date_to`
+excluía silenciosamente todas as linhas — não é um erro visível, é um
+número errado sem aviso. Corrigido em
+`EventReportSyncService::refreshRowAggregatesForMachine()` e no backfill
+da migração.
+
+**Validado contra dados reais** (evento Cavado local, não só os testes):
+`total_sum`, `rows_count`, contagem de bilhetes, faturação por loja, por
+produto (incl. o CASE de ZT→Contactless) e por tipo de documento, e a
+distribuição horária — todos batem 100% entre `event_report_rows` bruto e
+as tabelas agregadas.
+
+**Fora desta fatia, registado para depois:** `buildDailyBreakdowns`,
+`buildPaymentSummary`, `buildPaymentReconciliation`,
+`buildComparison`/`buildComparisonSnapshot` continuam a ler
+`event_report_payment_documents` tal como hoje (essa tabela não é o
+gargalo diagnosticado no §4 do plano, e mexer nela é risco de
+reconciliação sem ganho de performance real). `dashboardCacheVersion()`
+não mudou de mecanismo — continua chaveada por metadados do import.
+
+Critério de aceite original (ajustado ao âmbito da fatia 1):
+
+- ✅ o dashboard deixa de escrever queries sobre `event_report_rows` num
+  carregamento sem `total_min`/`total_max`/`product` — provado por um
+  teste que semeia 600 linhas e verifica zero queries à tabela bruta;
+- ✅ os agregados conciliam a 100% com o cálculo direto sobre as linhas,
+  validado contra o evento Cavado local (o evento 6 já não existe nesta
+  base local — mesma limitação já registada no PERF-101);
+- não medido `< 300 ms` (p95) a 200 máquinas — precisa do banco de ensaio
+  do PERF-001, que continua por fazer.
 
 O `EventDashboardController` recalcula hoje mais de vinte agregações sobre
 `event_report_rows` a cada abertura, protegido apenas por uma cache de 300 s cuja
@@ -555,7 +633,7 @@ Critério de aceite:
 - os agregados conciliam a 100% com o cálculo direto sobre as linhas, para o caso dourado do evento 6.
 
 #### PERF-402 — Retirar escritas do caminho de leitura
-**Prioridade:** P1 · **Estado:** Não iniciado
+**Prioridade:** P1 · **Estado:** Implementado
 
 Ações:
 

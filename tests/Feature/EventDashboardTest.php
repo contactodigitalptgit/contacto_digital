@@ -8,6 +8,7 @@ use App\Models\Event;
 use App\Models\EventReportImport;
 use App\Models\EventReportPaymentDocument;
 use App\Models\EventReportRow;
+use App\Models\EventReportRowAggregate;
 use App\Models\User;
 use App\Models\ZoneSoftApplication;
 use App\Services\DashboardConfigurationService;
@@ -241,6 +242,16 @@ class EventDashboardTest extends TestCase
                         && (float) collect($hours)->first()['sales_total'] === 11.45)));
     }
 
+    /**
+     * PERF-401 (fatia 1) changed what mutating "the source data outside the
+     * sync pipeline" means: event_report_rows is no longer what the
+     * dashboard reads directly — event_report_row_aggregates is. Mutating
+     * the aggregate table directly (instead of event_report_rows, as this
+     * test originally did) proves the exact same thing it always proved:
+     * the cache key is built from import metadata, not from a live read of
+     * whatever the summary is sourced from, so a change invisible to that
+     * metadata stays invisible until something bumps it.
+     */
     public function test_dashboard_reuses_cached_values_and_invalidates_when_the_active_import_changes(): void
     {
         [$admin, , $event] = $this->makeDashboardContext();
@@ -252,10 +263,10 @@ class EventDashboardTest extends TestCase
             ->assertInertia(fn (AssertableInertia $page) => $page
                 ->where('summary.total_sales', 15.75));
 
-        EventReportRow::query()
+        EventReportRowAggregate::query()
             ->where('event_id', $event->id)
             ->where('description', 'Snack')
-            ->update(['total' => 101.5]);
+            ->update(['total_sum' => 101.5]);
 
         $this->actingAs($admin)
             ->get(route('admin.events.dashboard', $event))
@@ -300,6 +311,139 @@ class EventDashboardTest extends TestCase
             ->assertOk();
 
         $this->assertSame([], $writeStatements, 'A dashboard GET must not write to the database: '.implode(' | ', $writeStatements));
+    }
+
+    /**
+     * PERF-401 (fatia 1) acceptance criterion: "o tempo de resposta não
+     * cresce com o histórico acumulado". Timing itself is unreliable in
+     * CI, but the mechanism that makes it true is provable directly: on a
+     * plain, unfiltered dashboard load, none of the aggregate-backed
+     * fragments (summary, bar groups, top stores/products, document
+     * types, hourly sales, filter options) may issue a single query
+     * against event_report_rows — they read event_report_row_aggregates/
+     * event_report_ticket_aggregates instead, which stay small regardless
+     * of how many raw sales lines the event has accumulated. This seeds
+     * 600 rows (dwarfing every other fixture in this file) specifically
+     * to make a regression here obvious if it ever creeps back in.
+     */
+    public function test_dashboard_read_path_never_queries_raw_rows_regardless_of_volume(): void
+    {
+        [$admin, , $event] = $this->makeDashboardContext();
+
+        $application = ZoneSoftApplication::create([
+            'name' => 'ZoneSoft Volume',
+            'base_url' => 'https://api.zonesoft.org/v3',
+            'app_key' => 'app-key-volume',
+            'app_secret' => 'secret-volume',
+            'is_active' => true,
+        ]);
+        $machine = ClientZoneSoftMachine::create([
+            'client_id' => $event->client_id,
+            'event_id' => $event->id,
+            'zonesoft_application_id' => $application->id,
+            'zs_client_id' => 'CLIENT-ID-VOLUME',
+            'license' => 'Z11JSMZIYP',
+            'store_id' => 9,
+            'store_label' => 'Loja Volume',
+            'permissions' => 'API + All document interfaces',
+            'is_active' => true,
+            'last_validated_at' => now(),
+        ]);
+        $import = EventReportImport::create([
+            'event_id' => $event->id,
+            'uploaded_by_user_id' => $admin->id,
+            'import_strategy' => 'replace',
+            'original_filename' => 'zonesoft-api',
+            'stored_path' => 'zonesoft://sync',
+            'mime_type' => 'application/json',
+            'file_hash' => hash('sha256', 'volume-dashboard-sync-'.$event->id),
+            'headers' => ['source' => 'zonesoft_api'],
+            'summary' => ['source' => 'zonesoft_api', 'machines_count' => 1],
+            'imported_rows_count' => 600,
+            'imported_at' => now(),
+            'is_active' => true,
+            'status' => 'completed',
+        ]);
+
+        for ($i = 1; $i <= 600; $i++) {
+            EventReportRow::create([
+                'event_id' => $event->id,
+                'event_report_import_id' => $import->id,
+                'machine_id' => $machine->id,
+                'source_sheet' => 'zonesoft:volume-test',
+                'source_row_number' => $i,
+                'store_code' => '9',
+                'store_name' => 'Loja Volume',
+                'sale_date' => '2026-03-14',
+                'sale_datetime' => '2026-03-14 '.str_pad((string) (10 + $i % 12), 2, '0', STR_PAD_LEFT).':00:00',
+                'doc_type' => 'FS',
+                'document_series' => 'VOL2026',
+                'document_number' => (string) $i,
+                'product_code' => 'VOL-'.($i % 20),
+                'description' => 'Produto Volume '.($i % 20),
+                'quantity' => '1.0000',
+                'value' => '1.0000',
+                'discount' => '0.0000',
+                'total' => '1.0000',
+                'raw_row' => ['index' => $i],
+            ]);
+        }
+
+        app(EventReportSyncService::class)->refreshRowAggregates($event->id, [$machine->id]);
+
+        // buildDailyBreakdowns() (out of scope for this fatia — it reads
+        // event_report_payment_documents, not rows) falls back to scanning
+        // event_report_rows only when an event has zero payment documents
+        // at all. That fallback is pre-existing, unrelated behaviour; one
+        // payment document is enough to take its normal path instead and
+        // keep this test scoped to what PERF-401 fatia 1 actually changed.
+        EventReportPaymentDocument::create([
+            'event_id' => $event->id,
+            'event_report_import_id' => $import->id,
+            'machine_id' => $machine->id,
+            'machine_client_id' => 'CLIENT-ID-VOLUME',
+            'store_code' => '9',
+            'store_name' => 'Loja Volume',
+            'sale_date' => '2026-03-14',
+            'sale_datetime' => '2026-03-14 10:00:00',
+            'doc_type' => 'FS',
+            'document_series' => 'VOL2026',
+            'document_number' => '1',
+            'paid' => true,
+            'document_total' => '1.0000',
+            'payment_key' => 'header',
+            'payment_code' => '1',
+            'total' => '1.0000',
+            'is_unallocated' => false,
+            'dedupe_key' => hash('sha256', 'volume-payment-doc-1'),
+        ]);
+
+        $rawRowQueries = [];
+        DB::listen(function ($query) use (&$rawRowQueries): void {
+            if (str_contains($query->sql, '"event_report_rows"')) {
+                $rawRowQueries[] = $query->sql;
+            }
+        });
+
+        $this->actingAs($admin)
+            ->get(route('admin.events.dashboard', $event))
+            ->assertOk()
+            ->assertInertia(fn (AssertableInertia $page) => $page
+                ->where('summary.total_rows', 600)
+                ->loadDeferredProps(
+                    ['dashboard-operational', 'dashboard-products', 'dashboard-analytics'],
+                    fn (AssertableInertia $details) => $details
+                        ->where('topStores', fn ($stores): bool => collect($stores)->contains(
+                            fn (array $store): bool => $store['label'] === 'Loja Volume'
+                                && (float) $store['sales_total'] === 600.0,
+                        )),
+                ));
+
+        $this->assertSame(
+            [],
+            $rawRowQueries,
+            'The dashboard must never query event_report_rows on an unfiltered load: '.implode(' | ', $rawRowQueries),
+        );
     }
 
     public function test_event_dashboard_exposes_client_events_for_switcher(): void
@@ -365,6 +509,8 @@ class EventDashboardTest extends TestCase
             ]);
         }
 
+        app(EventReportSyncService::class)->refreshRowAggregates($event->id, [null]);
+
         $this
             ->actingAs($admin)
             ->get(route('admin.events.dashboard', $event))
@@ -409,6 +555,8 @@ class EventDashboardTest extends TestCase
             'description' => 'Produto VIP',
             'raw_row' => ['index' => 100],
         ]);
+
+        app(EventReportSyncService::class)->refreshRowAggregates($event->id, [null]);
 
         $this
             ->actingAs($admin)
@@ -713,6 +861,8 @@ class EventDashboardTest extends TestCase
             ]);
         }
 
+        app(EventReportSyncService::class)->refreshRowAggregates($event->id, [null]);
+
         $this->actingAs($admin)
             ->get(route('admin.events.dashboard', $event))
             ->assertOk()
@@ -813,6 +963,8 @@ class EventDashboardTest extends TestCase
             'total' => '10.0000',
             'raw_row' => ['index' => 1],
         ]);
+
+        app(EventReportSyncService::class)->refreshRowAggregates($previousEvent->id, [null]);
 
         $response = $this
             ->actingAs($admin)
@@ -1019,7 +1171,7 @@ class EventDashboardTest extends TestCase
             'is_active' => true,
         ]);
 
-        ClientZoneSoftMachine::create([
+        $machine1 = ClientZoneSoftMachine::create([
             'client_id' => $event->client_id,
             'event_id' => $event->id,
             'zonesoft_application_id' => $application->id,
@@ -1032,7 +1184,7 @@ class EventDashboardTest extends TestCase
             'last_validated_at' => now(),
         ]);
 
-        ClientZoneSoftMachine::create([
+        $machine2 = ClientZoneSoftMachine::create([
             'client_id' => $event->client_id,
             'event_id' => $event->id,
             'zonesoft_application_id' => $application->id,
@@ -1044,6 +1196,7 @@ class EventDashboardTest extends TestCase
             'is_active' => true,
             'last_validated_at' => now(),
         ]);
+        $machineIdsByStoreCode = ['1' => $machine1->id, '2' => $machine2->id];
 
         $sync = EventReportImport::create([
             'event_id' => $event->id,
@@ -1252,9 +1405,12 @@ class EventDashboardTest extends TestCase
         ];
 
         foreach ($rows as $index => $row) {
+            $machineId = $machineIdsByStoreCode[$row['store_code'] ?? ''] ?? null;
+
             EventReportRow::create([
                 'event_id' => $event->id,
                 'event_report_import_id' => $sync->id,
+                'machine_id' => $machineId,
                 'source_sheet' => 'zonesoft:test',
                 'source_row_number' => $index + 1,
                 'doc_type' => $row['doc_type'],
@@ -1264,6 +1420,18 @@ class EventDashboardTest extends TestCase
                 ...$row,
             ]);
         }
+
+        // PERF-401 (fatia 1): this fixture writes rows directly instead of
+        // through a real sync — refresh the aggregate tables the same way
+        // EventReportSyncService::run() would, or the dashboard's fast
+        // (aggregate-backed) read path would see nothing. Collection::unique()
+        // (unlike array keys) correctly keeps null as its own distinct value.
+        $touchedMachineIds = collect($rows)
+            ->map(fn (array $row): ?int => $machineIdsByStoreCode[$row['store_code'] ?? ''] ?? null)
+            ->unique()
+            ->values()
+            ->all();
+        app(EventReportSyncService::class)->refreshRowAggregates($event->id, $touchedMachineIds);
     }
 
     private function resolveBarGroupLabel(?string $storeName): string
