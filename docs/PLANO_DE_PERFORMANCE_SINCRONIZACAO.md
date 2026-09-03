@@ -968,12 +968,40 @@ preciso, é `cp .env.production.bak-cutover-<timestamp> .env.production`
 mais reiniciar os serviços, exatamente como o próprio script já provou
 fazer sozinho perante uma falha.
 
-**Por fazer, fase separada, sem urgência:** Redis (CR-202) — a decisão
-tomada no início desta fase (Postgres primeiro, Redis depois de
-estabilizar) mantém-se. TLS na ligação Postgres e utilizador de menor
-privilégio dedicado (hoje usa o utilizador criado no arranque do
-container) ficam como follow-up de reforço, não bloqueiam o que já está
-em produção.
+**Utilizador dedicado do Postgres — implementado (2026-09-03).** A app
+deixou de correr como o superutilizador criado no arranque do container
+(`contacto_portal`, com `Superuser, Create role, Create DB, Replication,
+Bypass RLS`) e passou a correr como `contacto_portal_app`, sem nenhum
+desses privilégios — dono só da base de dados e das suas tabelas.
+
+Achado ao implementar: `REASSIGN OWNED BY <admin> TO <novo>` falha com
+"cannot reassign ownership of objects... required by the database
+system" — a linguagem `plpgsql` (instalada por omissão em toda a base
+Postgres nova) é do próprio utilizador que criou a base e o Postgres
+recusa-se a transferi-la via `REASSIGN OWNED`. Não é preciso — a app não
+precisa de possuir essa linguagem, só as suas próprias tabelas. Resolvido
+com um bloco `DO $$ ... $$` a percorrer `pg_tables`/`pg_sequences` do
+schema `public` e mudar o dono tabela a tabela, em vez de tentar
+transferir tudo de uma vez.
+
+À primeira tentativa, um erro de aspas aninhadas deixou a password do
+role vazia sem eu notar — a app nunca chegou a usar essas credenciais
+(só testado isoladamente via `docker exec -e`), mas um deploy automático
+que correu nessa janela apanhou a falha de ligação e abortou sozinho
+corretamente, como desenhado, deixando `worker`/`scheduler` parados até
+serem repostos manualmente. Nenhum dado afetado — confirmado comparando
+todos os números do evento "Brunch Porto" antes/depois ao pormenor
+(linhas, totais, agregados, bilhetes — idênticos). Corrigido usando um
+método de citação mais simples (`printf`+`sed` em vez de heredoc
+aninhado dentro de aspas), testado isoladamente antes de trocar a app a
+sério, e só depois disso confirmado o corte real e o pipeline de deploy
+completo (`pg_dump` continua a usar o utilizador administrador — esse
+não mudou, é usado só pelo script de backup, não pela app).
+
+**TLS na ligação Postgres — ainda por fazer, sem urgência.** A rede entre
+`app` e `postgres` (`internal: true` no compose) não tem saída para a
+internet — reduz bastante o risco de não ter TLS já. Redis (CR-202) fica
+também para depois, decisão já tomada no início desta fase.
 
 #### PERF-502 — Reduzir o intervalo e empurrar as atualizações
 **Prioridade:** P2 · **Estado:** Parcialmente implementado — intervalo reduzido, WebSockets fica para depois · **Dependências:** PERF-101, PERF-201, PERF-501
