@@ -11,8 +11,10 @@ use App\Models\EventReportRow;
 use App\Models\User;
 use App\Models\ZoneSoftApplication;
 use App\Services\DashboardConfigurationService;
+use App\Services\EventReportSyncService;
 use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Inertia\Testing\AssertableInertia;
 use Tests\TestCase;
 
@@ -271,6 +273,33 @@ class EventDashboardTest extends TestCase
             ->assertOk()
             ->assertInertia(fn (AssertableInertia $page) => $page
                 ->where('summary.total_sales', 115.75));
+    }
+
+    /**
+     * PERF-402: a GET on the dashboard must never write to the database —
+     * markStaleProcessingImportsAsFailed() used to run from this path
+     * whenever an event had a processing import; that write now only
+     * happens from the scheduler (events:sync-due-reports).
+     */
+    public function test_dashboard_get_produces_no_database_writes(): void
+    {
+        [$admin, , $event] = $this->makeDashboardContext();
+        $this->seedSyncedRows($event, $admin);
+
+        $writeStatements = [];
+        DB::listen(function ($query) use (&$writeStatements): void {
+            $sql = trim($query->sql);
+
+            if (preg_match('/^(insert|update|delete|replace)\b/i', $sql) === 1) {
+                $writeStatements[] = $sql;
+            }
+        });
+
+        $this->actingAs($admin)
+            ->get(route('admin.events.dashboard', $event))
+            ->assertOk();
+
+        $this->assertSame([], $writeStatements, 'A dashboard GET must not write to the database: '.implode(' | ', $writeStatements));
     }
 
     public function test_event_dashboard_exposes_client_events_for_switcher(): void
@@ -850,7 +879,18 @@ class EventDashboardTest extends TestCase
             ->where('event.processing_imports_count', 0)
             ->where('summary.processing_imports_count', 0));
 
+        // PERF-402: the dashboard GET must not have written anything — the
+        // stale import is excluded from the counts above, but it stays
+        // exactly as it was until something else actually marks it failed.
+        $this->assertSame('processing', $staleImport->fresh()->status);
+        $this->assertSame(0, EventReportImport::query()->where('status', 'failed')->count());
+
+        // Only the scheduler (events:sync-due-reports, routes/console.php,
+        // scheduled every minute) actually flips a stuck import to 'failed'.
+        app(EventReportSyncService::class)->markStaleProcessingImportsAsFailed();
+
         $this->assertSame(1, EventReportImport::query()->where('status', 'failed')->count());
+        $this->assertSame('failed', $staleImport->fresh()->status);
     }
 
     public function test_dashboard_exposes_a_safe_warning_after_a_failed_sync(): void

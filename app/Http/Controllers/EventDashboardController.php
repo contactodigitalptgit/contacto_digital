@@ -126,19 +126,17 @@ class EventDashboardController extends Controller
         string $backLabel,
         string $initialSection,
     ): Response {
+        // PERF-402: renderDashboard() no longer writes anything — a GET
+        // request must never mark imports as failed. Stale processing
+        // imports (stuck > 30 min) are simply excluded from the count
+        // here; events:sync-due-reports (routes/console.php, scheduled
+        // every minute) is the only place that actually flips their status.
+        $staleProcessingCutoff = now()->subMinutes(EventReportSyncService::STALE_PROCESSING_TIMEOUT_MINUTES);
         $event->load(['client', 'latestActiveReportImport', 'latestReportImport'])
             ->loadCount([
-                'processingReportImports',
+                'processingReportImports' => fn ($query) => $query->where('updated_at', '>', $staleProcessingCutoff),
                 'zonesoftMachines as active_zonesoft_machines_count' => fn ($query) => $query->where('is_active', true),
             ]);
-
-        if ((int) $event->processing_report_imports_count > 0) {
-            app(EventReportSyncService::class)->markStaleProcessingImportsAsFailed($event);
-            $event->unsetRelation('latestActiveReportImport');
-            $event->unsetRelation('latestReportImport');
-            $event->load(['latestActiveReportImport', 'latestReportImport'])
-                ->loadCount('processingReportImports');
-        }
 
         $latestActiveImportSummary = is_array($event->latestActiveReportImport?->summary)
             ? $event->latestActiveReportImport->summary

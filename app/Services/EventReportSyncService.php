@@ -27,7 +27,13 @@ class EventReportSyncService
 
     private const REPORT_TIMEZONE = 'Europe/Lisbon';
 
-    private const STALE_PROCESSING_TIMEOUT_MINUTES = 30;
+    /**
+     * PERF-402: public so EventDashboardController can exclude stale
+     * processing imports from its counts/display without writing anything
+     * — the scheduler (routes/console.php, events:sync-due-reports, every
+     * minute) is the only place that actually flips them to 'failed'.
+     */
+    public const STALE_PROCESSING_TIMEOUT_MINUTES = 30;
 
     private const RATE_LIMIT_SERIAL_RETRY_ROUNDS = 2;
 
