@@ -70,43 +70,88 @@ docker compose --env-file .env.production -f compose.yaml stop \
   --timeout "${worker_stop_timeout_seconds}" worker
 docker exec contacto_digital_portal_app php artisan down --retry=60
 
-# Back up the live database before replacing any runtime files or schema.
-docker exec contacto_digital_portal_app php -r '
-  umask(0077);
-  $source = getenv("DB_DATABASE");
-  $target = "/var/www/shared/database/'"$(basename "${database_backup_temp}")"'";
-  $pdo = new PDO("sqlite:".$source);
-  $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-  $pdo->exec("PRAGMA busy_timeout=30000");
-  if ((int) $pdo->query("SELECT COUNT(*) FROM event_report_imports WHERE status = '\''processing'\''")->fetchColumn() > 0) {
-    throw new RuntimeException("A sync is still processing; investigate before deploying.");
-  }
-  $sources = [$source => $target];
-  $runtime = "/var/www/shared/database/contacto_runtime.sqlite";
-  if (is_file($runtime)) {
-    $sources[$runtime] = "/var/www/shared/database/'"$(basename "${runtime_backup_temp}")"'";
-  }
-  foreach ($sources as $database => $destination) {
-    $connection = new PDO("sqlite:".$database);
-    $connection->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-    $connection->exec("PRAGMA busy_timeout=30000");
-    $connection->exec("VACUUM INTO ".$connection->quote($destination));
-    $backup = new PDO("sqlite:".$destination);
-    if ($backup->query("PRAGMA integrity_check")->fetchAll(PDO::FETCH_COLUMN) !== ["ok"]
-        || $backup->query("PRAGMA foreign_key_check")->fetchAll() !== []) {
-      throw new RuntimeException("Database backup failed integrity validation.");
+# PERF-501: DB_CONNECTION may now be pgsql instead of sqlite — DB_DATABASE
+# then holds a Postgres database name, not a SQLite file path, so the
+# backup mechanism itself has to branch on which one is actually live.
+db_connection="$(grep '^DB_CONNECTION=' "${project_dir}/.env.production" | cut -d= -f2-)"
+
+if [ "${db_connection}" = "pgsql" ]; then
+  processing_count="$(docker exec contacto_digital_portal_app php artisan tinker --execute='echo DB::table("event_report_imports")->where("status", "processing")->count();')"
+  if [ "${processing_count}" != "0" ]; then
+    echo "A sync is still processing; investigate before deploying." >&2
+    exit 1
+  fi
+
+  pg_user="$(grep '^POSTGRES_USER=' "${project_dir}/.env.production" | cut -d= -f2-)"
+  pg_db="$(grep '^POSTGRES_DB=' "${project_dir}/.env.production" | cut -d= -f2-)"
+  pg_backup_file="${backup_dir}/${pg_db}.pgdump"
+
+  docker exec contacto_digital_portal_db pg_dump -U "${pg_user}" -Fc "${pg_db}" > "${pg_backup_file}"
+  test -s "${pg_backup_file}"
+  chmod 0600 "${pg_backup_file}"
+  sha256sum "${pg_backup_file}"
+  echo "Verified database backup: ${pg_backup_file}"
+
+  # The original SQLite file is left untouched by the cutover — still
+  # worth an extra, best-effort backup of it too when it exists (cheap,
+  # and it is the instant-rollback fallback if pgsql is ever reverted).
+  if [ -s "${database_path}" ]; then
+    docker exec contacto_digital_portal_app php -r '
+      umask(0077);
+      $source = getenv("SQLITE_DATABASE");
+      $target = "/var/www/shared/database/'"$(basename "${database_backup_temp}")"'";
+      $pdo = new PDO("sqlite:".$source);
+      $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+      $pdo->exec("PRAGMA busy_timeout=30000");
+      $pdo->exec("VACUUM INTO ".$pdo->quote($target));
+      $backup = new PDO("sqlite:".$target);
+      if ($backup->query("PRAGMA integrity_check")->fetchAll(PDO::FETCH_COLUMN) !== ["ok"]) {
+        throw new RuntimeException("SQLite fallback backup failed integrity validation.");
+      }
+    ' || echo "Aviso: backup do sqlite (fallback) falhou — o backup pgsql acima e a copia primaria e ja foi validado." >&2
+    if [ -s "${database_backup_temp}" ]; then
+      install -m 0600 "${database_backup_temp}" "${backup_dir}/contacto_digital_bd.sqlite"
+      rm -f "${database_backup_temp}"
+    fi
+  fi
+else
+  docker exec contacto_digital_portal_app php -r '
+    umask(0077);
+    $source = getenv("DB_DATABASE");
+    $target = "/var/www/shared/database/'"$(basename "${database_backup_temp}")"'";
+    $pdo = new PDO("sqlite:".$source);
+    $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+    $pdo->exec("PRAGMA busy_timeout=30000");
+    if ((int) $pdo->query("SELECT COUNT(*) FROM event_report_imports WHERE status = '\''processing'\''")->fetchColumn() > 0) {
+      throw new RuntimeException("A sync is still processing; investigate before deploying.");
     }
-  }
-'
-test -s "${database_backup_temp}"
-install -m 0600 "${database_backup_temp}" "${backup_dir}/contacto_digital_bd.sqlite"
-sha256sum "${backup_dir}/contacto_digital_bd.sqlite"
-echo "Verified database backup: ${backup_dir}/contacto_digital_bd.sqlite"
-rm -f "${database_backup_temp}"
-if [ -s "${runtime_backup_temp}" ]; then
-  install -m 0600 "${runtime_backup_temp}" "${backup_dir}/contacto_runtime.sqlite"
-  sha256sum "${backup_dir}/contacto_runtime.sqlite"
-  rm -f "${runtime_backup_temp}"
+    $sources = [$source => $target];
+    $runtime = "/var/www/shared/database/contacto_runtime.sqlite";
+    if (is_file($runtime)) {
+      $sources[$runtime] = "/var/www/shared/database/'"$(basename "${runtime_backup_temp}")"'";
+    }
+    foreach ($sources as $database => $destination) {
+      $connection = new PDO("sqlite:".$database);
+      $connection->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+      $connection->exec("PRAGMA busy_timeout=30000");
+      $connection->exec("VACUUM INTO ".$connection->quote($destination));
+      $backup = new PDO("sqlite:".$destination);
+      if ($backup->query("PRAGMA integrity_check")->fetchAll(PDO::FETCH_COLUMN) !== ["ok"]
+          || $backup->query("PRAGMA foreign_key_check")->fetchAll() !== []) {
+        throw new RuntimeException("Database backup failed integrity validation.");
+      }
+    }
+  '
+  test -s "${database_backup_temp}"
+  install -m 0600 "${database_backup_temp}" "${backup_dir}/contacto_digital_bd.sqlite"
+  sha256sum "${backup_dir}/contacto_digital_bd.sqlite"
+  echo "Verified database backup: ${backup_dir}/contacto_digital_bd.sqlite"
+  rm -f "${database_backup_temp}"
+  if [ -s "${runtime_backup_temp}" ]; then
+    install -m 0600 "${runtime_backup_temp}" "${backup_dir}/contacto_runtime.sqlite"
+    sha256sum "${backup_dir}/contacto_runtime.sqlite"
+    rm -f "${runtime_backup_temp}"
+  fi
 fi
 
 if [ ! -f "${runtime_database_path}" ]; then
