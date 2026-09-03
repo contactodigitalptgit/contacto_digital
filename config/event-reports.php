@@ -28,5 +28,14 @@ return [
         'incremental_request_retry_attempts' => (int) env('EVENT_REPORT_INCREMENTAL_REQUEST_RETRY_ATTEMPTS', 1),
         'incremental_overlap_minutes' => (int) env('EVENT_REPORT_INCREMENTAL_OVERLAP_MINUTES', 15),
         'incremental_full_refresh_hours' => (int) env('EVENT_REPORT_INCREMENTAL_FULL_REFRESH_HOURS', 24),
+        // PERF-103: guards for the lastupdate-keyset document pagination
+        // (see EventReportSyncService::buildDocumentCondition()/
+        // dedupeDocumentPage()). max_pages bounds one machine's fetch to a
+        // sane number of round trips per sync cycle; max_documents bounds
+        // the same fetch by row volume. Both exist purely to fail loudly
+        // instead of looping forever if the ZSAPI ever behaves
+        // unexpectedly (e.g. lastupdate stops advancing).
+        'document_pagination_max_pages' => (int) env('EVENT_REPORT_DOCUMENT_PAGINATION_MAX_PAGES', 2000),
+        'document_pagination_max_documents' => (int) env('EVENT_REPORT_DOCUMENT_PAGINATION_MAX_DOCUMENTS', 500000),
     ],
 ];

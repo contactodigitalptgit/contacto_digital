@@ -17,6 +17,7 @@ use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Validation\ValidationException;
 use Inertia\Testing\AssertableInertia;
 use Tests\TestCase;
 
@@ -1722,20 +1723,38 @@ class EventReportImportTest extends TestCase
             'last_validated_at' => now(),
         ]);
 
+        // PERF-103: pagination is by lastupdate keyset, not offset (see
+        // EventReportSyncService::dedupeDocumentPage()) — this fake gives
+        // each document a distinct, strictly increasing lastupdate (one
+        // second apart) and honours "lastupdate >= 'X'" out of the request
+        // condition, exactly like a real ZSAPI listing would, so the round
+        // trips this test asserts are the same rounds production will make.
         $totalDocuments = 510;
-        $requestedOffsets = [];
+        $baseTimestamp = strtotime('2026-06-20 12:00:00');
+        $requestedBoundaries = [];
 
         Http::fake([
-            'https://api.zonesoft.org/v3/documents/getInstances' => function ($request) use (&$requestedOffsets, $totalDocuments) {
-                $offset = (int) ($request->data()['document']['offset'] ?? 0);
+            'https://api.zonesoft.org/v3/documents/getInstances' => function ($request) use (&$requestedBoundaries, $totalDocuments, $baseTimestamp) {
+                $condition = (string) ($request->data()['document']['condition'] ?? '');
                 $limit = (int) ($request->data()['document']['limit'] ?? 250);
-                $requestedOffsets[] = $offset;
+                $boundaryTimestamp = null;
 
-                $count = max(0, min($limit, $totalDocuments - $offset));
+                if (preg_match("/lastupdate >= '([^']+)'/", $condition, $matches) === 1) {
+                    $boundaryTimestamp = strtotime($matches[1]);
+                }
+
+                $requestedBoundaries[] = $matches[1] ?? null;
+
                 $documents = [];
 
-                for ($i = 0; $i < $count; $i++) {
-                    $numero = $offset + $i + 1;
+                for ($numero = 1; $numero <= $totalDocuments && count($documents) < $limit; $numero++) {
+                    $lastupdateTimestamp = $baseTimestamp + $numero;
+
+                    if ($boundaryTimestamp !== null && $lastupdateTimestamp < $boundaryTimestamp) {
+                        continue;
+                    }
+
+                    $lastupdate = date('Y-m-d H:i:s', $lastupdateTimestamp);
                     $documents[] = [
                         'loja' => 1,
                         'numero' => $numero,
@@ -1743,6 +1762,7 @@ class EventReportImportTest extends TestCase
                         'serie' => 'A2026',
                         'data' => '2026-06-20',
                         'datahora' => '2026-06-20 12:00:00',
+                        'lastupdate' => $lastupdate,
                         'pagamento' => 3,
                         'total' => 1.0,
                         'pago' => 1,
@@ -1779,7 +1799,12 @@ class EventReportImportTest extends TestCase
 
         $this->assertSame('completed', $import->status);
         $this->assertSame($totalDocuments, $import->imported_rows_count);
-        $this->assertSame([0, 250, 500], $requestedOffsets);
+        // 3 rounds: page 1 has no boundary yet, pages 2-3 carry the
+        // previous page's tail lastupdate forward as the next lower bound.
+        $this->assertCount(3, $requestedBoundaries);
+        $this->assertNull($requestedBoundaries[0]);
+        $this->assertNotNull($requestedBoundaries[1]);
+        $this->assertNotNull($requestedBoundaries[2]);
         $this->assertDatabaseHas('event_report_rows', [
             'event_id' => $event->id,
             'document_number' => '1',
@@ -1788,6 +1813,201 @@ class EventReportImportTest extends TestCase
             'event_id' => $event->id,
             'document_number' => (string) $totalDocuments,
         ]);
+    }
+
+    public function test_document_pagination_does_not_skip_a_document_inserted_between_page_requests(): void
+    {
+        config(['event-reports.zonesoft.complete_documents' => true]);
+
+        [$admin, $client] = $this->makeAdminClientContext();
+        $application = $this->makeApplication();
+        $event = $this->makeEvent($client);
+
+        ClientZoneSoftMachine::create([
+            'client_id' => $client->id,
+            'event_id' => $event->id,
+            'zonesoft_application_id' => $application->id,
+            'zs_client_id' => 'CONCURRENT-CLIENT',
+            'license' => 'Z11JSMZIYP',
+            'store_id' => 1,
+            'store_label' => 'Loja Concorrente',
+            'permissions' => 'API + All document interfaces',
+            'is_active' => true,
+            'last_validated_at' => now(),
+        ]);
+
+        // 260 documents already exist when the sync starts (round 1 fetches
+        // the first 250, leaving a page boundary at document 250's
+        // lastupdate). Once that first request has been served, a NEW
+        // document (261) is "inserted" — its lastupdate is later than
+        // everything already read, exactly like a real live sale recorded
+        // while this sync is mid-flight. The offset-based pagination this
+        // replaces (PERF-103) ordered by the business date `data`, so a
+        // late-arriving row with an earlier `data` than the current offset
+        // could land in an already-consumed page and never be read; a row
+        // inserted with a fresh lastupdate cannot do that here — it always
+        // sorts after the current boundary, into a page not yet visited.
+        $existingDocuments = 260;
+        $baseTimestamp = strtotime('2026-06-20 12:00:00');
+        $concurrentDocumentInserted = false;
+        $requestCount = 0;
+
+        Http::fake([
+            'https://api.zonesoft.org/v3/documents/getInstances' => function ($request) use (
+                &$concurrentDocumentInserted,
+                &$requestCount,
+                $existingDocuments,
+                $baseTimestamp,
+            ) {
+                $requestCount++;
+                $condition = (string) ($request->data()['document']['condition'] ?? '');
+                $limit = (int) ($request->data()['document']['limit'] ?? 250);
+                $boundaryTimestamp = null;
+
+                if (preg_match("/lastupdate >= '([^']+)'/", $condition, $matches) === 1) {
+                    $boundaryTimestamp = strtotime($matches[1]);
+                }
+
+                // The concurrent insert only becomes visible to the API
+                // after the first page has already been served — modelling
+                // it landing in the gap between two page requests.
+                $totalAvailable = $requestCount > 1 && $concurrentDocumentInserted
+                    ? $existingDocuments + 1
+                    : $existingDocuments;
+
+                $documents = [];
+
+                for ($numero = 1; $numero <= $totalAvailable && count($documents) < $limit; $numero++) {
+                    $lastupdateTimestamp = $baseTimestamp + $numero;
+
+                    if ($boundaryTimestamp !== null && $lastupdateTimestamp < $boundaryTimestamp) {
+                        continue;
+                    }
+
+                    $documents[] = [
+                        'loja' => 1,
+                        'numero' => $numero,
+                        'doc' => 'FS',
+                        'serie' => 'A2026',
+                        'data' => '2026-06-20',
+                        'datahora' => '2026-06-20 12:00:00',
+                        'lastupdate' => date('Y-m-d H:i:s', $lastupdateTimestamp),
+                        'pagamento' => 3,
+                        'total' => 1.0,
+                        'pago' => 1,
+                        'vendas' => [[
+                            'id' => $numero,
+                            'loja' => 1,
+                            'numero' => $numero,
+                            'doc' => 'FS',
+                            'serie' => 'A2026',
+                            'data' => '2026-06-20',
+                            'datahora' => '2026-06-20 12:00:00',
+                            'codigo' => 700,
+                            'descricao' => 'Produto',
+                            'qtd' => 1,
+                            'valor' => 1.0,
+                            'total' => 1.0,
+                        ]],
+                    ];
+                }
+
+                $concurrentDocumentInserted = true;
+
+                return Http::response([
+                    'Response' => [
+                        'StatusCode' => 200,
+                        'StatusMessage' => 'OK',
+                        'Content' => [
+                            'document' => $documents,
+                        ],
+                    ],
+                ], 200);
+            },
+        ]);
+
+        $import = app(EventReportSyncService::class)->sync($event, $admin);
+
+        $this->assertSame('completed', $import->status);
+        $this->assertSame($existingDocuments + 1, $import->imported_rows_count);
+        $this->assertDatabaseHas('event_report_rows', [
+            'event_id' => $event->id,
+            'document_number' => (string) ($existingDocuments + 1),
+        ]);
+    }
+
+    public function test_document_pagination_aborts_when_more_documents_than_the_page_limit_share_one_lastupdate(): void
+    {
+        config(['event-reports.zonesoft.complete_documents' => true]);
+
+        [$admin, $client] = $this->makeAdminClientContext();
+        $application = $this->makeApplication();
+        $event = $this->makeEvent($client);
+
+        ClientZoneSoftMachine::create([
+            'client_id' => $client->id,
+            'event_id' => $event->id,
+            'zonesoft_application_id' => $application->id,
+            'zs_client_id' => 'STUCK-CLIENT',
+            'license' => 'Z11JSMZIYP',
+            'store_id' => 1,
+            'store_label' => 'Loja Presa',
+            'permissions' => 'API + All document interfaces',
+            'is_active' => true,
+            'last_validated_at' => now(),
+        ]);
+
+        // 300 documents, all sharing the exact same lastupdate — more than
+        // the 250-per-page cap, which keyset pagination cannot get past
+        // (see EventReportSyncService::isStuckDocumentPage()). Every
+        // request gets the identical first 250-by-numero page back,
+        // regardless of the lastupdate boundary requested.
+        Http::fake([
+            'https://api.zonesoft.org/v3/documents/getInstances' => function () {
+                $documents = [];
+
+                for ($numero = 1; $numero <= 250; $numero++) {
+                    $documents[] = [
+                        'loja' => 1,
+                        'numero' => $numero,
+                        'doc' => 'FS',
+                        'serie' => 'A2026',
+                        'data' => '2026-06-20',
+                        'datahora' => '2026-06-20 12:00:00',
+                        'lastupdate' => '2026-06-20 12:00:00',
+                        'pagamento' => 3,
+                        'total' => 1.0,
+                        'pago' => 1,
+                        'vendas' => [],
+                    ];
+                }
+
+                return Http::response([
+                    'Response' => [
+                        'StatusCode' => 200,
+                        'StatusMessage' => 'OK',
+                        'Content' => [
+                            'document' => $documents,
+                        ],
+                    ],
+                ], 200);
+            },
+        ]);
+
+        try {
+            app(EventReportSyncService::class)->sync($event, $admin);
+            $this->fail('Esperava que a sincronizacao falhasse com a paginacao presa.');
+        } catch (ValidationException $exception) {
+            $this->assertStringContainsString(
+                'paginacao de documentos presa',
+                $exception->validator->errors()->first('integration'),
+            );
+        }
+
+        // The failed sync must not have left the event with any rows —
+        // nothing was ever published (PERF-101's publish transaction only
+        // runs once every machine has a clean fetch).
+        $this->assertDatabaseCount('event_report_rows', 0);
     }
 
     public function test_admin_cannot_start_sync_when_event_already_has_processing_import(): void

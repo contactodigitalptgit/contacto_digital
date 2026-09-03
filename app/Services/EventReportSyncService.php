@@ -840,11 +840,13 @@ class EventReportSyncService
      * still-pending machine concurrently, in rounds: each round pools one
      * "next page" request per machine that still has more pages (bounded by
      * $concurrency via Http::pool()'s own in-flight window — see
-     * PendingRequest::pool()), then advances each machine's offset from the
-     * round's results. A machine drops out of the round once it gets back a
-     * short page (< 250, same page size fetchDocuments() already used) or
-     * an error. Mirrors fetchDocuments()'s single-machine pagination
-     * exactly, just fanned out across machines instead of across processes.
+     * PendingRequest::pool()), then advances each machine's lastupdate
+     * keyset boundary from the round's results (see dedupeDocumentPage()
+     * and buildDocumentCondition() for why offset was replaced — PERF-103).
+     * A machine drops out of the round once it gets back a short page
+     * (< 250, same page size fetchDocuments() already used) or an error.
+     * Mirrors fetchDocuments()'s single-machine pagination exactly, just
+     * fanned out across machines instead of across processes.
      *
      * @param  Collection<int, ClientZoneSoftMachine>  $machines
      * @param  array{start:CarbonImmutable,end:CarbonImmutable}  $syncRange
@@ -859,6 +861,8 @@ class EventReportSyncService
         int $concurrency,
     ): array {
         $limit = 250;
+        $maxPages = (int) config('event-reports.zonesoft.document_pagination_max_pages', 2000);
+        $maxDocuments = (int) config('event-reports.zonesoft.document_pagination_max_documents', 500000);
         $states = [];
 
         foreach ($machines as $machine) {
@@ -868,7 +872,8 @@ class EventReportSyncService
 
             $states[$machine->id] = [
                 'machine' => $machine,
-                'offset' => 0,
+                'page_boundary' => null,
+                'seen_at_boundary' => [],
                 'documents' => [],
                 'request_count' => 0,
                 'done' => false,
@@ -892,6 +897,19 @@ class EventReportSyncService
                 $machine = $states[$machineId]['machine'];
                 $lastUpdatedAfter = $lastUpdatedAfterByMachine[$machineId] ?? null;
 
+                if ($states[$machineId]['request_count'] >= $maxPages) {
+                    $states[$machineId]['error'] = new ZoneSoftApiException(sprintf(
+                        'Maquina %d (loja %d): paginacao de documentos excedeu o limite de %d paginas. '.
+                        'Abortando esta maquina em vez de continuar indefinidamente — investigar antes '.
+                        'de aumentar o limite.',
+                        $machine->id,
+                        $machine->store_id,
+                        $maxPages,
+                    ));
+
+                    continue;
+                }
+
                 $requests[$machineId] = [
                     'application' => $machine->application,
                     'zsClientId' => $machine->zs_client_id,
@@ -899,10 +917,15 @@ class EventReportSyncService
                     'action' => $completeDocuments ? 'getInstances' : 'getDocumentsHeaders',
                     'entityName' => 'document',
                     'payload' => [
-                        'condition' => $this->buildDocumentCondition($machine, $syncRange, $lastUpdatedAfter),
-                        'order' => 'data ASC, numero ASC',
+                        'condition' => $this->buildDocumentCondition(
+                            $machine,
+                            $syncRange,
+                            $lastUpdatedAfter,
+                            $states[$machineId]['page_boundary'],
+                        ),
+                        'order' => 'lastupdate ASC, numero ASC',
                         'limit' => $limit,
-                        'offset' => $states[$machineId]['offset'],
+                        'offset' => 0,
                     ],
                     'requestTimeoutSeconds' => $lastUpdatedAfter
                         ? (int) config('event-reports.zonesoft.incremental_request_timeout_seconds', 10)
@@ -916,9 +939,16 @@ class EventReportSyncService
                 ];
             }
 
+            if ($requests === []) {
+                // Every still-pending machine just hit the max-pages guard
+                // above and was moved straight to 'error' without a request
+                // — nothing left to send this round.
+                continue;
+            }
+
             $responses = $this->apiClient->postManyAcrossRequests($requests, $concurrency);
 
-            foreach ($pendingMachineIds as $machineId) {
+            foreach (array_keys($requests) as $machineId) {
                 $states[$machineId]['request_count']++;
                 $response = $responses[$machineId] ?? null;
 
@@ -928,12 +958,43 @@ class EventReportSyncService
                     continue;
                 }
 
+                $machine = $states[$machineId]['machine'];
                 $batch = is_array($response['document'] ?? null)
                     ? array_values(array_filter($response['document'], 'is_array'))
                     : [];
 
-                $states[$machineId]['documents'] = [...$states[$machineId]['documents'], ...$batch];
-                $states[$machineId]['offset'] += count($batch);
+                $previousBoundary = $states[$machineId]['page_boundary'];
+                $page = $this->dedupeDocumentPage($batch, $previousBoundary, $states[$machineId]['seen_at_boundary']);
+
+                if ($this->isStuckDocumentPage($batch, $page, $previousBoundary, $limit)) {
+                    $states[$machineId]['error'] = new ZoneSoftApiException(sprintf(
+                        "Maquina %d (loja %d): paginacao de documentos presa em lastupdate '%s' — mais de ".
+                        '%d documentos partilham exatamente o mesmo lastupdate, o que a paginacao por '.
+                        'chave nao consegue atravessar. Abortando sem perder o que ja foi lido.',
+                        $machine->id,
+                        $machine->store_id,
+                        $previousBoundary,
+                        $limit,
+                    ));
+
+                    continue;
+                }
+
+                $states[$machineId]['documents'] = [...$states[$machineId]['documents'], ...$page['new_items']];
+                $states[$machineId]['page_boundary'] = $page['next_cursor'];
+                $states[$machineId]['seen_at_boundary'] = $page['next_seen'];
+
+                if (count($states[$machineId]['documents']) > $maxDocuments) {
+                    $states[$machineId]['error'] = new ZoneSoftApiException(sprintf(
+                        'Maquina %d (loja %d): paginacao de documentos excedeu o limite de %d documentos. '.
+                        'Abortando esta maquina — investigar antes de aumentar o limite.',
+                        $machine->id,
+                        $machine->store_id,
+                        $maxDocuments,
+                    ));
+
+                    continue;
+                }
 
                 if (count($batch) < $limit) {
                     $states[$machineId]['done'] = true;
@@ -1250,9 +1311,12 @@ class EventReportSyncService
         ?CarbonImmutable $lastUpdatedAfter = null,
     ): array {
         $documents = [];
-        $offset = 0;
         $limit = 250;
         $requestCount = 0;
+        $pageBoundary = null;
+        $seenAtBoundary = [];
+        $maxPages = (int) config('event-reports.zonesoft.document_pagination_max_pages', 2000);
+        $maxDocuments = (int) config('event-reports.zonesoft.document_pagination_max_documents', 500000);
         $requestTimeoutSeconds = $lastUpdatedAfter
             ? (int) config('event-reports.zonesoft.incremental_request_timeout_seconds', 10)
             : (int) config('event-reports.zonesoft.full_request_timeout_seconds', 30);
@@ -1262,6 +1326,18 @@ class EventReportSyncService
 
         do {
             $requestCount++;
+
+            if ($requestCount > $maxPages) {
+                throw new ZoneSoftApiException(sprintf(
+                    'Maquina %d (loja %d): paginacao de documentos excedeu o limite de %d paginas. '.
+                    'Abortando esta maquina em vez de continuar indefinidamente — investigar antes de '.
+                    'aumentar o limite.',
+                    $machine->id,
+                    $machine->store_id,
+                    $maxPages,
+                ));
+            }
+
             $response = $this->apiClient->post(
                 $machine->application,
                 $machine->zs_client_id,
@@ -1273,10 +1349,11 @@ class EventReportSyncService
                         $machine,
                         $syncRange,
                         $lastUpdatedAfter,
+                        $pageBoundary,
                     ),
-                    'order' => 'data ASC, numero ASC',
+                    'order' => 'lastupdate ASC, numero ASC',
                     'limit' => $limit,
-                    'offset' => $offset,
+                    'offset' => 0,
                 ],
                 false,
                 $requestTimeoutSeconds,
@@ -1288,8 +1365,33 @@ class EventReportSyncService
                 ? array_values(array_filter($response['document'], 'is_array'))
                 : [];
 
-            $documents = [...$documents, ...$batch];
-            $offset += count($batch);
+            $page = $this->dedupeDocumentPage($batch, $pageBoundary, $seenAtBoundary);
+
+            if ($this->isStuckDocumentPage($batch, $page, $pageBoundary, $limit)) {
+                throw new ZoneSoftApiException(sprintf(
+                    "Maquina %d (loja %d): paginacao de documentos presa em lastupdate '%s' — mais de %d ".
+                    'documentos partilham exatamente o mesmo lastupdate, o que a paginacao por chave nao '.
+                    'consegue atravessar. Abortando sem perder o que ja foi lido.',
+                    $machine->id,
+                    $machine->store_id,
+                    $pageBoundary,
+                    $limit,
+                ));
+            }
+
+            $documents = [...$documents, ...$page['new_items']];
+            $pageBoundary = $page['next_cursor'];
+            $seenAtBoundary = $page['next_seen'];
+
+            if (count($documents) > $maxDocuments) {
+                throw new ZoneSoftApiException(sprintf(
+                    'Maquina %d (loja %d): paginacao de documentos excedeu o limite de %d documentos. '.
+                    'Abortando esta maquina — investigar antes de aumentar o limite.',
+                    $machine->id,
+                    $machine->store_id,
+                    $maxDocuments,
+                ));
+            }
         } while (count($batch) === $limit);
 
         return [
@@ -1370,11 +1472,19 @@ class EventReportSyncService
 
     /**
      * @param  array{start:CarbonImmutable,end:CarbonImmutable}  $syncRange
+     * @param  string|null  $pageBoundaryLastupdate  PERF-103 keyset pagination
+     *                                               boundary for the CURRENT page within THIS fetch (see
+     *                                               dedupeDocumentPage()) — not to be confused with $lastUpdatedAfter,
+     *                                               which is the incremental boundary carried between sync cycles
+     *                                               (machine_document_cursors). From the 2nd page onward this is
+     *                                               always >= $lastUpdatedAfter, so it supersedes it rather than
+     *                                               combining with "and".
      */
     private function buildDocumentCondition(
         ClientZoneSoftMachine $machine,
         array $syncRange,
         ?CarbonImmutable $lastUpdatedAfter = null,
+        ?string $pageBoundaryLastupdate = null,
     ): string {
         $conditions = [
             sprintf('loja = %d', $machine->store_id),
@@ -1382,14 +1492,124 @@ class EventReportSyncService
             sprintf("data <= '%s'", $syncRange['end']->toDateString()),
         ];
 
-        if ($lastUpdatedAfter !== null) {
-            $conditions[] = sprintf(
-                "lastupdate >= '%s'",
-                $lastUpdatedAfter->setTimezone(self::REPORT_TIMEZONE)->format('Y-m-d H:i:s'),
-            );
+        $lastupdateAtLeast = $pageBoundaryLastupdate ?? (
+            $lastUpdatedAfter !== null
+                ? $lastUpdatedAfter->setTimezone(self::REPORT_TIMEZONE)->format('Y-m-d H:i:s')
+                : null
+        );
+
+        if ($lastupdateAtLeast !== null) {
+            $conditions[] = sprintf("lastupdate >= '%s'", $lastupdateAtLeast);
         }
 
         return implode(' and ', $conditions);
+    }
+
+    /**
+     * PERF-103: the ZSAPI paginates listings with `limit`/`offset` (SQL-like
+     * navigation — IntegrationManual.pdf p.16), but during a live event new
+     * documents keep arriving between page requests. Because
+     * fetchDocuments()/fetchDocumentsAcrossMachines() originally ordered by
+     * `data ASC, numero ASC` and advanced by offset, an insertion earlier in
+     * that order than the current offset shifts every later page's window —
+     * a document already "behind" the offset silently never gets read. This
+     * is a correctness bug, not just a performance one.
+     *
+     * The fix orders by `lastupdate ASC, numero ASC` instead and never uses
+     * offset: each page after the first re-requests with
+     * `lastupdate >= <last item's lastupdate from the previous page>`
+     * (inclusive — the ZSAPI condition grammar is documented only as plain
+     * AND-joined comparisons, so this avoids needing OR/parentheses to
+     * express an exclusive/tie-broken boundary). Being inclusive means the
+     * next page re-returns whatever shared that exact lastupdate with the
+     * previous page's tail; this method strips those back out using
+     * $seenAtBoundary, so the caller only ever appends genuinely new
+     * documents. A newly inserted document can only ever land at or after
+     * the current boundary — it can never be skipped, only (at worst)
+     * arrive one page later than a snapshot-consistent read would have
+     * placed it, which is fine: the same document is still picked up on the
+     * very next sync cycle if it somehow lands outside this one's window.
+     *
+     * @param  list<array<string, mixed>>  $batch  one raw page, in API order
+     * @param  string|null  $previousBoundary  lastupdate boundary this page
+     *                                         was requested with (null for the first page)
+     * @param  array<string, bool>  $seenAtBoundary  identities already
+     *                                               emitted whose lastupdate equals $previousBoundary
+     * @return array{new_items:list<array<string,mixed>>,next_cursor:?string,next_seen:array<string,bool>}
+     */
+    private function dedupeDocumentPage(array $batch, ?string $previousBoundary, array $seenAtBoundary): array
+    {
+        if ($batch === []) {
+            return ['new_items' => [], 'next_cursor' => $previousBoundary, 'next_seen' => $seenAtBoundary];
+        }
+
+        $newItems = [];
+
+        foreach ($batch as $document) {
+            $lastupdate = trim((string) ($document['lastupdate'] ?? ''));
+            $identity = $this->documentPaginationIdentity($document);
+
+            if ($previousBoundary !== null && $lastupdate === $previousBoundary && isset($seenAtBoundary[$identity])) {
+                continue;
+            }
+
+            $newItems[] = $document;
+        }
+
+        $tailLastupdate = trim((string) ($batch[array_key_last($batch)]['lastupdate'] ?? ''));
+        $nextCursor = $tailLastupdate !== '' ? $tailLastupdate : $previousBoundary;
+
+        $newSeenAtCursor = [];
+
+        foreach ($batch as $document) {
+            if (trim((string) ($document['lastupdate'] ?? '')) === $nextCursor) {
+                $newSeenAtCursor[$this->documentPaginationIdentity($document)] = true;
+            }
+        }
+
+        // The boundary timestamp didn't move between this page and the
+        // previous one (several documents share the exact same lastupdate,
+        // spanning more than one page) — keep accumulating identities seen
+        // at that timestamp instead of resetting, otherwise the next page's
+        // dedupe would re-admit documents this page already emitted.
+        $next_seen = $nextCursor === $previousBoundary
+            ? $seenAtBoundary + $newSeenAtCursor
+            : $newSeenAtCursor;
+
+        return ['new_items' => $newItems, 'next_cursor' => $nextCursor, 'next_seen' => $next_seen];
+    }
+
+    /**
+     * @param  array<string, mixed>  $document
+     */
+    private function documentPaginationIdentity(array $document): string
+    {
+        return implode('|', [
+            trim((string) ($document['doc'] ?? '')),
+            trim((string) ($document['serie'] ?? '')),
+            trim((string) ($document['numero'] ?? '')),
+        ]);
+    }
+
+    /**
+     * True when a full page came back without the lastupdate boundary
+     * advancing at all. Because pages are ordered `lastupdate ASC, numero
+     * ASC` with no offset, the boundary can only stay the same or move
+     * forward between pages — it never regresses — so "unchanged, and the
+     * page was full" can only mean the exact same query was repeated and
+     * got the exact same deterministic result back: either more than
+     * $limit documents share that one lastupdate value (unreachable by
+     * keyset pagination — see dedupeDocumentPage()), or no document in the
+     * page carried a usable lastupdate at all. Either way, another round
+     * would return the same thing forever; this must stop instead.
+     *
+     * @param  list<array<string, mixed>>  $batch
+     * @param  array{new_items:list<array<string,mixed>>,next_cursor:?string,next_seen:array<string,bool>}  $page
+     */
+    private function isStuckDocumentPage(array $batch, array $page, ?string $previousBoundary, int $limit): bool
+    {
+        return count($batch) === $limit
+            && $page['next_cursor'] === $previousBoundary;
     }
 
     /**

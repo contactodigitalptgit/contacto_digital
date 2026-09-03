@@ -365,21 +365,60 @@ Critério de aceite:
 - o refresh completo distribui-se ao longo da janela, sem picos.
 
 #### PERF-103 — Paginação por chave em vez de `offset`
-**Prioridade:** P1 (correção) · **Estado:** Não iniciado
+**Prioridade:** P1 (correção) · **Estado:** Implementado
 
-Ações:
+Implementado em `app/Services/EventReportSyncService.php` (branch
+`perf/101-incremental-natural-key`) — afeta os dois caminhos que paginam
+`documents/getInstances`: `fetchDocuments()` (serial, usado no retry serial
+de máquinas rate-limited) e `fetchDocumentsAcrossMachines()` (pooled,
+caminho principal do PERF-201).
 
-- ordenar por `lastupdate ASC, numero ASC` e paginar por chave, usando o último
-  valor lido como fronteira da página seguinte;
-- adicionar guarda de páginas máximas, itens máximos e tempo máximo por máquina;
-- detetar páginas repetidas e abortar com erro explícito;
-- testar explicitamente inserção concorrente durante a paginação.
+- `order` passou de `data ASC, numero ASC` para `lastupdate ASC, numero
+  ASC`, e o `offset` deixou de ser usado — cada página além da primeira
+  volta a pedir com `lastupdate >= '<lastupdate do último item da página
+  anterior>'` (`buildDocumentCondition()`). `data` é a data de negócio do
+  documento (pode ser antiga/retroativa); `lastupdate` é atribuída pelo
+  próprio ZoneSoft no momento da escrita, por isso um documento inserido
+  a meio de uma sincronização recebe sempre um `lastupdate` posterior a
+  qualquer fronteira já ultrapassada — nunca pode cair numa página já
+  lida. Isto elimina o offset-drift descrito no §4.6.
+- O manual da API (`IntegrationManual.pdf`, p.16) documenta `condition`
+  apenas como "critério de pesquisa extra" — sem gramática de OR/parênteses
+  garantida. Para não depender disso, a fronteira usa `>=` (inclusiva) em
+  vez de uma comparação exclusiva com desempate, e `dedupeDocumentPage()`
+  filtra do lado do cliente os documentos que a página seguinte
+  inevitavelmente repete por partilharem exatamente o mesmo `lastupdate`
+  que a fronteira.
+- Guarda de páginas máximas e de documentos máximos por máquina
+  (`event-reports.zonesoft.document_pagination_max_pages`/
+  `document_pagination_max_documents`, configuráveis por env), e deteção de
+  página repetida (`isStuckDocumentPage()`): uma página cheia cujo
+  `lastupdate` de fronteira não avançou em relação à página anterior só
+  pode significar mais de 250 documentos com o mesmo `lastupdate`
+  (inatingível por paginação de chave) — lança `ZoneSoftApiException`, que
+  flui pelo mesmo canal de erro por máquina já existente (não aborta a
+  sincronização inteira; só essa máquina falha, com mensagem explícita).
+- Achado ao testar: a primeira versão do teste de "página repetida" só
+  disparava quando a página cheia devolvia zero itens novos — mas se o
+  `lastupdate` vier vazio em todos os documentos (não deveria acontecer em
+  produção, mas aconteceu num teste com fixtures incompletas), a fronteira
+  fica presa em `null` para sempre e cada ronda volta a contar os mesmos
+  documentos como "novos", crescendo sem limite até esgotar a memória.
+  Corrigido simplificando a deteção para "página cheia + fronteira não
+  avançou" (sem depender de contar itens novos) — a ordenação por
+  `lastupdate ASC` garante que a fronteira nunca regride, por isso "não
+  avançou" já implica inequivocamente que a próxima ronda repetiria
+  exatamente o mesmo resultado.
 
 Critério de aceite:
 
-- nenhum documento é saltado quando são inseridos registos durante a paginação;
-- o teste de página repetida falha de forma controlada e visível;
-- os limites de páginas e itens são configuráveis e registados nas métricas.
+- nenhum documento é saltado quando são inseridos registos durante a
+  paginação — provado por
+  `test_document_pagination_does_not_skip_a_document_inserted_between_page_requests`
+  em `EventReportImportTest.php`;
+- o teste de página repetida falha de forma controlada e visível — provado
+  por `test_document_pagination_aborts_when_more_documents_than_the_page_limit_share_one_lastupdate`;
+- os limites de páginas e itens são configuráveis (`config/event-reports.php`).
 
 ---
 
