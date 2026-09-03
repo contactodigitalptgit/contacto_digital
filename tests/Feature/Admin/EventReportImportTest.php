@@ -976,22 +976,20 @@ class EventReportImportTest extends TestCase
                     'machines_count' => 1,
                     'failed_machines' => [],
                     'machine_warnings' => [],
-                    'historical_data_complete' => true,
-                    'document_cursor_version' => 1,
-                    'last_full_document_sync_at' => '2026-08-14T11:00:00+01:00',
-                    'machine_document_cursors' => [
-                        (string) $machine->id => [
-                            'machine_id' => $machine->id,
-                            'zs_client_id' => $machine->zs_client_id,
-                            'store_id' => 1,
-                            'cursor' => '2026-08-14T11:45:00+01:00',
-                        ],
-                    ],
                 ],
                 'imported_rows_count' => 3,
                 'imported_at' => now()->subHour(),
                 'is_active' => true,
                 'status' => 'completed',
+            ]);
+
+            // PERF-102: incremental/full is decided from this (event,
+            // machine) pairing's own durable pivot row, not from the
+            // import's summary — seed the cursor/full-sync state a real
+            // prior successful cycle would have left behind.
+            $event->zonesoftMachines()->updateExistingPivot($machine->id, [
+                'last_document_cursor' => '2026-08-14T11:45:00+01:00',
+                'last_full_sync_at' => CarbonImmutable::parse('2026-08-14T11:00:00+01:00'),
             ]);
 
             // event_report_rows/event_report_payment_documents are now the
@@ -1107,7 +1105,7 @@ class EventReportImportTest extends TestCase
             $import = app(EventReportSyncService::class)->sync($event, $admin);
 
             $this->assertSame('completed', $import->status);
-            $this->assertSame('incremental', $import->summary['document_fetch_mode'] ?? null);
+            $this->assertSame(['full' => 0, 'incremental' => 1], $import->summary['document_fetch_mode_counts'] ?? null);
             $this->assertSame(3, $import->imported_rows_count);
             $this->assertSame(1, $import->summary['reused_rows_count'] ?? null);
             $this->assertSame(2, $import->summary['fetched_rows_count'] ?? null);
@@ -1120,10 +1118,26 @@ class EventReportImportTest extends TestCase
                 '2026-08-14T11:30:00+01:00',
                 $import->summary['machine_document_cursors'][(string) $machine->id]['requested_after'] ?? null,
             );
+            // PERF-102: the durable state this cycle actually left behind
+            // lives on the pivot, not the import summary — the cursor moved
+            // forward, but this was an incremental cycle so last_full_sync_at
+            // must stay exactly where it was seeded. Read the raw stored row
+            // (not the Eloquent 'datetime' cast) — under a frozen
+            // CarbonImmutable::setTestNow(), Carbon's implicit-timezone
+            // parsing (used when the cast reads a naive DB string back)
+            // adopts testNow's own timezone instead of the app's UTC
+            // default, which would make a display-based comparison here
+            // fail for a reason that has nothing to do with this test.
+            $pivotRowAfterIncremental = DB::table('event_zonesoft_machines')
+                ->where('event_id', $event->id)
+                ->where('client_zonesoft_machine_id', $machine->id)
+                ->first();
             $this->assertSame(
-                '2026-08-14T11:00:00+01:00',
-                $import->summary['last_full_document_sync_at'] ?? null,
+                '2026-08-14T12:00:00+01:00',
+                $pivotRowAfterIncremental->last_document_cursor,
             );
+            $this->assertSame('2026-08-14 11:00:00', $pivotRowAfterIncremental->last_full_sync_at);
+            $this->assertSame(0, $pivotRowAfterIncremental->consecutive_failures);
             // PERF-101: doc 100 changed (updated in place, same row id — the
             // whole point of the natural-key upsert), doc 102 is new, doc
             // 103 was cancelled (line reconciled away). event_report_import_id
@@ -1167,16 +1181,284 @@ class EventReportImportTest extends TestCase
 
             $fullImport = app(EventReportSyncService::class)->sync($event, $admin);
 
-            $this->assertSame('full', $fullImport->summary['document_fetch_mode'] ?? null);
+            $this->assertSame(['full' => 1, 'incremental' => 0], $fullImport->summary['document_fetch_mode_counts'] ?? null);
             $this->assertSame(0, $fullImport->summary['reused_rows_count'] ?? null);
             $this->assertSame(3, $fullImport->summary['fetched_rows_count'] ?? null);
             $this->assertSame('14.0000', $fullImport->summary['sales_total'] ?? null);
-            $this->assertSame(
-                '2026-08-15T13:01:00+01:00',
-                $fullImport->summary['last_full_document_sync_at'] ?? null,
-            );
+            // 2026-08-15 13:01:00 Europe/Lisbon (this cycle's frozen "now")
+            // is 2026-08-15 12:01:00 UTC — see the raw-row rationale above.
+            $pivotRowAfterFullRefresh = DB::table('event_zonesoft_machines')
+                ->where('event_id', $event->id)
+                ->where('client_zonesoft_machine_id', $machine->id)
+                ->first();
+            $this->assertSame('2026-08-15 12:01:00', $pivotRowAfterFullRefresh->last_full_sync_at);
         } finally {
             CarbonImmutable::setTestNow();
+        }
+    }
+
+    /**
+     * PERF-102 acceptance criteria: "adicionar uma TPA ao evento passa a
+     * exigir refetch apenas dessa TPA."
+     */
+    public function test_adding_a_machine_only_triggers_a_full_refetch_for_that_machine(): void
+    {
+        config([
+            'event-reports.zonesoft.complete_documents' => true,
+            'event-reports.zonesoft.incremental_overlap_minutes' => 15,
+        ]);
+        CarbonImmutable::setTestNow(
+            CarbonImmutable::parse('2026-08-14 12:00:00', 'Europe/Lisbon'),
+        );
+
+        try {
+            [$admin, $client] = $this->makeAdminClientContext();
+            $application = $this->makeApplication();
+            $event = $this->makeEvent($client);
+
+            $existingMachine = ClientZoneSoftMachine::create([
+                'client_id' => $client->id,
+                'event_id' => $event->id,
+                'zonesoft_application_id' => $application->id,
+                'zs_client_id' => 'EXISTING-CLIENT',
+                'license' => 'Z11JSMZIYP',
+                'store_id' => 1,
+                'store_label' => 'Loja existente',
+                'permissions' => 'API + All document interfaces',
+                'is_active' => true,
+                'last_validated_at' => now(),
+            ]);
+            $event->zonesoftMachines()->updateExistingPivot($existingMachine->id, [
+                'last_document_cursor' => '2026-08-14T11:45:00+01:00',
+                'last_full_sync_at' => CarbonImmutable::parse('2026-08-14T11:00:00+01:00'),
+            ]);
+
+            // Newly added to this event — its pivot row exists (created by
+            // ClientZoneSoftMachine::booted()) but has no cursor yet.
+            ClientZoneSoftMachine::create([
+                'client_id' => $client->id,
+                'event_id' => $event->id,
+                'zonesoft_application_id' => $application->id,
+                'zs_client_id' => 'NEW-CLIENT',
+                'license' => 'Z11JSMZIYP',
+                'store_id' => 2,
+                'store_label' => 'Loja nova',
+                'permissions' => 'API + All document interfaces',
+                'is_active' => true,
+                'last_validated_at' => now(),
+            ]);
+
+            $conditionsByClientId = [];
+            Http::fake([
+                'https://api.zonesoft.org/v3/documents/getInstances' => function ($request) use (&$conditionsByClientId) {
+                    $clientId = $request->header('X-ZS-CLIENT-ID')[0] ?? null;
+                    $conditionsByClientId[$clientId] = $request->data()['document']['condition'] ?? null;
+
+                    return Http::response([
+                        'Response' => [
+                            'StatusCode' => 200,
+                            'StatusMessage' => 'OK',
+                            'Content' => ['document' => []],
+                        ],
+                    ]);
+                },
+            ]);
+
+            $import = app(EventReportSyncService::class)->sync($event, $admin);
+
+            $this->assertSame('completed', $import->status);
+            $this->assertSame(
+                ['full' => 1, 'incremental' => 1],
+                $import->summary['document_fetch_mode_counts'] ?? null,
+            );
+            $this->assertStringContainsString(
+                "lastupdate >= '2026-08-14 11:30:00'",
+                $conditionsByClientId['EXISTING-CLIENT'] ?? '',
+            );
+            $this->assertStringNotContainsString('lastupdate', $conditionsByClientId['NEW-CLIENT'] ?? '');
+        } finally {
+            CarbonImmutable::setTestNow();
+        }
+    }
+
+    /**
+     * PERF-102 acceptance criteria: "uma máquina com avisos não altera o
+     * modo de sincronização das outras" — a failing machine still aborts
+     * this cycle's publish (sync() stays all-or-nothing), but the healthy
+     * machine's own progress is not thrown away with it, and the failing
+     * machine's earlier failure does not force the healthy one back to a
+     * full refetch on the next cycle.
+     */
+    public function test_one_machine_failing_does_not_reset_the_other_machines_incremental_cursor(): void
+    {
+        config([
+            'event-reports.zonesoft.complete_documents' => true,
+            'event-reports.zonesoft.incremental_overlap_minutes' => 15,
+        ]);
+        CarbonImmutable::setTestNow(
+            CarbonImmutable::parse('2026-08-14 12:00:00', 'Europe/Lisbon'),
+        );
+
+        try {
+            [$admin, $client] = $this->makeAdminClientContext();
+            $application = $this->makeApplication();
+            $event = $this->makeEvent($client);
+
+            $healthyMachine = ClientZoneSoftMachine::create([
+                'client_id' => $client->id,
+                'event_id' => $event->id,
+                'zonesoft_application_id' => $application->id,
+                'zs_client_id' => 'HEALTHY-CLIENT',
+                'license' => 'Z11JSMZIYP',
+                'store_id' => 1,
+                'store_label' => 'Loja saudavel',
+                'permissions' => 'API + All document interfaces',
+                'is_active' => true,
+                'last_validated_at' => now(),
+            ]);
+            $flakyMachine = ClientZoneSoftMachine::create([
+                'client_id' => $client->id,
+                'event_id' => $event->id,
+                'zonesoft_application_id' => $application->id,
+                'zs_client_id' => 'FLAKY-CLIENT',
+                'license' => 'Z11JSMZIYP',
+                'store_id' => 2,
+                'store_label' => 'Loja instavel',
+                'permissions' => 'API + All document interfaces',
+                'is_active' => true,
+                'last_validated_at' => now(),
+            ]);
+
+            // Only the healthy machine already has a valid cursor — the
+            // flaky one starts with none (as a never-yet-synced machine
+            // would), so its own mode is 'full' independent of anything
+            // that happens to the healthy machine.
+            $event->zonesoftMachines()->updateExistingPivot($healthyMachine->id, [
+                'last_document_cursor' => '2026-08-14T11:45:00+01:00',
+                'last_full_sync_at' => CarbonImmutable::parse('2026-08-14T11:00:00+01:00'),
+            ]);
+
+            $flakyMachineShouldFail = true;
+            $conditionsByClientId = [];
+            Http::fake([
+                'https://api.zonesoft.org/v3/documents/getInstances' => function ($request) use (&$flakyMachineShouldFail, &$conditionsByClientId) {
+                    $clientId = $request->header('X-ZS-CLIENT-ID')[0] ?? null;
+                    $conditionsByClientId[$clientId] = $request->data()['document']['condition'] ?? null;
+
+                    if ($flakyMachineShouldFail && $clientId === 'FLAKY-CLIENT') {
+                        return Http::response([
+                            'Response' => [
+                                'StatusCode' => 401,
+                                'StatusMessage' => 'Unauthorized',
+                                'Content' => ['document' => null],
+                            ],
+                        ], 200);
+                    }
+
+                    return Http::response([
+                        'Response' => [
+                            'StatusCode' => 200,
+                            'StatusMessage' => 'OK',
+                            'Content' => ['document' => []],
+                        ],
+                    ]);
+                },
+            ]);
+
+            try {
+                app(EventReportSyncService::class)->sync($event, $admin);
+                $this->fail('Esperava que a sincronizacao falhasse por causa da maquina instavel.');
+            } catch (ValidationException) {
+                // Esperado — sync() continua tudo-ou-nada na publicacao.
+            }
+
+            // O próprio fetch da máquina saudável já tinha sucedido antes de
+            // a instável falhar — esse progresso é gravado de imediato
+            // (persistMachineSyncSuccess corre fora da transação de
+            // publicação), não descartado só porque o ciclo como um todo
+            // não chegou a publicar nada.
+            $healthyPivot = DB::table('event_zonesoft_machines')
+                ->where('event_id', $event->id)
+                ->where('client_zonesoft_machine_id', $healthyMachine->id)
+                ->first();
+            $this->assertNotNull($healthyPivot->last_synced_at);
+            $this->assertSame(0, $healthyPivot->consecutive_failures);
+
+            $flakyPivot = DB::table('event_zonesoft_machines')
+                ->where('event_id', $event->id)
+                ->where('client_zonesoft_machine_id', $flakyMachine->id)
+                ->first();
+            $this->assertSame(1, $flakyPivot->consecutive_failures);
+
+            // Segundo ciclo: as duas respondem bem desta vez. A máquina
+            // saudável deve continuar em modo incremental — o seu cursor
+            // não foi descartado pela falha da outra máquina na ronda
+            // anterior.
+            $flakyMachineShouldFail = false;
+            $conditionsByClientId = [];
+
+            $import = app(EventReportSyncService::class)->sync($event, $admin);
+
+            $this->assertSame('completed', $import->status);
+            $this->assertStringContainsString('lastupdate >=', $conditionsByClientId['HEALTHY-CLIENT'] ?? '');
+            // The flaky machine never had a valid cursor recorded, so it
+            // stays on a full refetch on its own — unrelated to the other
+            // machine's mode.
+            $this->assertStringNotContainsString('lastupdate', $conditionsByClientId['FLAKY-CLIENT'] ?? '');
+        } finally {
+            CarbonImmutable::setTestNow();
+        }
+    }
+
+    /**
+     * PERF-102 acceptance criteria: "o refresh completo distribui-se ao
+     * longo da janela, sem picos" — a deterministic per-machine offset
+     * (machineFullRefreshJitterMinutes()) means machines added at the same
+     * instant don't all become due for a full refresh simultaneously.
+     */
+    public function test_full_refresh_jitter_spreads_across_machines_instead_of_firing_together(): void
+    {
+        [$admin, $client] = $this->makeAdminClientContext();
+        $application = $this->makeApplication();
+        $event = $this->makeEvent($client);
+
+        $service = app(EventReportSyncService::class);
+        $jitterMethod = new \ReflectionMethod($service, 'machineFullRefreshJitterMinutes');
+
+        $jitterMinutesByMachine = [];
+
+        // Several machines, all added at the exact same instant (the
+        // scenario the plan calls out as risky under the old design —
+        // every machine sharing one full-refresh clock).
+        for ($storeId = 1; $storeId <= 5; $storeId++) {
+            $machine = ClientZoneSoftMachine::create([
+                'client_id' => $client->id,
+                'event_id' => $event->id,
+                'zonesoft_application_id' => $application->id,
+                'zs_client_id' => 'JITTER-CLIENT-'.$storeId,
+                'license' => 'Z11JSMZIYP',
+                'store_id' => $storeId,
+                'store_label' => 'Loja '.$storeId,
+                'permissions' => 'API + All document interfaces',
+                'is_active' => true,
+                'last_validated_at' => now(),
+            ]);
+
+            $jitterMinutesByMachine[$machine->id] = $jitterMethod->invoke($service, $machine);
+        }
+
+        // Not every machine landing on a different offset would still be
+        // fine (a collision doesn't break correctness), but if they were
+        // ALL identical the "sem picos" guarantee wouldn't hold at all —
+        // assert the jitter genuinely varies across machines instead of
+        // being a constant in disguise.
+        $this->assertGreaterThan(1, count(array_unique($jitterMinutesByMachine)));
+
+        $window = (int) config('event-reports.zonesoft.full_refresh_jitter_minutes', 120);
+
+        foreach ($jitterMinutesByMachine as $jitterMinutes) {
+            $this->assertGreaterThanOrEqual(0, $jitterMinutes);
+            $this->assertLessThan($window, $jitterMinutes);
         }
     }
 
@@ -1254,8 +1536,8 @@ class EventReportImportTest extends TestCase
 
             $this->assertSame('completed', $import->status);
             $this->assertSame(1, $import->summary['api_requests_count'] ?? null);
-            $this->assertTrue($import->summary['historical_data_complete'] ?? false);
-            $this->assertSame('2026-08-10T12:31:00+00:00', $import->summary['fetch_range']['start'] ?? null);
+            $this->assertSame(['full' => 1, 'incremental' => 0], $import->summary['document_fetch_mode_counts'] ?? null);
+            $this->assertSame('2026-08-10T12:31:00+00:00', $import->summary['sync_range']['start'] ?? null);
         } finally {
             CarbonImmutable::setTestNow();
         }

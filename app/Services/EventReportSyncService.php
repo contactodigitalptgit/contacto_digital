@@ -9,6 +9,7 @@ use App\Models\EventReportPaymentDocument;
 use App\Models\EventReportRow;
 use App\Models\EventReportRowAggregate;
 use App\Models\EventReportTicketAggregate;
+use App\Models\EventZoneSoftMachine;
 use App\Models\User;
 use App\Services\ZoneSoft\ZoneSoftApiClient;
 use App\Services\ZoneSoft\ZoneSoftApiException;
@@ -231,7 +232,7 @@ class EventReportSyncService
                     $machineSync['pending_reconciliations'],
                     $machineSync['pending_rows'],
                     $machineSync['pending_payment_documents'],
-                    $machineSync['document_fetch_mode'] === 'full',
+                    $machineSync['full_mode_machine_ids'],
                 );
 
                 // PERF-401 (fatia 1): keep the dashboard's pre-aggregated
@@ -257,13 +258,15 @@ class EventReportSyncService
                     'fetch_duration_ms' => $fetchDurationMs,
                     'total_duration_ms' => (int) round((microtime(true) - $runStartedAt) * 1000),
                 ];
-                $summary['historical_data_complete'] = true;
                 $summary['sync_range'] = $machineSync['sync_range'];
-                $summary['fetch_range'] = $machineSync['fetch_range'];
-                $summary['document_cursor_version'] = 1;
-                $summary['document_fetch_mode'] = $machineSync['document_fetch_mode'];
+                // PERF-102: incremental/full is now decided per machine
+                // (resolveMachineSyncMode()), so there is no longer one
+                // event-wide mode to record — these counts and the cursors
+                // actually requested this cycle are diagnostic only; the
+                // durable, authoritative state lives on each (event,
+                // machine) pivot row (EventZoneSoftMachine).
+                $summary['document_fetch_mode_counts'] = $machineSync['document_fetch_mode_counts'];
                 $summary['machine_document_cursors'] = $machineSync['machine_document_cursors'];
-                $summary['last_full_document_sync_at'] = $machineSync['last_full_document_sync_at'];
 
                 $lockedEvent->reportImports()
                     ->where('is_active', true)
@@ -380,10 +383,9 @@ class EventReportSyncService
      *     pending_payment_documents:list<array<string, mixed>>,
      *     pending_reconciliations:list<array{machine_id:int,document_keys:list<array<string,string>>}>,
      *     sync_range:array{start:string,end:string},
-     *     fetch_range:array{start:string,end:string},
-     *     document_fetch_mode:string,
+     *     full_mode_machine_ids:list<int>,
+     *     document_fetch_mode_counts:array{full:int,incremental:int},
      *     machine_document_cursors:array<string, array<string, mixed>>,
-     *     last_full_document_sync_at:string,
      *     metrics:array{documents_count:int,api_requests_count:int,machine_duration_ms:int,machine_timings:list<array<string, int|string|null>>}
      * }
      */
@@ -393,12 +395,12 @@ class EventReportSyncService
         EventReportImport $syncLog,
     ): array {
         $syncRange = $this->resolveSyncRange($event);
-        $documentSyncStartedAt = CarbonImmutable::now(self::REPORT_TIMEZONE);
-        $syncMode = $this->resolveSyncMode($event, $machines, $syncRange);
         $successfulMachinesCount = 0;
         $failedMachines = [];
         $machineWarnings = [];
         $machineDocumentCursors = [];
+        $fullModeMachineIds = [];
+        $documentFetchModeCounts = ['full' => 0, 'incremental' => 0];
         $metrics = [
             'documents_count' => 0,
             'api_requests_count' => 0,
@@ -411,14 +413,43 @@ class EventReportSyncService
         $apiRequestsCount = 0;
         $totalRowsCount = 0;
         $totalMachines = $machines->count();
+
+        // PERF-102: each machine's incremental/full decision is now its
+        // own — see resolveMachineSyncMode(). $requestCursorsByMachine only
+        // carries an entry for machines running incrementally this cycle;
+        // resolveMachineLastUpdatedAfter() already treats a missing entry
+        // as "full" (null lastUpdatedAfter), unchanged.
+        $machineFetchModes = [];
+        $requestCursorsByMachine = [];
+        $anyMachineNeedsFullMode = false;
+
+        foreach ($machines as $machine) {
+            $mode = $this->resolveMachineSyncMode($machine);
+            $machineFetchModes[$machine->id] = $mode['document_fetch_mode'];
+            $documentFetchModeCounts[$mode['document_fetch_mode']]++;
+
+            if ($mode['document_fetch_mode'] === 'full') {
+                $anyMachineNeedsFullMode = true;
+
+                continue;
+            }
+
+            $requestCursorsByMachine[(string) $machine->id] = [
+                'machine_id' => $machine->id,
+                'zs_client_id' => $machine->zs_client_id,
+                'store_id' => $machine->store_id,
+                'cursor' => $mode['cursor'],
+            ];
+        }
+
         $rangePayload = [
-            'start' => $syncMode['fetch_range']['start']->toIso8601String(),
-            'end' => $syncMode['fetch_range']['end']->toIso8601String(),
+            'start' => $syncRange['start']->toIso8601String(),
+            'end' => $syncRange['end']->toIso8601String(),
             'sync_import_id' => $syncLog->id,
-            'machine_document_cursors' => $syncMode['machine_document_cursors'],
-            'machine_sync_concurrency' => $syncMode['document_fetch_mode'] === 'incremental'
-                ? (int) config('event-reports.zonesoft.incremental_machine_sync_concurrency', 4)
-                : (int) config('event-reports.zonesoft.full_machine_sync_concurrency', 10),
+            'machine_document_cursors' => $requestCursorsByMachine,
+            'machine_sync_concurrency' => $anyMachineNeedsFullMode
+                ? (int) config('event-reports.zonesoft.full_machine_sync_concurrency', 10)
+                : (int) config('event-reports.zonesoft.incremental_machine_sync_concurrency', 4),
         ];
 
         $machineIds = $machines->modelKeys();
@@ -463,6 +494,7 @@ class EventReportSyncService
 
             if (is_string($result['failure_message'] ?? null) && $result['failure_message'] !== '') {
                 $failedMachines[] = $this->persistMachineFailure(
+                    $event,
                     $machine,
                     $result['failure_message'],
                     $statusTimestamp,
@@ -524,8 +556,22 @@ class EventReportSyncService
             if ($documentCursor !== null) {
                 $machineDocumentCursors[(string) $machine->id] = $documentCursor;
             }
+
+            $machineFetchMode = $machineFetchModes[$machine->id] ?? 'full';
+
+            if ($machineFetchMode === 'full') {
+                $fullModeMachineIds[] = $machine->id;
+            }
+
             $warningMessage = $result['warning_message'] ?? null;
-            $this->persistMachineStatus($machine, $warningMessage, $statusTimestamp);
+            $this->persistMachineSyncSuccess(
+                $event,
+                $machine,
+                $warningMessage,
+                $statusTimestamp,
+                $machineFetchMode,
+                is_array($documentCursor) ? ($documentCursor['cursor'] ?? null) : null,
+            );
             // PERF-101 no longer stages rows per machine, so this is the only
             // heartbeat during a (possibly long) fetch across many machines —
             // keeps markStaleProcessingImportsAsFailed() from reaping a sync
@@ -566,168 +612,86 @@ class EventReportSyncService
                 'start' => $syncRange['start']->toIso8601String(),
                 'end' => $syncRange['end']->toIso8601String(),
             ],
-            'fetch_range' => [
-                'start' => $syncMode['fetch_range']['start']->toIso8601String(),
-                'end' => $syncMode['fetch_range']['end']->toIso8601String(),
-            ],
-            'document_fetch_mode' => $syncMode['document_fetch_mode'],
+            'full_mode_machine_ids' => $fullModeMachineIds,
+            'document_fetch_mode_counts' => $documentFetchModeCounts,
             'machine_document_cursors' => $machineDocumentCursors,
-            'last_full_document_sync_at' => $syncMode['document_fetch_mode'] === 'full'
-                ? $documentSyncStartedAt->toIso8601String()
-                : $syncMode['last_full_document_sync_at'],
             'metrics' => $metrics,
         ];
     }
 
     /**
-     * Decides incremental vs full and resolves per-machine cursors — PERF-101
-     * removed the part of this decision that used to copy the previous
-     * snapshot's rows/payment documents into staging (resolveReusableHistoricalData()).
-     * Nothing needs to be copied anymore: unchanged rows already sit in
-     * event_report_rows and are simply left alone by this cycle.
+     * PERF-102: decides incremental vs full independently for ONE machine,
+     * from that (event, machine) pairing's own durable pivot columns
+     * (event_zonesoft_machines — see EventZoneSoftMachine) instead of a
+     * single event-wide summary blob. This is what makes one machine's
+     * failure or warning stop forcing a full refetch on the other 199: each
+     * machine's cursor durably survives regardless of whether THIS cycle's
+     * publish ever happens (persistMachineSyncSuccess()/persistMachineFailure()
+     * write straight to the pivot row, outside the publish transaction).
      *
-     * @param  Collection<int, ClientZoneSoftMachine>  $machines
-     * @param  array{start:CarbonImmutable,end:CarbonImmutable}  $syncRange
-     * @return array{
-     *     fetch_range:array{start:CarbonImmutable,end:CarbonImmutable},
-     *     document_fetch_mode:string,
-     *     machine_document_cursors:array<string, array<string, mixed>>,
-     *     last_full_document_sync_at:string|null
-     * }
+     * @return array{document_fetch_mode:string, cursor:?string}
      */
-    private function resolveSyncMode(
-        Event $event,
-        Collection $machines,
-        array $syncRange,
-    ): array {
-        $fullMode = [
-            'fetch_range' => $syncRange,
-            'document_fetch_mode' => 'full',
-            'machine_document_cursors' => [],
-            'last_full_document_sync_at' => null,
-        ];
+    private function resolveMachineSyncMode(ClientZoneSoftMachine $machine): array
+    {
+        $fullMode = ['document_fetch_mode' => 'full', 'cursor' => null];
 
         if (! (bool) config('event-reports.zonesoft.complete_documents', true)) {
             return $fullMode;
         }
 
-        $activeImport = $event->reportImports()
-            ->where('is_active', true)
-            ->where('status', 'completed')
-            ->latest('imported_at')
-            ->first();
+        $pivot = $machine->pivot instanceof EventZoneSoftMachine ? $machine->pivot : null;
+        $cursorValue = $pivot?->last_document_cursor;
 
-        if (! $activeImport) {
+        if (! is_string($cursorValue) || trim($cursorValue) === '') {
             return $fullMode;
         }
-
-        $summary = is_array($activeImport->summary) ? $activeImport->summary : [];
-
-        if (($summary['failed_machines'] ?? []) !== [] || ($summary['machine_warnings'] ?? []) !== []) {
-            return $fullMode;
-        }
-
-        if (($summary['historical_data_complete'] ?? false) !== true) {
-            return $fullMode;
-        }
-
-        if ((int) ($summary['document_cursor_version'] ?? 0) !== 1) {
-            return $fullMode;
-        }
-
-        $lastFullSyncValue = $summary['last_full_document_sync_at'] ?? null;
 
         try {
-            $lastFullSync = is_string($lastFullSyncValue) && trim($lastFullSyncValue) !== ''
-                ? CarbonImmutable::parse($lastFullSyncValue)
-                : null;
+            $cursor = CarbonImmutable::parse($cursorValue);
         } catch (\Throwable) {
-            $lastFullSync = null;
+            return $fullMode;
+        }
+
+        $maxConsecutiveFailures = max(
+            1,
+            (int) config('event-reports.zonesoft.max_consecutive_failures_before_full_refresh', 3),
+        );
+
+        if ((int) ($pivot?->consecutive_failures ?? 0) >= $maxConsecutiveFailures) {
+            return $fullMode;
         }
 
         $fullRefreshHours = max(
             1,
             min(168, (int) config('event-reports.zonesoft.incremental_full_refresh_hours', 24)),
         );
+        $lastFullSync = $pivot?->last_full_sync_at;
+        $dueAt = $lastFullSync?->copy()
+            ->addHours($fullRefreshHours)
+            ->addMinutes($this->machineFullRefreshJitterMinutes($machine));
 
-        if ($lastFullSync === null || $lastFullSync->addHours($fullRefreshHours)->lte(now())) {
-            return $fullMode;
-        }
-
-        $currentMachineIds = $machines->modelKeys();
-        sort($currentMachineIds);
-        $snapshotMachineIds = collect($activeImport->headers['machines'] ?? [])
-            ->pluck('id')
-            ->filter(fn (mixed $id): bool => is_numeric($id))
-            ->map(fn (mixed $id): int => (int) $id)
-            ->sort()
-            ->values()
-            ->all();
-
-        if ($currentMachineIds !== $snapshotMachineIds) {
-            return $fullMode;
-        }
-
-        $machineDocumentCursors = $this->resolveMachineDocumentCursors($summary, $machines);
-
-        if ($machineDocumentCursors === null) {
+        if ($lastFullSync === null || $dueAt === null || $dueAt->lte(now())) {
             return $fullMode;
         }
 
         return [
-            'fetch_range' => $syncRange,
             'document_fetch_mode' => 'incremental',
-            'machine_document_cursors' => $machineDocumentCursors,
-            'last_full_document_sync_at' => $lastFullSync->toIso8601String(),
+            'cursor' => $cursor->toIso8601String(),
         ];
     }
 
     /**
-     * @param  array<string, mixed>  $summary
-     * @param  Collection<int, ClientZoneSoftMachine>  $machines
-     * @return array<string, array<string, mixed>>|null
+     * Deterministic per-machine offset so 200 machines added at the same
+     * moment don't all become due for a full refresh at the exact same
+     * instant every incremental_full_refresh_hours — see PERF-102's
+     * acceptance criteria ("o refresh completo distribui-se ao longo da
+     * janela, sem picos").
      */
-    private function resolveMachineDocumentCursors(array $summary, Collection $machines): ?array
+    private function machineFullRefreshJitterMinutes(ClientZoneSoftMachine $machine): int
     {
-        $storedCursors = $summary['machine_document_cursors'] ?? null;
+        $window = max(1, (int) config('event-reports.zonesoft.full_refresh_jitter_minutes', 120));
 
-        if (! is_array($storedCursors)) {
-            return null;
-        }
-
-        $resolved = [];
-
-        foreach ($machines as $machine) {
-            $cursor = $storedCursors[(string) $machine->id] ?? null;
-            $cursorValue = is_array($cursor) ? ($cursor['cursor'] ?? null) : null;
-
-            if (! is_string($cursorValue) || trim($cursorValue) === '') {
-                return null;
-            }
-
-            try {
-                $parsedCursor = CarbonImmutable::parse($cursorValue);
-            } catch (\Throwable) {
-                return null;
-            }
-
-            if (isset($cursor['zs_client_id']) && $cursor['zs_client_id'] !== $machine->zs_client_id) {
-                return null;
-            }
-
-            if (isset($cursor['store_id']) && (int) $cursor['store_id'] !== (int) $machine->store_id) {
-                return null;
-            }
-
-            $resolved[(string) $machine->id] = [
-                'machine_id' => $machine->id,
-                'zs_client_id' => $machine->zs_client_id,
-                'store_id' => $machine->store_id,
-                'cursor' => $parsedCursor->toIso8601String(),
-            ];
-        }
-
-        return $resolved;
+        return $machine->id % $window;
     }
 
     private function machineSyncConcurrency(?int $configuredConcurrency = null): int
@@ -1796,7 +1760,7 @@ class EventReportSyncService
      * total (that distinction only matters for a failed import's admin
      * display, which was already best-effort before PERF-101).
      *
-     * @param  array{pending_rows:list<array<string,mixed>>,pending_payment_documents:list<array<string,mixed>>,sync_range:array{start:string,end:string},fetch_range:array{start:string,end:string},document_fetch_mode:string,metrics:array{documents_count:int,api_requests_count:int,machine_duration_ms:int,machine_timings:list<array<string, int|string|null>>}}  $machineSync
+     * @param  array{pending_rows:list<array<string,mixed>>,pending_payment_documents:list<array<string,mixed>>,sync_range:array{start:string,end:string},document_fetch_mode_counts:array{full:int,incremental:int},metrics:array{documents_count:int,api_requests_count:int,machine_duration_ms:int,machine_timings:list<array<string, int|string|null>>}}  $machineSync
      * @param  list<array{machine_id:int,zs_client_id:string,store_id:int,store_label:?string,message:string}>  $failedMachines
      * @param  list<array{machine_id:int,zs_client_id:string,store_id:int,store_label:?string,message:string}>  $machineWarnings
      * @return array<string, mixed>
@@ -1826,8 +1790,7 @@ class EventReportSyncService
             'machine_warnings' => $machineWarnings,
             'stage' => 'failed',
             'sync_range' => $machineSync['sync_range'],
-            'fetch_range' => $machineSync['fetch_range'],
-            'document_fetch_mode' => $machineSync['document_fetch_mode'],
+            'document_fetch_mode_counts' => $machineSync['document_fetch_mode_counts'],
             'machines_total' => $successfulMachinesCount + count($failedMachines),
             'machines_processed' => $successfulMachinesCount + count($failedMachines),
             'documents_processed' => $metrics['documents_count'],
@@ -1945,26 +1908,61 @@ class EventReportSyncService
         ]);
     }
 
-    private function persistMachineStatus(
+    /**
+     * PERF-102: writes straight to the (event, machine) pivot row via a
+     * direct update — not inside run()'s publish transaction, and not
+     * gated on the rest of the machines in this cycle succeeding. This is
+     * what lets 199 healthy machines keep their incremental progress even
+     * when the 200th fails or warns this cycle: their cursor is durable the
+     * moment their own fetch succeeds, independent of anything else.
+     */
+    private function persistMachineSyncSuccess(
+        Event $event,
         ClientZoneSoftMachine $machine,
         ?string $message,
         $timestamp,
+        string $documentFetchMode,
+        ?string $documentCursor,
     ): void {
         $machine->forceFill([
             'last_validated_at' => $timestamp,
             'last_error' => $message,
         ])->save();
+
+        $pivotUpdates = [
+            'last_synced_at' => $timestamp,
+            'consecutive_failures' => 0,
+        ];
+
+        if ($documentCursor !== null) {
+            $pivotUpdates['last_document_cursor'] = $documentCursor;
+        }
+
+        if ($documentFetchMode === 'full') {
+            $pivotUpdates['last_full_sync_at'] = $timestamp;
+        }
+
+        $event->zonesoftMachines()->updateExistingPivot($machine->id, $pivotUpdates);
     }
 
     /**
      * @return array{machine_id:int,zs_client_id:string,store_id:int,store_label:?string,message:string}
      */
     private function persistMachineFailure(
+        Event $event,
         ClientZoneSoftMachine $machine,
         string $message,
         $timestamp,
     ): array {
-        $this->persistMachineStatus($machine, $message, $timestamp);
+        $machine->forceFill([
+            'last_validated_at' => $timestamp,
+            'last_error' => $message,
+        ])->save();
+
+        $pivot = $machine->pivot instanceof EventZoneSoftMachine ? $machine->pivot : null;
+        $event->zonesoftMachines()->updateExistingPivot($machine->id, [
+            'consecutive_failures' => (int) ($pivot?->consecutive_failures ?? 0) + 1,
+        ]);
 
         return [
             'machine_id' => $machine->id,
@@ -2300,13 +2298,17 @@ class EventReportSyncService
      * @param  list<array{machine_id:int,document_keys:list<array<string,string>>}>  $pendingReconciliations
      * @param  list<array<string,mixed>>  $pendingRows
      * @param  list<array<string,mixed>>  $pendingPaymentDocuments
+     * @param  list<int>  $fullModeMachineIds  PERF-102: full/incremental is
+     *                                         now decided per machine, so "was this a complete listing" (the
+     *                                         only thing that licenses reconcileVanishedDocuments() below) must
+     *                                         be checked per machine too, not once for the whole cycle.
      */
     private function reconcileFetchedDocuments(
         int $eventId,
         array $pendingReconciliations,
         array $pendingRows,
         array $pendingPaymentDocuments,
-        bool $isFullMode,
+        array $fullModeMachineIds,
     ): void {
         if ($pendingReconciliations === []) {
             return;
@@ -2376,7 +2378,7 @@ class EventReportSyncService
                 $paymentQuery->delete();
             }
 
-            if ($isFullMode) {
+            if (in_array($machineId, $fullModeMachineIds, true)) {
                 $this->reconcileVanishedDocuments($eventId, $machineId, $fetchedSignatures);
             }
         }

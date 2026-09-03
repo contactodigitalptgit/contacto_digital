@@ -345,24 +345,78 @@ Critério de aceite:
 - reprocessar o mesmo intervalo duas vezes produz exatamente o mesmo resultado.
 
 #### PERF-102 — Cursor incremental durável e por máquina
-**Prioridade:** P1 · **Estado:** Não iniciado · **Dependências:** PERF-101
+**Prioridade:** P1 · **Estado:** Implementado · **Dependências:** PERF-101
 
-Ações:
+Implementado em `app/Services/EventReportSyncService.php`,
+`app/Models/EventZoneSoftMachine.php` (novo), `app/Models/Event.php` (branch
+`perf/101-incremental-natural-key`).
 
-- mover os cursores de `summary['machine_document_cursors']` (JSON dentro da
-  importação) para colunas próprias em `client_zonesoft_machines`:
-  `last_synced_at`, `last_document_cursor`, `last_full_sync_at`, `consecutive_failures`;
-- eliminar as regras de invalidação global: o aviso de uma máquina deixa de
-  forçar refetch completo das restantes 199;
-- adicionar uma TPA ao evento passa a exigir refetch **apenas** dessa TPA;
-- manter o refresh completo periódico, mas escalonado por máquina em vez de
-  simultâneo para todas.
+- **Correção ao desenho original:** o plano dizia para mover os cursores
+  para colunas em `client_zonesoft_machines` — mas essa tabela foi tornada
+  global entre eventos por
+  `2026_08_29_170500_make_zonesoft_machines_global.php` (a mesma TPA física
+  pode estar ligada a vários eventos ao longo do tempo, via
+  `event_zonesoft_machines`). Um cursor `lastupdate` só faz sentido para um
+  par (evento, máquina) — se vivesse na máquina, um evento novo a reutilizar
+  uma TPA antiga herdaria um cursor de um evento completamente diferente e
+  arriscava saltar todo o histórico desse evento novo. As colunas
+  (`last_synced_at`, `last_document_cursor`, `last_full_sync_at`,
+  `consecutive_failures`) ficam antes na tabela pivot
+  `event_zonesoft_machines`, através de um pivot model dedicado
+  (`EventZoneSoftMachine`, usado por `Event::zonesoftMachines()` via
+  `->using()->withPivot([...])`).
+- `resolveMachineSyncMode()` decide incremental/completo **por máquina**,
+  lendo só o pivot dessa máquina — substituiu por completo o antigo
+  `resolveSyncMode()` (que lia um blob JSON único em
+  `event_report_imports.summary`, decidindo para o evento inteiro de uma
+  vez).
+- **A causa raiz da invalidação global era mais funda do que "um campo
+  ficava a `false`":** `sync()` já era tudo-ou-nada na publicação — uma
+  máquina a falhar ou a avisar aborta a sincronização inteira sem escrever
+  nada (nunca mudou, continua correto: só se publica depois de todas as
+  máquinas terem sucesso). Antes do PERF-102, os cursores só existiam
+  dentro do summary de uma importação **completa e publicada** — por isso,
+  quando 1 de 200 máquinas falhava, não havia onde guardar o progresso das
+  outras 199, e a próxima tentativa via-se forçada a repetir tudo. A
+  correção não foi só mudar onde os cursores vivem — foi desacoplar a sua
+  escrita da transação de publicação: `persistMachineSyncSuccess()`/
+  `persistMachineFailure()` escrevem direto no pivot assim que o fetch
+  dessa máquina termina, fora da transação — por isso o progresso de uma
+  máquina sobrevive mesmo que o ciclo inteiro aborte por causa de outra.
+- `reconcileFetchedDocuments()` recebia um `bool $isFullMode` único;
+  passou a receber `$fullModeMachineIds` (a lista das máquinas que fizeram
+  fetch completo neste ciclo) — a decisão "isto foi uma listagem completa,
+  logo o que não veio já não existe" tinha de se tornar por máquina
+  também, não só a decisão de pedir.
+- Refresh completo periódico escalonado: `machineFullRefreshJitterMinutes()`
+  soma um deslocamento determinístico por `machine_id % janela`
+  (`full_refresh_jitter_minutes`, 120min por omissão) ao prazo de
+  `incremental_full_refresh_hours` — 200 máquinas adicionadas no mesmo
+  instante deixam de ficar todas devidas ao mesmo segundo.
+- Falhas consecutivas: `max_consecutive_failures_before_full_refresh`
+  (3 por omissão) força essa máquina de volta a completo, isolada das
+  outras.
 
 Critério de aceite:
 
-- adicionar uma máquina a um evento com 200 TPAs gera pedidos apenas para essa máquina;
-- uma máquina com avisos não altera o modo de sincronização das outras;
-- o refresh completo distribui-se ao longo da janela, sem picos.
+- adicionar uma máquina a um evento com TPAs já incrementais gera pedido
+  completo só para a nova — provado por
+  `test_adding_a_machine_only_triggers_a_full_refetch_for_that_machine`;
+- uma máquina a falhar não altera o modo de sincronização das outras nem
+  descarta o progresso já feito por elas no mesmo ciclo — provado por
+  `test_one_machine_failing_does_not_reset_the_other_machines_incremental_cursor`;
+- o refresh completo distribui-se ao longo da janela, sem picos — provado
+  por `test_full_refresh_jitter_spreads_across_machines_instead_of_firing_together`.
+
+Achado ao testar: comparar o timestamp lido de volta do pivot (`'datetime'`
+cast) contra uma string ISO8601 falhava por causa de uma particularidade do
+Carbon — com `CarbonImmutable::setTestNow()` ativo, `Date::createFromFormat()`
+(usado internamente pelo cast ao reidratar uma string "naive" da base de
+dados) herda o fuso horário do próprio testNow em vez do fuso por omissão
+da app (UTC), só durante os testes — em produção, sem testNow, o
+comportamento é o correto. Os testes passaram a comparar o valor bruto
+gravado na base (`DB::table('event_zonesoft_machines')->first()`) em vez de
+passar pelo cast, evitando a particularidade sem mascarar nada.
 
 #### PERF-103 — Paginação por chave em vez de `offset`
 **Prioridade:** P1 (correção) · **Estado:** Implementado

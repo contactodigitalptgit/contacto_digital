@@ -37,5 +37,15 @@ return [
         // unexpectedly (e.g. lastupdate stops advancing).
         'document_pagination_max_pages' => (int) env('EVENT_REPORT_DOCUMENT_PAGINATION_MAX_PAGES', 2000),
         'document_pagination_max_documents' => (int) env('EVENT_REPORT_DOCUMENT_PAGINATION_MAX_DOCUMENTS', 500000),
+        // PERF-102: a machine with this many CONSECUTIVE failed sync
+        // attempts falls back to a full refetch on its next attempt
+        // (instead of trusting a cursor that might now be stale for
+        // reasons the failures never let it prove) — isolated to that one
+        // machine, never the rest of the event.
+        'max_consecutive_failures_before_full_refresh' => (int) env('EVENT_REPORT_MAX_CONSECUTIVE_FAILURES_BEFORE_FULL_REFRESH', 3),
+        // PERF-102: spreads each machine's periodic full refresh across
+        // this many minutes (deterministic per machine id) instead of every
+        // machine becoming due for a full refresh at the exact same instant.
+        'full_refresh_jitter_minutes' => (int) env('EVENT_REPORT_FULL_REFRESH_JITTER_MINUTES', 120),
     ],
 ];

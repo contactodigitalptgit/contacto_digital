@@ -90,6 +90,11 @@ class Event extends Model
             'event_zonesoft_machines',
             'event_id',
             'client_zonesoft_machine_id',
-        )->withTimestamps();
+        )
+            ->using(EventZoneSoftMachine::class)
+            // PERF-102: this (event, machine) pairing's own incremental
+            // sync state — see EventZoneSoftMachine.
+            ->withPivot(['last_synced_at', 'last_document_cursor', 'last_full_sync_at', 'consecutive_failures'])
+            ->withTimestamps();
     }
 }
