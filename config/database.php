@@ -34,7 +34,14 @@ return [
         'sqlite' => [
             'driver' => 'sqlite',
             'url' => env('DB_URL'),
-            'database' => env('DB_DATABASE', database_path('database.sqlite')),
+            // PERF-501: a dedicated env var, not the shared DB_DATABASE —
+            // 'pgsql' below also reads DB_DATABASE (its database *name*),
+            // so once DB_CONNECTION switches to pgsql, DB_DATABASE holds a
+            // Postgres database name, not this file path. Falling back to
+            // DB_DATABASE here only matters for environments that never
+            // set SQLITE_DATABASE explicitly (e.g. local dev) and don't
+            // also use pgsql, so the fallback stays harmless for them.
+            'database' => env('SQLITE_DATABASE', env('DB_DATABASE', database_path('database.sqlite'))),
             'prefix' => '',
             'foreign_key_constraints' => env('DB_FOREIGN_KEYS', true),
             'busy_timeout' => (int) env('DB_BUSY_TIMEOUT', 15000),
