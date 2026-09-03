@@ -18,6 +18,21 @@ use Illuminate\Support\Facades\Schema;
  * See docs/PLANO_DE_PERFORMANCE_SINCRONIZACAO.md (PERF-101) for the design
  * and docs/PADRAO_DE_IMPLEMENTACAO_SEGURA.md §12 for the backfill rules this
  * migration must respect before it is ever run against production data.
+ *
+ * DEPLOYMENT NOTE — this migration deletes rows (see
+ * dropRowsAndPaymentDocumentsNotBelongingToTheActiveImport() below), and
+ * its down() cannot restore what it deletes. Before running this against
+ * production:
+ *   1. Back up the production database file/dump first — non-negotiable,
+ *      regardless of how safe the code looks on review.
+ *   2. Run `php artisan migrate --force` and read its output. A thrown
+ *      RuntimeException from verifyDeletionMatchedExpectations() means
+ *      the whole migration rolled back automatically (nothing was kept
+ *      half-applied) — the message names the exact event/count mismatch
+ *      to investigate; do not re-run until that is understood.
+ *   3. Only after migrate exits successfully, spot-check a couple of
+ *      events' dashboard totals against what they showed before the
+ *      deploy, then confirm a real sync cycle still runs cleanly.
  */
 return new class extends Migration
 {
@@ -81,10 +96,30 @@ return new class extends Migration
         // exercised locally, not against a copy of the real Fesnima
         // dataset. Per docs/PADRAO_DE_IMPLEMENTACAO_SEGURA.md §12, it must
         // be rehearsed there before this migration ever runs in production.
+        //
+        // Safety net: this migration runs inside a DB transaction on
+        // sqlite/pgsql (Laravel's default for drivers with transactional
+        // DDL — confirm this holds for whatever driver production actually
+        // uses before relying on it). verifyDeletionMatchedExpectations()
+        // below THROWS if the row/payment-document count left behind for
+        // any event doesn't exactly match that event's own
+        // imported_rows_count / summary.payment_documents_count — numbers
+        // production already trusted before this migration touched
+        // anything. Throwing rolls the whole migration back; nothing is
+        // left half-applied.
         $this->dropRowsAndPaymentDocumentsNotBelongingToTheActiveImport();
+        $this->verifyDeletionMatchedExpectations();
         $this->backfillRowIdentity();
     }
 
+    /**
+     * Reverses the schema (columns, indexes) but NOT the delete this
+     * migration's up() ran — the superseded/orphaned rows it removed are
+     * gone, `down()` cannot bring them back. If up() ever needs undoing
+     * after real data was affected, restore from the backup taken before
+     * migrating (see the deployment note in this migration's class
+     * docblock) rather than relying on this down().
+     */
     public function down(): void
     {
         Schema::table('event_report_payment_documents', function (Blueprint $table): void {
@@ -139,6 +174,71 @@ return new class extends Migration
                 // sync that only ever failed) keep no rows either —
                 // nothing "current" exists for them under either model.
                 $query->delete();
+            }
+        }
+    }
+
+    /**
+     * Hard stop before this migration touches machine_id/line_key at all:
+     * for every event with an active, completed import, the rows/payment
+     * documents left after the delete above must exactly match the counts
+     * that import already claims (imported_rows_count, and
+     * summary.payment_documents_count when present). Those numbers were
+     * already trusted by the dashboard and the admin events list before
+     * this migration ran — if they don't match now, something about this
+     * production database doesn't match the assumption the delete step
+     * relied on, and continuing would risk silently keeping (or removing)
+     * the wrong rows. Better to abort loudly and roll back than guess.
+     */
+    private function verifyDeletionMatchedExpectations(): void
+    {
+        $activeImports = \Illuminate\Support\Facades\DB::table('event_report_imports')
+            ->where('is_active', true)
+            ->where('status', 'completed')
+            ->get(['id', 'event_id', 'imported_rows_count', 'summary']);
+
+        foreach ($activeImports as $import) {
+            $actualRows = \Illuminate\Support\Facades\DB::table('event_report_rows')
+                ->where('event_id', $import->event_id)
+                ->count();
+
+            if ($actualRows !== (int) $import->imported_rows_count) {
+                throw new \RuntimeException(sprintf(
+                    'PERF-101 migration safety check failed for event #%d: '.
+                    'expected %d rows (event_report_imports.imported_rows_count for import #%d) '.
+                    'but %d remain after removing non-active-import rows. Aborting without '.
+                    'changing anything further — investigate before re-running this migration.',
+                    $import->event_id,
+                    (int) $import->imported_rows_count,
+                    $import->id,
+                    $actualRows,
+                ));
+            }
+
+            $summary = is_string($import->summary) ? json_decode($import->summary, true) : null;
+            $expectedPaymentDocuments = is_array($summary) && isset($summary['payment_documents_count'])
+                ? (int) $summary['payment_documents_count']
+                : null;
+
+            if ($expectedPaymentDocuments === null) {
+                continue;
+            }
+
+            $actualPaymentDocuments = \Illuminate\Support\Facades\DB::table('event_report_payment_documents')
+                ->where('event_id', $import->event_id)
+                ->count();
+
+            if ($actualPaymentDocuments !== $expectedPaymentDocuments) {
+                throw new \RuntimeException(sprintf(
+                    'PERF-101 migration safety check failed for event #%d: '.
+                    'expected %d payment documents (summary.payment_documents_count for import #%d) '.
+                    'but %d remain after removing non-active-import documents. Aborting without '.
+                    'changing anything further — investigate before re-running this migration.',
+                    $import->event_id,
+                    $expectedPaymentDocuments,
+                    $import->id,
+                    $actualPaymentDocuments,
+                ));
             }
         }
     }
