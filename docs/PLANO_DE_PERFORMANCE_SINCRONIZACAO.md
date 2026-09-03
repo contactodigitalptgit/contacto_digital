@@ -276,7 +276,7 @@ Critério de aceite:
 Maior ganho, menor risco arquitetural. Pode avançar mesmo em SQLite.
 
 #### PERF-101 — Substituir a cópia de snapshot por um registo incremental
-**Prioridade:** P0 · **Estado:** Implementado, aguarda ensaio contra cópia de produção antes do deploy · **Dependências:** PERF-001
+**Prioridade:** P0 · **Estado:** Implementado e em produção (ensaiado contra cópia real antes do deploy, migração validada duas vezes) · **Dependências:** PERF-001
 
 Implementado em `app/Services/EventReportSyncService.php` (branch
 `perf/101-incremental-natural-key`), com chave natural
