@@ -744,15 +744,86 @@ Critério de aceite:
 ### Fase 5 — Infraestrutura e frescura
 
 #### PERF-501 — PostgreSQL e Redis
-**Prioridade:** P1 · **Estado:** Não iniciado · **Referência:** CR-201, CR-202
+**Prioridade:** P1 · **Estado:** Fase 1 implementada (preparação, sem tocar em produção) · **Referência:** CR-201, CR-202
 
 Este é o teto físico do sistema. O SQLite admite **um escritor de cada vez**. Com
 200 máquinas, sincronizações concorrentes e clientes a abrir dashboards, nenhuma
 otimização de código contorna essa restrição.
 
-O trabalho está descrito nos CR-201 e CR-202 e não é repetido aqui. Fica apenas
-registada a dependência: as Fases 2, 3 e 4 entregam uma fração do ganho enquanto
-a persistência for SQLite.
+O trabalho está descrito nos CR-201 e CR-202
+(`docs/PLANO_DE_CORRECAO_PRE_COMERCIAL.md`) e não é repetido aqui.
+
+**Achado ao investigar antes de implementar:** o servidor de produção
+(185.32.190.86) tem **1,9 GB RAM e 1 CPU**, já a correr duas stacks lado a
+lado (`contacto-digital-portal` e `contacto-digital-gestao`, esta com o seu
+próprio Postgres 17). Memória livre real: ~154 MB. Um Postgres novo e
+dedicado custa realisticamente 150–250 MB só de processo servidor —
+apertado demais para arriscar sem margem. Decisão (com o utilizador):
+**redimensionar o VPS primeiro** (recomendação: pelo menos 4 GB RAM / 2
+CPU), e fazer o Redis (CR-202) numa fase separada, depois de o Postgres
+estabilizar — a separação sessões/cache/fila do SQLite de vendas já foi
+feita no commit `56a5d16`, o que reduz a urgência do Redis.
+
+**Fase 1 (implementada agora, sem tocar em produção)** — preparar tudo e
+provar que a aplicação corre em Postgres, para as fases seguintes
+avançarem rápido assim que o VPS for redimensionado:
+
+- `deploy/Dockerfile`: extensões `pdo_pgsql`/`pgsql` acrescentadas
+  (`pdo_sqlite` mantido — via de rollback);
+- `deploy/compose.yaml`: serviço `postgres` novo (`postgres:17-alpine`,
+  igual à stack "gestão"), memória e concorrência tunadas para um host
+  modesto (`shared_buffers=96MB`, `max_connections=50`) — **aditivo**, sem
+  `depends_on` nem `DB_CONNECTION` do `app` ligados ainda;
+- `App\Services\SqliteToPostgresMigrator` + comando
+  `php artisan app:migrate-sqlite-to-postgres` (`routes/console.php`):
+  copia cada tabela da ligação `sqlite` para a `pgsql`, por lotes, e
+  confere no fim contagens de linhas e somas de controlo
+  (`SUM(total)` em `event_report_rows`/`event_report_payment_documents`);
+- validado localmente com PostgreSQL 16 (Homebrew) — produção usa 17
+  (stack "gestão"), a diferença de versão menor não afeta esta validação:
+  `php artisan migrate:fresh` correu sem alterações em todas as ~19
+  migrações do projeto, a **suite de testes completa correu contra
+  Postgres real** (122 testes aplicáveis passaram — 3 ficaram corretamente
+  marcados como `skipped`, ver achados abaixo), e o comando de migração
+  correu contra um conjunto sintético (clients, events, machines, imports,
+  rows, payment documents) com contagens e somas de controlo idênticas
+  dos dois lados.
+
+**Achados da validação** (o valor real desta fase — nenhum exigiu mudar
+comportamento em produção):
+
+1. `SqliteToPostgresMigrator` listava as tabelas pela ordem que
+   `sqlite_master` devolve, que não respeita chaves estrangeiras —
+   `event_report_payment_documents` tentava inserir-se antes de
+   `client_zonesoft_machines` existir no destino e falhava com violação de
+   FK. Corrigido com uma ordem explícita e seguro para FK
+   (`ORDERED_TABLES`); qualquer tabela não listada (sessões, cache, fila,
+   ou uma tabela nova de uma migração futura) migra depois, na ordem que
+   aparecer — seguro desde que não tenha FK para algo ainda não migrado.
+2. `PRAGMA foreign_keys` (num teste que confirma que o migração do
+   PERF-101 restaura corretamente o estado de FK após abortar) é sintaxe
+   exclusiva do SQLite — Postgres não tem um equivalente de sessão (cada
+   constraint é sempre aplicada). Corrigido tornando essa asserção
+   condicional ao driver da ligação.
+3. `SQLiteRuntimeStorageTest` (3 testes) valida especificamente o
+   contorno para a limitação de escritor único do SQLite — deixa de fazer
+   sentido quando a ligação por omissão é Postgres (a limitação que
+   contorna não existe lá). Corrigido: o teste salta-se sozinho
+   (`markTestSkipped`) quando `database.default` não é `sqlite`, em vez de
+   fingir testar algo que já não se aplica.
+4. **Nenhum código de produção precisou de mudar** — só estes dois
+   ajustes de teste. É um sinal forte de que a aplicação já está pronta
+   para Postgres.
+
+**Fases 2 e 3 (bloqueadas até ao VPS ser redimensionado, não iniciadas):**
+
+- Fase 2: ensaiar a migração real contra uma **cópia** dos dados de
+  produção (nunca produção diretamente) — duas vezes, conforme o critério
+  de aceite do CR-201;
+- Fase 3: corte de produção — ligar `postgres` ao `app` (`depends_on`,
+  `DB_CONNECTION`), janela de indisponibilidade coordenada com o
+  utilizador, TLS, utilizador de menor privilégio, confirmação explícita
+  antes de qualquer alteração real ao servidor.
 
 #### PERF-502 — Reduzir o intervalo e empurrar as atualizações
 **Prioridade:** P2 · **Estado:** Não iniciado · **Dependências:** PERF-101, PERF-201, PERF-501

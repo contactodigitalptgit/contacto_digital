@@ -8,6 +8,7 @@ RUN apt-get update && apt-get install -y \
     libjpeg62-turbo-dev \
     libonig-dev \
     libpng-dev \
+    libpq-dev \
     libsqlite3-dev \
     libwebp-dev \
     libxml2-dev \
@@ -23,7 +24,9 @@ RUN apt-get update && apt-get install -y \
         mbstring \
         pcntl \
         pdo \
+        pdo_pgsql \
         pdo_sqlite \
+        pgsql \
         zip \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*

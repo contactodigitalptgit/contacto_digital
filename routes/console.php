@@ -4,6 +4,7 @@ use App\Jobs\SyncEventReportJob;
 use App\Models\EventReportImport;
 use App\Services\EventReportAutoSyncService;
 use App\Services\EventReportSyncService;
+use App\Services\SqliteToPostgresMigrator;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Schedule;
@@ -85,3 +86,73 @@ Artisan::command('events:sync-due-reports {--dry-run : Show the next due event w
 Schedule::command('events:sync-due-reports')
     ->everyMinute()
     ->withoutOverlapping(10);
+
+// PERF-501 (fase 1): ferramenta de ensaio para a migracao SQLite -> Postgres
+// — ver docs/PLANO_DE_PERFORMANCE_SINCRONIZACAO.md. Nao e chamada por
+// nenhum agendamento; corre-se manualmente, contra uma copia dos dados,
+// nunca diretamente contra producao. O destino tem de ja ter o schema
+// (`php artisan migrate --database=pgsql`) antes de correr isto.
+Artisan::command(
+    'app:migrate-sqlite-to-postgres {--force : Skip the confirmation prompt}',
+    function (SqliteToPostgresMigrator $migrator) {
+        if (! $this->option('force') && ! $this->confirm(
+            'Isto apaga e reescreve todas as tabelas na ligacao "pgsql" a partir da ligacao "sqlite". Continuar?',
+        )) {
+            $this->info('Cancelado.');
+
+            return Command::SUCCESS;
+        }
+
+        $mismatches = [];
+
+        $results = $migrator->migrate(function (string $table): void {
+            $this->line("A migrar {$table}...");
+        });
+
+        foreach ($results as $table => $result) {
+            $status = $result['source_count'] === $result['destination_count'] ? 'OK' : 'DIVERGE';
+
+            if ($status === 'DIVERGE') {
+                $mismatches[] = $table;
+            }
+
+            $this->line(sprintf(
+                '  %s: origem=%d destino=%d copiadas=%d [%s]',
+                $table,
+                $result['source_count'],
+                $result['destination_count'],
+                $result['copied'],
+                $status,
+            ));
+        }
+
+        $this->line('');
+        $this->line('Somas de controlo:');
+
+        foreach ($migrator->verifyControlSums() as $check => $sums) {
+            $status = $sums['matches'] ? 'OK' : 'DIVERGE';
+
+            if (! $sums['matches']) {
+                $mismatches[] = $check;
+            }
+
+            $this->line(sprintf(
+                '  %s: origem=%s destino=%s [%s]',
+                $check,
+                $sums['source_total'],
+                $sums['destination_total'],
+                $status,
+            ));
+        }
+
+        if ($mismatches !== []) {
+            $this->error('Divergencias encontradas: '.implode(', ', $mismatches));
+
+            return Command::FAILURE;
+        }
+
+        $this->info('Migracao concluida — todas as tabelas e somas de controlo batem certo.');
+
+        return Command::SUCCESS;
+    },
+)->purpose('PERF-501: copy every table from the sqlite connection into the pgsql connection and verify counts/sums match');

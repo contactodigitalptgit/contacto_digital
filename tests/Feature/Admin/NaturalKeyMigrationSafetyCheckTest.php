@@ -67,7 +67,14 @@ class NaturalKeyMigrationSafetyCheckTest extends TestCase
         $this->assertFalse(Schema::hasColumn('event_report_rows', 'line_key'));
         $this->assertTrue(Schema::hasIndex('event_report_payment_documents', 'event_payment_documents_import_dedupe_unique'));
         $this->assertFalse(Schema::hasIndex('event_report_payment_documents', 'event_payment_documents_event_dedupe_unique'));
-        $this->assertSame(1, (int) DB::scalar('PRAGMA foreign_keys'));
+
+        // PERF-501: `PRAGMA foreign_keys` is SQLite-only syntax — Postgres
+        // has no equivalent session-level toggle (each constraint is
+        // simply always enforced), so this confirms the SQLite-specific
+        // half of the same guarantee only when actually running on sqlite.
+        if (DB::connection()->getDriverName() === 'sqlite') {
+            $this->assertSame(1, (int) DB::scalar('PRAGMA foreign_keys'));
+        }
     }
 
     public function test_safety_check_throws_when_row_count_does_not_match_imported_rows_count(): void

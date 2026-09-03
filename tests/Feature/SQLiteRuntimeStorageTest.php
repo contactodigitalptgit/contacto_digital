@@ -19,6 +19,16 @@ class SQLiteRuntimeStorageTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
+
+        // This whole test exercises a SQLite-only workaround for SQLite's
+        // single-writer limitation (see 2026_09_03_080000_isolate_sqlite_runtime_storage.php)
+        // — the concern it validates does not exist once the default
+        // connection is Postgres (PERF-501), so it has nothing meaningful
+        // to prove there.
+        if (config('database.default') !== 'sqlite') {
+            $this->markTestSkipped('SQLite-only: this validates a workaround for a limitation Postgres does not have.');
+        }
+
         $this->businessPath = tempnam(sys_get_temp_dir(), 'contacto-business-test-');
         $this->runtimePath = tempnam(sys_get_temp_dir(), 'contacto-runtime-test-');
         config([
