@@ -169,3 +169,49 @@ Artisan::command(
         return Command::SUCCESS;
     },
 )->purpose('PERF-501: copy every table from the sqlite connection into the pgsql connection and verify counts/sums match');
+
+// PERF-302: event_report_imports is an audit trail of sync attempts, not
+// a data snapshot — BUT event_report_rows.event_report_import_id and
+// event_report_payment_documents.event_report_import_id are
+// cascadeOnDelete() foreign keys, and PERF-101 repurposed that column to
+// mean "the sync attempt that last touched this row", not "which
+// snapshot owns it". A row untouched since an older cycle can still point
+// at an import that is otherwise inactive/old — deleting that import row
+// would silently cascade-delete CURRENT rows too. Only ever prune an
+// import that no row or payment document references at all, regardless
+// of age or active status; never prunes the active import for an event.
+Artisan::command(
+    'events:prune-report-imports {--dry-run : Only report what would be deleted}',
+    function () {
+        $days = max(1, (int) config('event-reports.retention.import_audit_days', 90));
+        $cutoff = now()->subDays($days);
+
+        $query = EventReportImport::query()
+            ->where('is_active', false)
+            ->where('created_at', '<', $cutoff)
+            ->whereDoesntHave('rows')
+            ->whereDoesntHave('paymentDocuments');
+
+        $count = $query->count();
+
+        if ($count === 0) {
+            $this->info("Nada a podar (nenhuma importação inativa com mais de {$days} dias).");
+
+            return Command::SUCCESS;
+        }
+
+        if ($this->option('dry-run')) {
+            $this->info("{$count} importação(ões) inativa(s) com mais de {$days} dias seriam removidas.");
+
+            return Command::SUCCESS;
+        }
+
+        $deleted = $query->delete();
+        $this->info("{$deleted} importação(ões) inativa(s) com mais de {$days} dias removida(s).");
+
+        return Command::SUCCESS;
+    },
+)->purpose('PERF-302: prune event_report_imports audit rows older than the configured retention window');
+
+Schedule::command('events:prune-report-imports')
+    ->daily();

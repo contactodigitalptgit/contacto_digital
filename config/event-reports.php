@@ -48,4 +48,14 @@ return [
         // machine becoming due for a full refresh at the exact same instant.
         'full_refresh_jitter_minutes' => (int) env('EVENT_REPORT_FULL_REFRESH_JITTER_MINUTES', 120),
     ],
+
+    // PERF-302: event_report_imports rows are lightweight audit/attempt
+    // records (not data snapshots — event_report_rows/payment_documents
+    // are the durable current state since PERF-101), but the table still
+    // grows one row per sync attempt. With PERF-502 lowering the interval
+    // from 15 to 2 minutes, that growth rate went up ~7.5x — worth
+    // pruning old, non-active ones instead of keeping them forever.
+    'retention' => [
+        'import_audit_days' => (int) env('EVENT_REPORT_IMPORT_AUDIT_RETENTION_DAYS', 90),
+    ],
 ];
