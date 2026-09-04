@@ -94,6 +94,63 @@ class EventSummaryTest extends TestCase
         $this->assertSame('Loja Pequena', $stores[1]['store_name']);
     }
 
+    public function test_dashboard_returns_all_mobile_sections_from_aggregates(): void
+    {
+        [$user, $client] = $this->makeClient();
+        $event = $this->makeEvent($client, 'Evento Completo');
+
+        $this->seedAggregateRow(
+            $event->id,
+            'Bar Central',
+            'FS',
+            80.0,
+            productCode: 'C1',
+            description: 'Cerveja',
+            soldQuantity: 8,
+            offeredQuantity: 2,
+            hour: 20,
+        );
+        $this->seedAggregateRow(
+            $event->id,
+            'Bar VIP',
+            'FS',
+            40.0,
+            productCode: 'A1',
+            description: 'Água',
+            soldQuantity: 4,
+            hour: 21,
+        );
+        $this->seedAggregateRow(
+            $event->id,
+            'Bar Central',
+            'CM',
+            999.0,
+            productCode: 'X1',
+            description: 'Movimento excluído',
+            hour: 22,
+        );
+        $this->seedTicket($event->id, 'FS', hour: 20);
+        $this->seedTicket($event->id, 'FS', hour: 21);
+        $this->seedTicket($event->id, 'CM', hour: 22);
+
+        $response = $this->authenticated($user)
+            ->getJson("/api/events/{$event->id}/dashboard");
+
+        $response
+            ->assertOk()
+            ->assertJsonPath('event.title', 'Evento Completo')
+            ->assertJsonPath('summary.total_sales', 120)
+            ->assertJsonPath('summary.tickets_count', 2)
+            ->assertJsonPath('top_stores.0.store_name', 'Bar Central')
+            ->assertJsonPath('top_products.0.description', 'Cerveja')
+            ->assertJsonPath('top_products.0.sold_quantity', 8)
+            ->assertJsonPath('top_products.0.offered_quantity', 2)
+            ->assertJsonPath('hourly_sales.0.hour', 20)
+            ->assertJsonPath('hourly_sales.0.tickets_count', 1)
+            ->assertJsonCount(2, 'hourly_sales')
+            ->assertJsonCount(2, 'top_products');
+    }
+
     public function test_returns_404_for_an_event_belonging_to_another_client(): void
     {
         [$user] = $this->makeClient();
@@ -139,29 +196,38 @@ class EventSummaryTest extends TestCase
         ]);
     }
 
-    private function seedAggregateRow(int $eventId, string $storeName, string $docType, float $total): void
-    {
+    private function seedAggregateRow(
+        int $eventId,
+        string $storeName,
+        string $docType,
+        float $total,
+        string $productCode = 'P1',
+        string $description = 'Produto',
+        float $soldQuantity = 1,
+        float $offeredQuantity = 0,
+        int $hour = 12,
+    ): void {
         EventReportRowAggregate::create([
             'event_id' => $eventId,
             'sale_date' => '2026-06-20',
             'sale_calendar_date' => '2026-06-20',
-            'sale_hour' => 12,
+            'sale_hour' => $hour,
             'store_code' => $storeName,
             'store_name' => $storeName,
             'doc_type' => $docType,
-            'product_code' => 'P1',
-            'description' => 'Produto',
+            'product_code' => $productCode,
+            'description' => $description,
             'rows_count' => 1,
-            'quantity_total' => 1,
+            'quantity_total' => $soldQuantity + $offeredQuantity,
             'value_total' => $total,
             'discount_total' => 0,
             'total_sum' => $total,
-            'offered_quantity_total' => 0,
-            'sold_quantity_total' => 1,
+            'offered_quantity_total' => $offeredQuantity,
+            'sold_quantity_total' => $soldQuantity,
         ]);
     }
 
-    private function seedTicket(int $eventId, string $docType): void
+    private function seedTicket(int $eventId, string $docType, int $hour = 12): void
     {
         static $documentNumber = 0;
         $documentNumber++;
@@ -170,7 +236,7 @@ class EventSummaryTest extends TestCase
             'event_id' => $eventId,
             'sale_date' => '2026-06-20',
             'sale_calendar_date' => '2026-06-20',
-            'sale_hour' => 12,
+            'sale_hour' => $hour,
             'store_code' => 'Loja A',
             'store_name' => 'Loja A',
             'doc_type' => $docType,
