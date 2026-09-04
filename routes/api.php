@@ -13,6 +13,7 @@ Route::middleware(['auth:sanctum', 'active.client.api'])->group(function (): voi
     Route::post('/logout', [AuthController::class, 'logout']);
 
     Route::get('/events', [EventSummaryController::class, 'index']);
+    Route::get('/events/{event}/dashboard', [EventSummaryController::class, 'dashboard']);
     Route::get('/events/{event}/summary', [EventSummaryController::class, 'summary']);
     Route::get('/events/{event}/top-stores', [EventSummaryController::class, 'topStores']);
 });
