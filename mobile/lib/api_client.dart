@@ -27,8 +27,10 @@ class ApiException implements Exception {
 class ApiClient {
   ApiClient({String? baseUrl}) : baseUrl = baseUrl ?? defaultBaseUrl;
 
-  static const String defaultBaseUrl =
-      'https://portal.contactodigital.pt/api';
+  static const String defaultBaseUrl = String.fromEnvironment(
+    'API_BASE_URL',
+    defaultValue: 'https://portal.contactodigital.pt/api',
+  );
 
   final String baseUrl;
   final http.Client _http = http.Client();

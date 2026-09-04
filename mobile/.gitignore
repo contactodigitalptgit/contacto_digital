@@ -11,6 +11,8 @@
 build/
 *.iml
 *.log
+.metadata
+.idea/
 
 # Platform build artifacts (the source folders themselves are fine to
 # commit once generated — only their own build output is excluded).

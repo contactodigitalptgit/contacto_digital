@@ -31,11 +31,16 @@ flutter pub get
 ## 3. Configurar o URL da API
 
 Por omissão o app aponta para `https://portal.contactodigital.pt/api`
-(produção) — ver `ApiClient.defaultBaseUrl` em `lib/api_client.dart`.
-Para testar contra o teu ambiente local, muda essa constante ou passa um
-`baseUrl` diferente ao construir o `ApiClient` em `lib/main.dart`
+(produção). Para testar contra um backend local sem editar código, passa
+`--dart-define`:
+
+```bash
+flutter run --dart-define=API_BASE_URL=http://127.0.0.1:8000/api
+```
+
 (no emulador Android, `http://10.0.2.2:8000/api` chega ao `localhost:8000`
-da máquina anfitriã; num dispositivo físico usa o IP da tua rede local).
+da máquina anfitriã; num dispositivo físico usa o IP da tua rede local;
+no Flutter Web basta o `127.0.0.1` normal).
 
 ## 4. Correr o app
 

@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "mobile-web",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": ["-c", "cd mobile && flutter run -d web-server --web-port=8791 --web-hostname=127.0.0.1 --dart-define=API_BASE_URL=http://127.0.0.1:8792/api"],
+      "port": 8791
+    },
+    {
+      "name": "laravel-dev",
+      "runtimeExecutable": "php",
+      "runtimeArgs": ["artisan", "serve", "--port=8792"],
+      "port": 8792
+    }
+  ]
+}
