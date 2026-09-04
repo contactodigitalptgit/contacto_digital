@@ -4,6 +4,7 @@ import 'package:intl/date_symbol_data_local.dart';
 import 'api_client.dart';
 import 'screens/event_summary_screen.dart';
 import 'screens/login_screen.dart';
+import 'theme/app_theme.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -22,12 +23,9 @@ class ContactoDigitalApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'O meu evento',
+      title: 'Contacto Digital',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        colorSchemeSeed: Colors.indigo,
-        useMaterial3: true,
-      ),
+      theme: AppTheme.dark,
       home: const _StartupGate(),
     );
   }
@@ -55,7 +53,9 @@ class _StartupGateState extends State<_StartupGate> {
       builder: (context, snapshot) {
         if (snapshot.connectionState != ConnectionState.done) {
           return const Scaffold(
-            body: Center(child: CircularProgressIndicator()),
+            body: BrandBackground(
+              child: Center(child: CircularProgressIndicator()),
+            ),
           );
         }
 

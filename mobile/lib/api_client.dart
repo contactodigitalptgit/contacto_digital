@@ -99,6 +99,10 @@ class ApiClient {
         .toList();
   }
 
+  Future<Map<String, dynamic>> fetchDashboard(int eventId) async {
+    return _get('/events/$eventId/dashboard');
+  }
+
   Future<Map<String, dynamic>> _get(String path) async {
     final response = await _http.get(
       Uri.parse('$baseUrl$path'),
