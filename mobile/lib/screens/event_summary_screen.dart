@@ -3,10 +3,13 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../api_client.dart';
 import '../theme/app_theme.dart';
 import 'login_screen.dart';
+
+part 'event_portal_sections.dart';
 
 class EventSummaryScreen extends StatefulWidget {
   const EventSummaryScreen({super.key, required this.apiClient});
@@ -30,6 +33,17 @@ class _EventSummaryScreenState extends State<EventSummaryScreen> {
   List<Map<String, dynamic>> _topProducts = [];
   List<Map<String, dynamic>> _hourlySales = [];
 
+  String _activeSection = 'summary';
+  DashboardFilters _filters = const DashboardFilters();
+  Map<String, dynamic>? _filterOptions;
+  Map<String, dynamic>? _configuration;
+  final Map<String, Map<String, dynamic>> _sectionData = {};
+  final TextEditingController _sectionSearchController =
+      TextEditingController();
+  bool _sectionLoading = false;
+  String? _sectionError;
+  String _sectionSearch = '';
+
   int? _selectedEventId;
   int _requestVersion = 0;
   bool _loading = true;
@@ -48,6 +62,7 @@ class _EventSummaryScreenState extends State<EventSummaryScreen> {
   @override
   void dispose() {
     _timer?.cancel();
+    _sectionSearchController.dispose();
     super.dispose();
   }
 
@@ -87,10 +102,25 @@ class _EventSummaryScreenState extends State<EventSummaryScreen> {
         orElse: () => events.first,
       );
       final selectedId = selectedEvent['id'] as int;
-      final dashboard = await widget.apiClient.fetchDashboard(selectedId);
+      final preserveFilters =
+          selectedId == _selectedEventId && _filters.activeCount > 0;
+      final responses = await Future.wait<dynamic>([
+        preserveFilters
+            ? widget.apiClient.fetchEventSection(
+                selectedId,
+                'dashboard',
+                filters: _filters.toQuery(),
+              )
+            : widget.apiClient.fetchDashboard(selectedId),
+        _fetchConfigurationSafely(selectedId),
+      ]);
+      final dashboard = (responses[0] as Map).cast<String, dynamic>();
+      final configuration = responses[1] as Map<String, dynamic>?;
 
       if (!mounted || requestVersion != _requestVersion) return;
+      String? sectionToLoad;
       setState(() {
+        final eventChanged = _selectedEventId != selectedId;
         _events = events;
         _selectedEventId = selectedId;
         _event = selectedEvent;
@@ -101,7 +131,23 @@ class _EventSummaryScreenState extends State<EventSummaryScreen> {
         _error = null;
         _loading = false;
         _refreshing = false;
+        _configuration = configuration ?? _configuration;
+        if (eventChanged) {
+          _activeSection = _initialSection(configuration);
+          sectionToLoad = _activeSection;
+          _filters = const DashboardFilters();
+          _filterOptions = null;
+          _sectionData.clear();
+          _sectionError = null;
+          _sectionSearch = '';
+          _sectionSearchController.clear();
+        }
       });
+      if (sectionToLoad != null &&
+          sectionToLoad != 'summary' &&
+          sectionToLoad != 'more') {
+        unawaited(_loadSection(sectionToLoad!));
+      }
     } on ApiException catch (exception) {
       if (!mounted || requestVersion != _requestVersion) return;
 
@@ -117,6 +163,14 @@ class _EventSummaryScreenState extends State<EventSummaryScreen> {
       });
     } finally {
       if (requestVersion == _requestVersion) _requestInFlight = false;
+    }
+  }
+
+  Future<Map<String, dynamic>?> _fetchConfigurationSafely(int eventId) async {
+    try {
+      return await widget.apiClient.fetchConfiguration(eventId);
+    } on ApiException {
+      return null;
     }
   }
 
@@ -228,16 +282,21 @@ class _EventSummaryScreenState extends State<EventSummaryScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      extendBody: true,
       body: BrandBackground(
         child: SafeArea(
+          bottom: false,
           child: RefreshIndicator(
-            onRefresh: _load,
+            onRefresh: _activeSection == 'summary'
+                ? _load
+                : () => _loadSection(_activeSection, force: true),
             color: AppColors.navy,
             backgroundColor: AppColors.lime,
             child: _buildBody(),
           ),
         ),
       ),
+      bottomNavigationBar: _portalNavigation(),
     );
   }
 
@@ -250,6 +309,10 @@ class _EventSummaryScreenState extends State<EventSummaryScreen> {
 
     if (_event == null) return _emptyEventView();
 
+    if (_activeSection != 'summary') {
+      return _featureBody();
+    }
+
     return LayoutBuilder(
       builder: (context, constraints) {
         final isWide = constraints.maxWidth >= 760;
@@ -257,7 +320,7 @@ class _EventSummaryScreenState extends State<EventSummaryScreen> {
 
         return ListView(
           physics: const AlwaysScrollableScrollPhysics(),
-          padding: EdgeInsets.fromLTRB(pagePadding, 18, pagePadding, 40),
+          padding: EdgeInsets.fromLTRB(pagePadding, 18, pagePadding, 122),
           children: [
             Center(
               child: ConstrainedBox(
@@ -270,27 +333,47 @@ class _EventSummaryScreenState extends State<EventSummaryScreen> {
                     _eventSelector(),
                     const SizedBox(height: 12),
                     _syncStatus(_summary?['last_synced_at'] as String?),
+                    const SizedBox(height: 12),
+                    _filterToolbar(),
                     if (_error != null) ...[
                       const SizedBox(height: 12),
                       _staleDataNotice(),
                     ],
                     const SizedBox(height: 18),
                     _overview(_summary!, isWide: isWide),
-                    const SizedBox(height: 28),
-                    _sectionTitle(
-                      'Vendas por hora',
-                      '${_hourlySales.length} HORAS',
-                    ),
-                    const SizedBox(height: 12),
-                    _hourlyChart(),
-                    const SizedBox(height: 28),
-                    _sectionTitle('Produtos em destaque', 'TOP 6'),
-                    const SizedBox(height: 12),
-                    _productsPanel(),
-                    const SizedBox(height: 28),
-                    _sectionTitle('Desempenho por loja', 'TOP 10'),
-                    const SizedBox(height: 12),
-                    _storesPanel(_summary!),
+                    if (_sectionIsVisible('charts')) ...[
+                      const SizedBox(height: 28),
+                      _sectionTitle(
+                        'Vendas por hora',
+                        '${_hourlySales.length} HORAS',
+                      ),
+                      const SizedBox(height: 12),
+                      _hourlyChart(),
+                    ],
+                    if (_sectionIsVisible('products')) ...[
+                      const SizedBox(height: 28),
+                      _sectionTitle(
+                        _configuredSectionHeading(
+                          'products',
+                          'Produtos em destaque',
+                        ),
+                        'TOP 6',
+                      ),
+                      const SizedBox(height: 12),
+                      _productsPanel(),
+                    ],
+                    if (_sectionIsVisible('zones')) ...[
+                      const SizedBox(height: 28),
+                      _sectionTitle(
+                        _configuredSectionHeading(
+                          'zones',
+                          'Desempenho por loja',
+                        ),
+                        'TOP 10',
+                      ),
+                      const SizedBox(height: 12),
+                      _storesPanel(_summary!),
+                    ],
                     const SizedBox(height: 28),
                     const Center(
                       child: Text(
@@ -645,15 +728,25 @@ class _EventSummaryScreenState extends State<EventSummaryScreen> {
   }
 
   Widget _overview(Map<String, dynamic> summary, {required bool isWide}) {
+    final showTotal = _configurationItemVisible('blocks', 'overview');
+    final showOperations = _configurationItemVisible('blocks', 'operations');
+    if (!showTotal && !showOperations) return const SizedBox.shrink();
+
     if (!isWide) {
       return Column(
         children: [
-          _salesHero(summary),
-          const SizedBox(height: 14),
-          _metricGrid(summary, crossAxisCount: 2, childAspectRatio: 1.18),
+          if (showTotal) _salesHero(summary),
+          if (showTotal && showOperations) const SizedBox(height: 14),
+          if (showOperations)
+            _metricGrid(summary, crossAxisCount: 2, childAspectRatio: 1.18),
         ],
       );
     }
+
+    if (!showTotal) {
+      return _metricGrid(summary, crossAxisCount: 4, childAspectRatio: 1.5);
+    }
+    if (!showOperations) return _salesHero(summary);
 
     return SizedBox(
       height: 300,
@@ -713,19 +806,23 @@ class _EventSummaryScreenState extends State<EventSummaryScreen> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Row(
+              Row(
                 children: [
                   Text(
-                    'FATURAÇÃO DO EVENTO',
-                    style: TextStyle(
+                    _configurationItemLabel(
+                      'blocks',
+                      'overview',
+                      'FATURAÇÃO DO EVENTO',
+                    ).toUpperCase(),
+                    style: const TextStyle(
                       color: AppColors.textMuted,
                       fontSize: 11,
                       fontWeight: FontWeight.w700,
                       letterSpacing: 1.7,
                     ),
                   ),
-                  Spacer(),
-                  Icon(Icons.trending_up_rounded,
+                  const Spacer(),
+                  const Icon(Icons.trending_up_rounded,
                       color: AppColors.lime, size: 21),
                 ],
               ),
@@ -774,7 +871,11 @@ class _EventSummaryScreenState extends State<EventSummaryScreen> {
         accent: AppColors.blueBright,
       ),
       _MetricData(
-        label: 'TICKET MÉDIO',
+        label: _configurationItemLabel(
+          'metrics',
+          'average_ticket',
+          'TICKET MÉDIO',
+        ).toUpperCase(),
         value: _currency.format(summary['average_ticket']),
         caption: 'por transação',
         icon: Icons.payments_outlined,
@@ -788,7 +889,11 @@ class _EventSummaryScreenState extends State<EventSummaryScreen> {
         accent: AppColors.success,
       ),
       _MetricData(
-        label: 'MÁQUINAS',
+        label: _configurationItemLabel(
+          'metrics',
+          'devices',
+          'MÁQUINAS',
+        ).toUpperCase(),
         value: _integer.format(summary['machines_count']),
         caption: 'na sincronização',
         icon: Icons.point_of_sale_outlined,

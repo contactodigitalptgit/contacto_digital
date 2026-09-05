@@ -113,10 +113,83 @@ void main() {
     expect(find.text('FATURAÇÃO DO EVENTO'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets('client navigates to products and combines multiple zones',
+      (WidgetTester tester) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final apiClient = _FakeApiClient();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: AppTheme.dark,
+        home: EventSummaryScreen(apiClient: apiClient),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Produtos').last);
+    await tester.pumpAndSettle();
+    expect(find.text('RANKING DE PRODUTOS'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('Ajustar filtros'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Bar 1'));
+    await tester.tap(find.text('Bar 2'));
+    await tester.tap(find.text('Aplicar filtros'));
+    await tester.pumpAndSettle();
+
+    expect(apiClient.sectionRequests.last['section'], 'products');
+    expect(
+      apiClient.sectionRequests.last['filters']['bar_groups'],
+      ['Bar 1', 'Bar 2'],
+    );
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('all client portal destinations open without layout errors',
+      (WidgetTester tester) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: AppTheme.dark,
+        home: EventSummaryScreen(apiClient: _FakeApiClient()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Pagamentos'));
+    await tester.pumpAndSettle();
+    expect(find.text('PAGAMENTOS × VENDAS'), findsOneWidget);
+
+    await tester.tap(find.text('Zonas').last);
+    await tester.pumpAndSettle();
+    expect(find.text('FATURAÇÃO DA SELEÇÃO'), findsOneWidget);
+
+    await tester.tap(find.text('Mais'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Performance'));
+    await tester.pumpAndSettle();
+    expect(find.text('DESEMPENHO DOS DEVICES'), findsOneWidget);
+
+    await tester.tap(find.text('Mais'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Comparar edições'));
+    await tester.pumpAndSettle();
+    expect(find.text('INDICADORES OPERACIONAIS'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
 }
 
 class _FakeApiClient extends ApiClient {
   final List<int> dashboardRequests = [];
+  final List<Map<String, dynamic>> sectionRequests = [];
 
   @override
   Future<List<Map<String, dynamic>>> fetchEvents() async => [
@@ -180,5 +253,79 @@ class _FakeApiClient extends ApiClient {
         {'store_name': 'Zona VIP', 'total_sales': totalSales * 0.15},
       ],
     };
+  }
+
+  @override
+  Future<Map<String, dynamic>> fetchConfiguration(int eventId) async => {
+        'preset': 'complete',
+        'sections': [
+          {'key': 'summary', 'visible': true, 'available': true},
+          {'key': 'products', 'visible': true, 'available': true},
+          {'key': 'reconciliation', 'visible': true, 'available': true},
+          {'key': 'zones', 'visible': true, 'available': true},
+          {'key': 'highlights', 'visible': true, 'available': true},
+          {'key': 'comparison', 'visible': true, 'available': true},
+        ],
+      };
+
+  @override
+  Future<Map<String, dynamic>> fetchFilterOptions(int eventId) async => {
+        'zones': [
+          {'value': 'Bar 1', 'label': 'Bar 1'},
+          {'value': 'Bar 2', 'label': 'Bar 2'},
+        ],
+        'stores': [
+          {'value': 'Bar 1 - POS A', 'label': 'Bar 1 - POS A'},
+          {'value': 'Bar 2 - POS B', 'label': 'Bar 2 - POS B'},
+        ],
+        'products': [
+          {'value': 'P1', 'label': 'Cerveja'},
+          {'value': 'P2', 'label': 'Água'},
+        ],
+      };
+
+  @override
+  Future<Map<String, dynamic>> fetchEventSection(
+    int eventId,
+    String section, {
+    Map<String, dynamic> filters = const {},
+  }) async {
+    sectionRequests.add({
+      'event_id': eventId,
+      'section': section,
+      'filters': filters,
+    });
+
+    if (section == 'products') {
+      return {
+        'summary': {
+          'sold_quantity': 630,
+          'offered_quantity': 12,
+          'served_quantity': 642,
+          'offer_share': 1.87,
+          'total_sales': 38970.0,
+          'products_count': 2,
+        },
+        'items': [
+          {
+            'description': 'Cerveja',
+            'sold_quantity': 420,
+            'offered_quantity': 12,
+            'served_quantity': 432,
+            'total_sales': 27836.31,
+          },
+          {
+            'description': 'Água',
+            'sold_quantity': 210,
+            'offered_quantity': 0,
+            'served_quantity': 210,
+            'total_sales': 11134.52,
+          },
+        ],
+        'daily': [],
+      };
+    }
+
+    return {'summary': {}, 'items': []};
   }
 }

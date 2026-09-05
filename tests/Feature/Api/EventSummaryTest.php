@@ -5,6 +5,7 @@ namespace Tests\Feature\Api;
 use App\Models\Client;
 use App\Models\Event;
 use App\Models\EventReportImport;
+use App\Models\EventReportPaymentDocument;
 use App\Models\EventReportRowAggregate;
 use App\Models\EventReportTicketAggregate;
 use App\Models\User;
@@ -151,6 +152,110 @@ class EventSummaryTest extends TestCase
             ->assertJsonCount(2, 'top_products');
     }
 
+    public function test_mobile_sections_support_multiple_zones_and_keep_metrics_consistent(): void
+    {
+        [$user, $client] = $this->makeClient();
+        $event = $this->makeEvent($client, 'Evento Filtros');
+
+        $this->seedAggregateRow($event->id, 'Bar 1 - POS A', 'FS', 100, soldQuantity: 10, offeredQuantity: 2, hour: 20);
+        $this->seedAggregateRow($event->id, 'Bar 2 - POS B', 'FS', 60, productCode: 'P2', description: 'Água', soldQuantity: 6, hour: 21);
+        $this->seedAggregateRow($event->id, 'Bilheteira', 'FS', 500, productCode: 'P3', description: 'Bilhete', soldQuantity: 5, hour: 22);
+        $this->seedTicket($event->id, 'FS', 20, 'Bar 1 - POS A');
+        $this->seedTicket($event->id, 'FS', 21, 'Bar 2 - POS B');
+        $this->seedTicket($event->id, 'FS', 22, 'Bilheteira');
+
+        $query = http_build_query(['bar_groups' => ['Bar 1', 'Bar 2']]);
+
+        $this->authenticated($user)
+            ->getJson("/api/events/{$event->id}/zones?{$query}")
+            ->assertOk()
+            ->assertJsonPath('summary.total_sales', 160)
+            ->assertJsonPath('summary.zones_count', 2)
+            ->assertJsonPath('summary.tickets_count', 2)
+            ->assertJsonCount(2, 'items');
+
+        $this->authenticated($user)
+            ->getJson("/api/events/{$event->id}/products?{$query}")
+            ->assertOk()
+            ->assertJsonPath('summary.sold_quantity', 16)
+            ->assertJsonPath('summary.offered_quantity', 2)
+            ->assertJsonPath('summary.served_quantity', 18)
+            ->assertJsonCount(2, 'items');
+
+        $this->authenticated($user)
+            ->getJson("/api/events/{$event->id}/performance?{$query}")
+            ->assertOk()
+            ->assertJsonPath('summary.best_product.description', 'Produto')
+            ->assertJsonPath('summary.peak_hour.hour', 20);
+
+        $this->authenticated($user)
+            ->getJson("/api/events/{$event->id}/dashboard?{$query}")
+            ->assertOk()
+            ->assertJsonPath('summary.total_sales', 160)
+            ->assertJsonPath('summary.tickets_count', 2)
+            ->assertJsonCount(2, 'top_stores');
+    }
+
+    public function test_payment_endpoint_separates_sales_topups_and_reconciliation(): void
+    {
+        [$user, $client] = $this->makeClient();
+        $event = $this->makeEvent($client, 'Evento Pagamentos');
+        $import = $this->makeImport($event, $user, machines: 1);
+
+        $this->seedAggregateRow($event->id, 'Bar 1 - POS A', 'FS', 100);
+        $this->seedPayment($event, $import, 'Bar 1 - POS A', 'FS', '3', 70, '1');
+        $this->seedPayment($event, $import, 'Bar 1 - POS A', 'FS', '1', 30, '1');
+        $this->seedPayment($event, $import, 'Top Up 1', 'ZT', '10', 200, '2');
+
+        $this->authenticated($user)
+            ->getJson("/api/events/{$event->id}/payments")
+            ->assertOk()
+            ->assertJsonPath('summary.multibanco', 70)
+            ->assertJsonPath('summary.cash', 30)
+            ->assertJsonPath('summary.top_up_loaded', 200)
+            ->assertJsonPath('summary.sales_total', 100)
+            ->assertJsonPath('summary.total_with_zt', 300)
+            ->assertJsonPath('reconciliation.totals.difference', 0)
+            ->assertJsonPath('reconciliation.items.0.store_name', 'Bar 1 - POS A');
+    }
+
+    public function test_filters_configuration_and_comparison_are_available_to_mobile(): void
+    {
+        [$user, $client] = $this->makeClient();
+        $previous = $this->makeEvent($client, 'Evento Anterior');
+        $previous->update(['event_date' => '2026-05-20 12:00:00']);
+        $this->makeImport($previous, $user, machines: 2);
+        $this->seedAggregateRow($previous->id, 'Bar 1', 'FS', 100);
+        $this->seedTicket($previous->id, 'FS', 12, 'Bar 1');
+
+        $current = $this->makeEvent($client, 'Evento Atual');
+        $this->makeImport($current, $user, machines: 4);
+        $this->seedAggregateRow($current->id, 'Bar 1 - POS A', 'FS', 150, hour: 20);
+        $this->seedAggregateRow($current->id, 'Bar 2 - POS B', 'FS', 50, productCode: 'P2', description: 'Água', hour: 21);
+        $this->seedTicket($current->id, 'FS', 20, 'Bar 1 - POS A');
+        $this->seedTicket($current->id, 'FS', 21, 'Bar 2 - POS B');
+
+        $this->authenticated($user)
+            ->getJson("/api/events/{$current->id}/filters")
+            ->assertOk()
+            ->assertJsonCount(2, 'filters.zones')
+            ->assertJsonCount(2, 'filters.stores')
+            ->assertJsonPath('filters.date_bounds.from', '2026-06-20');
+
+        $this->authenticated($user)
+            ->getJson("/api/events/{$current->id}/configuration")
+            ->assertOk()
+            ->assertJsonPath('configuration.preset', 'complete');
+
+        $this->authenticated($user)
+            ->getJson("/api/events/{$current->id}/comparison")
+            ->assertOk()
+            ->assertJsonPath('available', true)
+            ->assertJsonPath('current.total_sales', 200)
+            ->assertJsonPath('previous.total_sales', 100)
+            ->assertJsonPath('total_variation', 100);
+    }
+
     public function test_returns_404_for_an_event_belonging_to_another_client(): void
     {
         [$user] = $this->makeClient();
@@ -196,6 +301,25 @@ class EventSummaryTest extends TestCase
         ]);
     }
 
+    private function makeImport(Event $event, User $user, int $machines): EventReportImport
+    {
+        return EventReportImport::create([
+            'event_id' => $event->id,
+            'uploaded_by_user_id' => $user->id,
+            'import_strategy' => 'replace',
+            'original_filename' => 'zonesoft-api',
+            'stored_path' => 'zonesoft://sync',
+            'mime_type' => 'application/json',
+            'file_hash' => hash('sha256', 'mobile-import-'.$event->id),
+            'headers' => ['source' => 'zonesoft_api'],
+            'summary' => ['machines_count' => $machines],
+            'imported_rows_count' => 1,
+            'imported_at' => now(),
+            'is_active' => true,
+            'status' => 'completed',
+        ]);
+    }
+
     private function seedAggregateRow(
         int $eventId,
         string $storeName,
@@ -227,7 +351,7 @@ class EventSummaryTest extends TestCase
         ]);
     }
 
-    private function seedTicket(int $eventId, string $docType, int $hour = 12): void
+    private function seedTicket(int $eventId, string $docType, int $hour = 12, string $storeName = 'Loja A'): void
     {
         static $documentNumber = 0;
         $documentNumber++;
@@ -237,11 +361,36 @@ class EventSummaryTest extends TestCase
             'sale_date' => '2026-06-20',
             'sale_calendar_date' => '2026-06-20',
             'sale_hour' => $hour,
-            'store_code' => 'Loja A',
-            'store_name' => 'Loja A',
+            'store_code' => $storeName,
+            'store_name' => $storeName,
             'doc_type' => $docType,
             'document_series' => 'A2026',
             'document_number' => (string) $documentNumber,
+        ]);
+    }
+
+    private function seedPayment(
+        Event $event,
+        EventReportImport $import,
+        string $storeName,
+        string $docType,
+        string $paymentCode,
+        float $total,
+        string $documentNumber,
+    ): void {
+        EventReportPaymentDocument::create([
+            'event_id' => $event->id,
+            'event_report_import_id' => $import->id,
+            'store_code' => $storeName,
+            'store_name' => $storeName,
+            'sale_date' => '2026-06-20',
+            'sale_datetime' => '2026-06-20 12:00:00',
+            'doc_type' => $docType,
+            'document_series' => 'A2026',
+            'document_number' => $documentNumber,
+            'payment_code' => $paymentCode,
+            'total' => $total,
+            'dedupe_key' => implode('|', [$storeName, $docType, $paymentCode, $documentNumber]),
         ]);
     }
 
