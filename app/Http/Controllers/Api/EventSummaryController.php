@@ -6,6 +6,8 @@ use App\Http\Controllers\Controller;
 use App\Models\Event;
 use App\Models\EventReportRowAggregate;
 use App\Models\EventReportTicketAggregate;
+use App\Services\DashboardConfigurationService;
+use App\Services\MobileEventAnalyticsService;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -26,6 +28,11 @@ class EventSummaryController extends Controller
     // Kept identical to EventDashboardController::NON_SALES_DOCUMENT_TYPES
     // so "total sales" means the same thing on web and mobile.
     private const NON_SALES_DOCUMENT_TYPES = ['CM', 'ZT'];
+
+    public function __construct(
+        private readonly MobileEventAnalyticsService $analytics,
+        private readonly DashboardConfigurationService $dashboardConfiguration,
+    ) {}
 
     public function index(Request $request): JsonResponse
     {
@@ -74,17 +81,58 @@ class EventSummaryController extends Controller
     {
         $event = $this->authorizeEventForClient($request, $event);
 
+        return response()->json($this->analytics->dashboard($event, $this->validatedFilters($request)));
+    }
+
+    public function configuration(Request $request, Event $event): JsonResponse
+    {
+        $event = $this->authorizeEventForClient($request, $event);
+
         return response()->json([
-            'event' => [
-                'id' => $event->id,
-                'title' => $event->title,
-                'event_date' => $event->event_date?->toISOString(),
-            ],
-            'summary' => $this->summaryData($event),
-            'hourly_sales' => $this->hourlySalesData($event->id),
-            'top_products' => $this->topProductsData($event->id),
-            'top_stores' => $this->topStoresData($event->id),
+            'configuration' => $this->dashboardConfiguration->resolve($event),
         ]);
+    }
+
+    public function filters(Request $request, Event $event): JsonResponse
+    {
+        $event = $this->authorizeEventForClient($request, $event);
+
+        return response()->json(['filters' => $this->analytics->filterOptions($event)]);
+    }
+
+    public function products(Request $request, Event $event): JsonResponse
+    {
+        $event = $this->authorizeEventForClient($request, $event);
+
+        return response()->json($this->analytics->products($event, $this->validatedFilters($request)));
+    }
+
+    public function payments(Request $request, Event $event): JsonResponse
+    {
+        $event = $this->authorizeEventForClient($request, $event);
+
+        return response()->json($this->analytics->payments($event, $this->validatedFilters($request)));
+    }
+
+    public function zones(Request $request, Event $event): JsonResponse
+    {
+        $event = $this->authorizeEventForClient($request, $event);
+
+        return response()->json($this->analytics->zones($event, $this->validatedFilters($request)));
+    }
+
+    public function performance(Request $request, Event $event): JsonResponse
+    {
+        $event = $this->authorizeEventForClient($request, $event);
+
+        return response()->json($this->analytics->performance($event, $this->validatedFilters($request)));
+    }
+
+    public function comparison(Request $request, Event $event): JsonResponse
+    {
+        $event = $this->authorizeEventForClient($request, $event);
+
+        return response()->json($this->analytics->comparison($event));
     }
 
     /**
@@ -199,6 +247,38 @@ class EventSummaryController extends Controller
         abort_unless($event->client_id === $client->id && $event->is_active, 404);
 
         return $event;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function validatedFilters(Request $request): array
+    {
+        $validated = $request->validate([
+            'bar_groups' => ['sometimes', 'array', 'max:50'],
+            'bar_groups.*' => ['string', 'max:255'],
+            'store' => ['nullable', 'string', 'max:255'],
+            'product' => ['nullable', 'string', 'max:255'],
+            'date_from' => ['nullable', 'date_format:Y-m-d'],
+            'date_to' => ['nullable', 'date_format:Y-m-d', 'after_or_equal:date_from'],
+            'hour_from' => ['nullable', 'integer', 'between:0,23'],
+            'hour_to' => ['nullable', 'integer', 'between:0,23'],
+        ]);
+
+        return [
+            'bar_groups' => collect($validated['bar_groups'] ?? [])
+                ->map(fn (mixed $value): string => trim((string) $value))
+                ->filter()
+                ->unique()
+                ->values()
+                ->all(),
+            'store' => trim((string) ($validated['store'] ?? '')),
+            'product' => trim((string) ($validated['product'] ?? '')),
+            'date_from' => $validated['date_from'] ?? null,
+            'date_to' => $validated['date_to'] ?? null,
+            'hour_from' => array_key_exists('hour_from', $validated) ? (int) $validated['hour_from'] : null,
+            'hour_to' => array_key_exists('hour_to', $validated) ? (int) $validated['hour_to'] : null,
+        ];
     }
 
     private function salesRowsQuery(int $eventId): Builder

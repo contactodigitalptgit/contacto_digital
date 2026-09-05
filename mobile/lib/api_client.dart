@@ -27,8 +27,10 @@ class ApiException implements Exception {
 class ApiClient {
   ApiClient({String? baseUrl}) : baseUrl = baseUrl ?? defaultBaseUrl;
 
-  static const String defaultBaseUrl =
-      'https://portal.contactodigital.pt/api';
+  static const String defaultBaseUrl = String.fromEnvironment(
+    'API_BASE_URL',
+    defaultValue: 'https://portal.contactodigital.pt/api',
+  );
 
   final String baseUrl;
   final http.Client _http = http.Client();
@@ -97,11 +99,53 @@ class ApiClient {
         .toList();
   }
 
+  Future<Map<String, dynamic>> fetchDashboard(int eventId) async {
+    return _get('/events/$eventId/dashboard');
+  }
+
+  Future<Map<String, dynamic>> fetchConfiguration(int eventId) async {
+    final body = await _get('/events/$eventId/configuration');
+
+    return (body['configuration'] as Map).cast<String, dynamic>();
+  }
+
+  Future<Map<String, dynamic>> fetchFilterOptions(int eventId) async {
+    final body = await _get('/events/$eventId/filters');
+
+    return (body['filters'] as Map).cast<String, dynamic>();
+  }
+
+  Future<Map<String, dynamic>> fetchEventSection(
+    int eventId,
+    String section, {
+    Map<String, dynamic> filters = const {},
+  }) async {
+    final query = <String, dynamic>{};
+    filters.forEach((key, value) {
+      if (value == null || value == '' || (value is List && value.isEmpty)) {
+        return;
+      }
+      query[key] = value;
+    });
+    final queryParameters = <String, dynamic>{};
+    for (final entry in query.entries) {
+      queryParameters[entry.value is List ? '${entry.key}[]' : entry.key] =
+          entry.value is List
+              ? (entry.value as List).map((item) => item.toString()).toList()
+              : entry.value.toString();
+    }
+    final uri = Uri.parse('$baseUrl/events/$eventId/$section')
+        .replace(queryParameters: queryParameters);
+
+    return _getUri(uri);
+  }
+
   Future<Map<String, dynamic>> _get(String path) async {
-    final response = await _http.get(
-      Uri.parse('$baseUrl$path'),
-      headers: await _authHeaders(),
-    );
+    return _getUri(Uri.parse('$baseUrl$path'));
+  }
+
+  Future<Map<String, dynamic>> _getUri(Uri uri) async {
+    final response = await _http.get(uri, headers: await _authHeaders());
 
     final body = _decode(response);
 

@@ -1,10 +1,19 @@
 import 'package:flutter/material.dart';
+import 'package:intl/date_symbol_data_local.dart';
 
 import 'api_client.dart';
 import 'screens/event_summary_screen.dart';
 import 'screens/login_screen.dart';
+import 'theme/app_theme.dart';
 
-void main() {
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  // NumberFormat works out of the box, but DateFormat (used for "última
+  // sincronização") throws LocaleDataException for any locale beyond the
+  // default until its symbol data is loaded explicitly — found running
+  // the app for real, not something a plain `flutter analyze` catches.
+  await initializeDateFormatting('pt_PT');
+
   runApp(const ContactoDigitalApp());
 }
 
@@ -14,12 +23,9 @@ class ContactoDigitalApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'O meu evento',
+      title: 'Contacto Digital',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        colorSchemeSeed: Colors.indigo,
-        useMaterial3: true,
-      ),
+      theme: AppTheme.dark,
       home: const _StartupGate(),
     );
   }
@@ -47,7 +53,9 @@ class _StartupGateState extends State<_StartupGate> {
       builder: (context, snapshot) {
         if (snapshot.connectionState != ConnectionState.done) {
           return const Scaffold(
-            body: Center(child: CircularProgressIndicator()),
+            body: BrandBackground(
+              child: Center(child: CircularProgressIndicator()),
+            ),
           );
         }
 
