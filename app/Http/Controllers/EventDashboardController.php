@@ -455,7 +455,7 @@ class EventDashboardController extends Controller
         ksort($cacheFilters);
 
         $cacheKey = implode(':', [
-            'event-dashboard-v1',
+            'event-dashboard-v2',
             $event->id,
             $cacheVersion,
             $fragment,
