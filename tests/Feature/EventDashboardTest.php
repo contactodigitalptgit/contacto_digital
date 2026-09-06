@@ -530,6 +530,14 @@ class EventDashboardTest extends TestCase
             ['Tpa 13 - Bar 2 Claudia - POS 1', '13', '4.0000'],
             ['Tpa 8 - Bar Vip Alison - POS 1', '8', '5.0000'],
             ['Tpa 15 - Bar Vip Simao - POS 1', '15', '6.0000'],
+            ['Bar Central - TPA 1 - POS 1', '101', '10.0000'],
+            ['Bar Central - TPA 2 - POS 1', '102', '20.0000'],
+            ['Bar Central - TPA 3 - POS 1', '103', '30.0000'],
+            ['Bar Central - TPA 4 - POS 1', '104', '40.0000'],
+            ['Bar Central - TPA 6 - POS 1', '106', '50.0000'],
+            ['Bar RedBull - TPA 7 - POS 1', '107', '60.0000'],
+            ['Bar RedBull - TPA 8 - POS 1', '108', '70.0000'],
+            ['Roulotte - TPA 9 - POS 1', '109', '80.0000'],
         ];
 
         foreach ($stores as $index => [$storeName, $storeCode, $total]) {
@@ -572,7 +580,25 @@ class EventDashboardTest extends TestCase
                     ) && collect($groups)->contains(
                         fn (array $group): bool => $group['label'] === 'Bar Vip'
                             && $group['stores_count'] === 2,
+                    ) && collect($groups)->contains(
+                        fn (array $group): bool => $group['label'] === 'Bar Central'
+                            && $group['stores_count'] === 5,
+                    ) && collect($groups)->contains(
+                        fn (array $group): bool => $group['label'] === 'Bar RedBull'
+                            && $group['stores_count'] === 2,
+                    ) && collect($groups)->contains(
+                        fn (array $group): bool => $group['label'] === 'Roulotte'
+                            && $group['stores_count'] === 1,
                     ))));
+
+        $this
+            ->actingAs($admin)
+            ->get(route('admin.events.zones', $event).'?bar_groups%5B0%5D=Bar%20Central')
+            ->assertOk()
+            ->assertInertia(fn (AssertableInertia $page) => $page
+                ->where('filters.bar_groups', ['Bar Central'])
+                ->where('summary.bar_groups_count', 1)
+                ->where('summary.total_sales', 150));
     }
 
     public function test_products_filter_includes_store_names_starting_with_vip_in_bar_vip(): void

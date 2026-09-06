@@ -725,6 +725,10 @@ class MobileEventAnalyticsService
             return 'Bilheteira';
         }
 
+        if (preg_match('/^(.+?)\s*-\s*TPA\b/i', $name, $matches)) {
+            return trim($matches[1]);
+        }
+
         return $name;
     }
 

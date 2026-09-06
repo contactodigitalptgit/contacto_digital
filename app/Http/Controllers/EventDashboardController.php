@@ -2417,7 +2417,16 @@ class EventDashboardController extends Controller
             return;
         }
 
-        $query->whereRaw('TRIM(COALESCE(store_name, \'\')) = ?', [$normalizedBarGroup]);
+        $normalizedLower = Str::lower($normalizedBarGroup);
+
+        $query->where(function (Builder $builder) use ($normalizedBarGroup, $normalizedLower): void {
+            $builder
+                ->whereRaw('TRIM(COALESCE(store_name, \'\')) = ?', [$normalizedBarGroup])
+                ->orWhereRaw(
+                    'LOWER(TRIM(COALESCE(store_name, \'\'))) LIKE ?',
+                    [$normalizedLower.' - tpa %'],
+                );
+        });
     }
 
     /**
@@ -2462,6 +2471,10 @@ class EventDashboardController extends Controller
 
         if (preg_match('/^(bilheteira)\b/i', $storeName) === 1) {
             return 'Bilheteira';
+        }
+
+        if (preg_match('/^(.+?)\s*-\s*TPA\b/i', $storeName, $matches) === 1) {
+            return trim($matches[1]);
         }
 
         return trim($storeName);
