@@ -196,6 +196,37 @@ class EventSummaryTest extends TestCase
             ->assertJsonCount(2, 'top_stores');
     }
 
+    public function test_mobile_groups_tpa_devices_by_operational_zone_prefix(): void
+    {
+        [$user, $client] = $this->makeClient();
+        $event = $this->makeEvent($client, 'Evento por zona operacional');
+
+        $this->seedAggregateRow($event->id, 'Bar Central - TPA 1 - POS 1', 'FS', 100);
+        $this->seedAggregateRow($event->id, 'Bar Central - TPA 2 - POS 1', 'FS', 60);
+        $this->seedAggregateRow($event->id, 'Bar RedBull - TPA 7 - POS 1', 'FS', 40);
+        $this->seedTicket($event->id, 'FS', 12, 'Bar Central - TPA 1 - POS 1');
+        $this->seedTicket($event->id, 'FS', 12, 'Bar Central - TPA 2 - POS 1');
+        $this->seedTicket($event->id, 'FS', 12, 'Bar RedBull - TPA 7 - POS 1');
+
+        $this->authenticated($user)
+            ->getJson("/api/events/{$event->id}/zones")
+            ->assertOk()
+            ->assertJsonPath('summary.zones_count', 2)
+            ->assertJsonPath('items.0.label', 'Bar Central')
+            ->assertJsonPath('items.0.devices_count', 2)
+            ->assertJsonPath('items.0.total_sales', 160)
+            ->assertJsonPath('items.1.label', 'Bar RedBull');
+
+        $query = http_build_query(['bar_groups' => ['Bar Central']]);
+
+        $this->authenticated($user)
+            ->getJson("/api/events/{$event->id}/zones?{$query}")
+            ->assertOk()
+            ->assertJsonPath('summary.zones_count', 1)
+            ->assertJsonPath('summary.total_sales', 160)
+            ->assertJsonCount(1, 'items');
+    }
+
     public function test_payment_endpoint_separates_sales_topups_and_reconciliation(): void
     {
         [$user, $client] = $this->makeClient();
