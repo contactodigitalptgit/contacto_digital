@@ -9,12 +9,9 @@ use Illuminate\Support\Facades\Auth;
 use Illuminate\Validation\ValidationException;
 
 /**
- * Token auth for the client-facing mobile app only (see
- * docs/PLANO_DE_PERFORMANCE_SINCRONIZACAO.md — app Flutter, cliente
- * acompanhar o evento). Deliberately separate from the web session guard:
- * an admin logging in here would be a mistake, not a feature, so it is
- * rejected outright rather than silently issuing a token nobody meant to
- * hand a mobile client.
+ * Token authentication for the mobile event portal. Client accounts remain
+ * scoped to their own events, while administrators can inspect every active
+ * event through the same read-only reporting API.
  */
 class AuthController extends Controller
 {
@@ -36,13 +33,15 @@ class AuthController extends Controller
 
         $user = Auth::user();
 
-        if (! $user->client) {
+        $client = $user->client;
+
+        if (! $user->isAdmin() && ! $client) {
             throw ValidationException::withMessages([
                 'email' => 'Esta conta nao e uma conta de cliente.',
             ]);
         }
 
-        if (! $user->client->is_active) {
+        if (! $user->isAdmin() && ! $client->is_active) {
             throw ValidationException::withMessages([
                 'email' => 'Cliente desativado. Entre em contacto com o administrador.',
             ]);
@@ -53,10 +52,11 @@ class AuthController extends Controller
         return response()->json([
             'token' => $token,
             'client' => [
-                'id' => $user->client->id,
-                'name' => $user->client->name,
-                'business_name' => $user->client->business_name,
+                'id' => $user->isAdmin() ? $user->id : $client->id,
+                'name' => $user->isAdmin() ? $user->name : $client->name,
+                'business_name' => $user->isAdmin() ? 'Administrador' : $client->business_name,
             ],
+            'role' => $user->role,
         ]);
     }
 

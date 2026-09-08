@@ -38,6 +38,40 @@ class EventSummaryTest extends TestCase
         $this->assertSame($ownEvent->id, $response->json('events.0.id'));
     }
 
+    public function test_admin_lists_all_active_events_and_can_open_them(): void
+    {
+        $admin = User::factory()->create(['role' => 'admin']);
+        Client::create([
+            'user_id' => $admin->id,
+            'name' => 'Vinculo legado do administrador',
+            'address' => 'Porto',
+            'phone' => '+351 930000001',
+            'is_active' => false,
+        ]);
+        [, $firstClient] = $this->makeClient();
+        [, $secondClient] = $this->makeClient();
+        $firstEvent = $this->makeEvent($firstClient, 'Evento Cliente Um');
+        $secondEvent = $this->makeEvent($secondClient, 'Evento Cliente Dois');
+        $inactiveEvent = $this->makeEvent($secondClient, 'Evento Inativo', active: false);
+
+        $this->authenticated($admin)
+            ->getJson('/api/events')
+            ->assertOk()
+            ->assertJsonCount(2, 'events')
+            ->assertJsonFragment(['id' => $firstEvent->id, 'title' => 'Evento Cliente Um'])
+            ->assertJsonFragment(['id' => $secondEvent->id, 'title' => 'Evento Cliente Dois'])
+            ->assertJsonMissing(['id' => $inactiveEvent->id]);
+
+        $this->authenticated($admin)
+            ->getJson("/api/events/{$secondEvent->id}/dashboard")
+            ->assertOk()
+            ->assertJsonPath('event.id', $secondEvent->id);
+
+        $this->authenticated($admin)
+            ->getJson("/api/events/{$inactiveEvent->id}/dashboard")
+            ->assertNotFound();
+    }
+
     public function test_summary_matches_the_aggregate_tables_and_excludes_cm_zt(): void
     {
         [$user, $client] = $this->makeClient();

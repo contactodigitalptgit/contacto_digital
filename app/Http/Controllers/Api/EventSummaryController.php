@@ -36,10 +36,16 @@ class EventSummaryController extends Controller
 
     public function index(Request $request): JsonResponse
     {
-        $client = $request->user()->client()->firstOrFail();
+        $user = $request->user();
+        $eventsQuery = Event::query()
+            ->with('client:id,name,business_name')
+            ->where('is_active', true);
 
-        $events = $client->events()
-            ->where('is_active', true)
+        if (! $user->isAdmin()) {
+            $eventsQuery->where('client_id', $user->client()->firstOrFail()->id);
+        }
+
+        $events = $eventsQuery
             ->orderByDesc('event_date')
             ->orderByDesc('id')
             ->get()
@@ -47,6 +53,7 @@ class EventSummaryController extends Controller
                 'id' => $event->id,
                 'title' => $event->title,
                 'event_date' => $event->event_date->toISOString(),
+                'client_name' => $event->client?->business_name ?: $event->client?->name,
             ]);
 
         return response()->json(['events' => $events]);
@@ -54,7 +61,7 @@ class EventSummaryController extends Controller
 
     public function summary(Request $request, Event $event): JsonResponse
     {
-        $event = $this->authorizeEventForClient($request, $event);
+        $event = $this->authorizeEventForUser($request, $event);
 
         return response()->json([
             'event' => [
@@ -67,7 +74,7 @@ class EventSummaryController extends Controller
 
     public function topStores(Request $request, Event $event): JsonResponse
     {
-        $event = $this->authorizeEventForClient($request, $event);
+        $event = $this->authorizeEventForUser($request, $event);
 
         return response()->json(['top_stores' => $this->topStoresData($event->id)]);
     }
@@ -79,14 +86,14 @@ class EventSummaryController extends Controller
      */
     public function dashboard(Request $request, Event $event): JsonResponse
     {
-        $event = $this->authorizeEventForClient($request, $event);
+        $event = $this->authorizeEventForUser($request, $event);
 
         return response()->json($this->analytics->dashboard($event, $this->validatedFilters($request)));
     }
 
     public function configuration(Request $request, Event $event): JsonResponse
     {
-        $event = $this->authorizeEventForClient($request, $event);
+        $event = $this->authorizeEventForUser($request, $event);
 
         return response()->json([
             'configuration' => $this->dashboardConfiguration->resolve($event),
@@ -95,42 +102,42 @@ class EventSummaryController extends Controller
 
     public function filters(Request $request, Event $event): JsonResponse
     {
-        $event = $this->authorizeEventForClient($request, $event);
+        $event = $this->authorizeEventForUser($request, $event);
 
         return response()->json(['filters' => $this->analytics->filterOptions($event)]);
     }
 
     public function products(Request $request, Event $event): JsonResponse
     {
-        $event = $this->authorizeEventForClient($request, $event);
+        $event = $this->authorizeEventForUser($request, $event);
 
         return response()->json($this->analytics->products($event, $this->validatedFilters($request)));
     }
 
     public function payments(Request $request, Event $event): JsonResponse
     {
-        $event = $this->authorizeEventForClient($request, $event);
+        $event = $this->authorizeEventForUser($request, $event);
 
         return response()->json($this->analytics->payments($event, $this->validatedFilters($request)));
     }
 
     public function zones(Request $request, Event $event): JsonResponse
     {
-        $event = $this->authorizeEventForClient($request, $event);
+        $event = $this->authorizeEventForUser($request, $event);
 
         return response()->json($this->analytics->zones($event, $this->validatedFilters($request)));
     }
 
     public function performance(Request $request, Event $event): JsonResponse
     {
-        $event = $this->authorizeEventForClient($request, $event);
+        $event = $this->authorizeEventForUser($request, $event);
 
         return response()->json($this->analytics->performance($event, $this->validatedFilters($request)));
     }
 
     public function comparison(Request $request, Event $event): JsonResponse
     {
-        $event = $this->authorizeEventForClient($request, $event);
+        $event = $this->authorizeEventForUser($request, $event);
 
         return response()->json($this->analytics->comparison($event));
     }
@@ -240,11 +247,17 @@ class EventSummaryController extends Controller
             ->all();
     }
 
-    private function authorizeEventForClient(Request $request, Event $event): Event
+    private function authorizeEventForUser(Request $request, Event $event): Event
     {
+        abort_unless($event->is_active, 404);
+
+        if ($request->user()->isAdmin()) {
+            return $event;
+        }
+
         $client = $request->user()->client()->firstOrFail();
 
-        abort_unless($event->client_id === $client->id && $event->is_active, 404);
+        abort_unless($event->client_id === $client->id, 404);
 
         return $event;
     }
