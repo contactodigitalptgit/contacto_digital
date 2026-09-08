@@ -21,6 +21,10 @@ class EnsureApiClientIsActive
     {
         $user = $request->user();
 
+        if ($user?->isAdmin()) {
+            return $next($request);
+        }
+
         if ($user && $user->client && ! $user->client->is_active) {
             $user->currentAccessToken()?->delete();
 

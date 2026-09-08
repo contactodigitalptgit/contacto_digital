@@ -9,10 +9,8 @@ use Tests\TestCase;
 
 /**
  * Token auth for the mobile app (see docs/PLANO_DE_PERFORMANCE_SINCRONIZACAO.md
- * — app Flutter, cliente acompanhar o evento). This guard is intentionally
- * client-only: an admin token here would let mobile bypass the admin UI's
- * own authorization entirely, so login must reject anything that isn't an
- * active client account.
+ * — app Flutter, cliente acompanhar o evento). Client tokens stay scoped to
+ * one client while administrators can use the same read-only mobile portal.
  */
 class AuthTest extends TestCase
 {
@@ -54,14 +52,18 @@ class AuthTest extends TestCase
         ])->assertUnprocessable();
     }
 
-    public function test_login_rejects_admin_accounts(): void
+    public function test_admin_can_login_without_a_client_and_receive_a_token(): void
     {
         $admin = User::factory()->create(['role' => 'admin', 'password' => bcrypt('secret123')]);
 
         $this->postJson('/api/login', [
             'email' => $admin->email,
             'password' => 'secret123',
-        ])->assertUnprocessable();
+        ])
+            ->assertOk()
+            ->assertJsonPath('client.name', $admin->name)
+            ->assertJsonPath('client.business_name', 'Administrador')
+            ->assertJsonPath('role', 'admin');
     }
 
     public function test_login_rejects_inactive_client(): void
