@@ -1121,19 +1121,6 @@ const eventPeriodLabel = computed(() => {
 const eventStatusLabel = computed(() => hasProcessingSync.value || props.autoSync.enabled
     ? 'Em curso'
     : 'Concluído');
-const syncMachinesTotal = computed(() => props.syncStatus.machines_total > 0
-    ? props.syncStatus.machines_total
-    : props.summary.machines_count);
-const syncMachinesProcessed = computed(() => (hasProcessingSync.value || props.syncStatus.is_stale) && props.syncStatus.machines_total > 0
-    ? Math.min(props.syncStatus.machines_processed, syncMachinesTotal.value)
-    : props.summary.machines_count);
-const syncMachinesPending = computed(() => Math.max(0, syncMachinesTotal.value - syncMachinesProcessed.value));
-const syncCompletionPercentage = computed(() => syncMachinesTotal.value > 0
-    ? Math.min(100, Math.max(0, (syncMachinesProcessed.value / syncMachinesTotal.value) * 100))
-    : 0);
-const filteredCoveragePercentage = computed(() => props.summary.total_rows > 0
-    ? Math.min(100, Math.max(0, (props.summary.filtered_rows / props.summary.total_rows) * 100))
-    : 0);
 const hourlyChartAriaLabel = computed(() => hourlyPeakItems.value
     .map((sale) => `${sale.label}, ${sale.hour_label}: ${formatMoney(sale.sales_total)}`)
     .join(', '));
@@ -2447,26 +2434,6 @@ function getDifferenceClass(value: number | null) {
                                 </div>
                             </article>
 
-                            <article class="contacto-panel contacto-operational-alerts" :class="{ 'is-warning': props.syncStatus.is_stale }">
-                                <header>
-                                    <span class="contacto-label">Alertas operacionais</span>
-                                    <small>Sincronização</small>
-                                </header>
-                                <div>
-                                    <i :class="{ 'is-processing': hasProcessingSync, 'is-failed': props.syncStatus.is_stale }" />
-                                    <span>
-                                        <strong v-if="props.syncStatus.is_stale">A última tentativa não foi concluída</strong>
-                                        <strong v-else-if="hasProcessingSync">A sincronização está em curso</strong>
-                                        <strong v-else>Nenhum alerta crítico</strong>
-                                        <small v-if="props.syncStatus.message">{{ props.syncStatus.message }}</small>
-                                        <small v-else>Os valores apresentados pertencem à última importação válida.</small>
-                                    </span>
-                                </div>
-                                <footer>
-                                    <span>{{ formatNumber(props.summary.filtered_rows) }} linhas visíveis</span>
-                                    <strong>{{ filteredCoveragePercentage.toFixed(0) }}% da seleção</strong>
-                                </footer>
-                            </article>
                         </section>
 
                         <section class="contacto-summary-details">
@@ -2486,30 +2453,6 @@ function getDifferenceClass(value: number | null) {
                                 </dl>
                             </article>
 
-                            <article class="contacto-panel contacto-operational-state">
-                                <header>
-                                    <span class="contacto-label">Estado operacional</span>
-                                    <small>Frota sincronizada</small>
-                                </header>
-                                <div>
-                                    <article>
-                                        <span>Sincronizadas</span>
-                                        <strong>{{ formatNumber(props.summary.machines_count) }}</strong>
-                                    </article>
-                                    <article>
-                                        <span>Processadas</span>
-                                        <strong>{{ formatNumber(syncMachinesProcessed) }}</strong>
-                                    </article>
-                                    <article>
-                                        <span>Pendentes</span>
-                                        <strong>{{ formatNumber(syncMachinesPending) }}</strong>
-                                    </article>
-                                </div>
-                                <footer>
-                                    <span><i :style="{ width: `${syncCompletionPercentage}%` }" /></span>
-                                    <small>{{ syncCompletionPercentage.toFixed(0) }}% das máquinas da última tentativa processadas</small>
-                                </footer>
-                            </article>
                         </section>
                     </div>
 

@@ -2510,9 +2510,7 @@ body {
 .contacto-top-products-summary > header,
 .contacto-payment-distribution > header,
 .contacto-sync-feed > header,
-.contacto-operational-alerts > header,
-.contacto-event-sheet > header,
-.contacto-operational-state > header {
+.contacto-event-sheet > header {
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -2523,9 +2521,7 @@ body {
 .contacto-top-products-summary > header small,
 .contacto-payment-distribution > header small,
 .contacto-sync-feed > header small,
-.contacto-operational-alerts > header small,
-.contacto-event-sheet > header small,
-.contacto-operational-state > header small {
+.contacto-event-sheet > header small {
     color: #8ea3b8;
     font-size: 0.625rem;
     letter-spacing: 0.12em;
@@ -2597,7 +2593,7 @@ body {
 
 .contacto-summary-operations,
 .contacto-summary-details {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: 1fr;
 }
 
 .contacto-top-products-table {
@@ -2780,134 +2776,36 @@ body {
     background: #082742;
 }
 
-.contacto-sync-feed i,
-.contacto-operational-alerts > div > i {
+.contacto-sync-feed i {
     width: 0.5rem;
     height: 0.5rem;
     border-radius: 50%;
     background: #e7ff49;
 }
 
-.contacto-sync-feed i.is-processing,
-.contacto-operational-alerts > div > i.is-processing {
+.contacto-sync-feed i.is-processing {
     animation: report-dashboard-pulse 1.4s ease-in-out infinite;
 }
 
-.contacto-sync-feed i.is-failed,
-.contacto-operational-alerts > div > i.is-failed {
+.contacto-sync-feed i.is-failed {
     background: #f0b44d;
 }
 
 .contacto-sync-feed span,
 .contacto-sync-feed strong,
-.contacto-sync-feed small,
-.contacto-operational-alerts span,
-.contacto-operational-alerts strong,
-.contacto-operational-alerts small {
+.contacto-sync-feed small {
     display: block;
     min-width: 0;
 }
 
-.contacto-sync-feed strong,
-.contacto-operational-alerts strong {
+.contacto-sync-feed strong {
     color: #ededed;
     font-size: 0.75rem;
     font-weight: 500;
 }
 
-.contacto-sync-feed small,
-.contacto-operational-alerts small {
+.contacto-sync-feed small {
     margin-top: 0.2rem;
-    color: #8ea3b8;
-    font-size: 0.625rem;
-}
-
-.contacto-operational-alerts.is-warning {
-    border-color: rgba(240, 180, 77, 0.42);
-}
-
-.contacto-operational-alerts > div {
-    display: grid;
-    min-height: 8.8rem;
-    grid-template-columns: 0.65rem minmax(0, 1fr);
-    align-content: center;
-    gap: 0.75rem;
-    margin-top: 1rem;
-    border-radius: 0.85rem;
-    padding: 1rem;
-    background: #082742;
-}
-
-.contacto-operational-alerts footer {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 1rem;
-    margin-top: 0.75rem;
-    color: #8ea3b8;
-    font-size: 0.625rem;
-}
-
-.contacto-operational-alerts footer strong {
-    color: #e7ff49;
-    font-weight: 500;
-}
-
-.contacto-operational-state > div {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 0.75rem;
-    margin-top: 1rem;
-}
-
-.contacto-operational-state > div article {
-    border: 1px solid rgba(237, 237, 237, 0.08);
-    border-radius: 0.75rem;
-    padding: 0.9rem;
-    background: #082742;
-}
-
-.contacto-operational-state article span,
-.contacto-operational-state article strong {
-    display: block;
-}
-
-.contacto-operational-state article span {
-    color: #8ea3b8;
-    font-size: 0.625rem;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-}
-
-.contacto-operational-state article strong {
-    margin-top: 0.45rem;
-    color: #ededed;
-    font-size: 1.35rem;
-    font-weight: 500;
-}
-
-.contacto-operational-state footer {
-    margin-top: 1rem;
-}
-
-.contacto-operational-state footer > span {
-    display: block;
-    height: 0.3rem;
-    overflow: hidden;
-    border-radius: 999px;
-    background: #14334f;
-}
-
-.contacto-operational-state footer i {
-    display: block;
-    height: 100%;
-    border-radius: inherit;
-    background: #e7ff49;
-}
-
-.contacto-operational-state footer small {
-    display: block;
-    margin-top: 0.5rem;
     color: #8ea3b8;
     font-size: 0.625rem;
 }
@@ -3246,8 +3144,7 @@ body {
         grid-template-columns: 1fr;
     }
 
-    .contacto-payment-distribution-layout,
-    .contacto-operational-state > div {
+    .contacto-payment-distribution-layout {
         grid-template-columns: 1fr;
     }
 
