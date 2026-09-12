@@ -2341,51 +2341,6 @@ function getDifferenceClass(value: number | null) {
                             </article>
                         </section>
 
-                        <section class="contacto-event-bests" aria-labelledby="contacto-event-bests-title">
-                            <header>
-                                <span class="contacto-label" id="contacto-event-bests-title">Os melhores do evento</span>
-                                <small>Produto · zona · hora · pagamento</small>
-                            </header>
-                            <div>
-                                <article>
-                                    <span>Melhor produto</span>
-                                    <strong>{{ bestProductBySales?.label || 'Sem dados' }}</strong>
-                                    <b>{{ bestProductBySales ? formatMoney(bestProductBySales.sales_total) : formatMoney(0) }}</b>
-                                    <small>Maior faturação por produto</small>
-                                </article>
-                                <article>
-                                    <span>Mais servido</span>
-                                    <strong>{{ mostServedProduct?.label || 'Sem dados' }}</strong>
-                                    <b>{{ mostServedProduct ? `${formatNumber(mostServedProduct.quantity_total)} un` : '0 un' }}</b>
-                                    <small>Maior quantidade registada</small>
-                                </article>
-                                <article>
-                                    <span>Melhor zona</span>
-                                    <strong>{{ leadingZone?.label || 'Sem dados' }}</strong>
-                                    <b>{{ leadingZone ? formatMoney(leadingZone.sales_total) : formatMoney(0) }}</b>
-                                    <small>{{ leadingZoneShare.toFixed(1).replace('.', ',') }}% do total</small>
-                                </article>
-                                <article>
-                                    <span>Melhor hora</span>
-                                    <strong>{{ primaryHourlyPeak?.hour_label || 'Sem dados' }}</strong>
-                                    <b>{{ primaryHourlyPeak ? formatMoney(primaryHourlyPeak.sales_total) : formatMoney(0) }}</b>
-                                    <small>{{ primaryHourlyPeak ? `${formatNumber(primaryHourlyPeak.tickets_count)} transações` : 'Sem vendas horárias' }}</small>
-                                </article>
-                                <article>
-                                    <span>Melhor método</span>
-                                    <strong>{{ bestPaymentMethod?.label || 'Sem dados' }}</strong>
-                                    <b>{{ bestPaymentMethod ? formatMoney(bestPaymentMethod.value) : formatMoney(0) }}</b>
-                                    <small>{{ bestPaymentMethod ? `${bestPaymentMethod.percentage.toFixed(1).replace('.', ',')}% dos pagamentos` : 'Sem pagamentos' }}</small>
-                                </article>
-                                <article>
-                                    <span>Melhor dia</span>
-                                    <strong>{{ bestEventDay?.label || 'Sem dados' }}</strong>
-                                    <b>{{ bestEventDay ? formatMoney(bestEventDay.sales_total) : formatMoney(0) }}</b>
-                                    <small>{{ bestEventDay ? `${formatNumber(bestEventDay.tickets_count)} transações` : 'Sem vendas diárias' }}</small>
-                                </article>
-                            </div>
-                        </section>
-
                         <section class="contacto-summary-insights">
                             <article class="contacto-panel contacto-top-products-summary">
                                 <header>
