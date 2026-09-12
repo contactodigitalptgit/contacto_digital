@@ -28,19 +28,15 @@ import { Link } from '@inertiajs/vue3';
 
                 <div class="guest-intro-copy">
                     <p class="guest-intro-eyebrow">Controlo operacional</p>
-                    <h2>Os dados do evento, com clareza.</h2>
+                    <h2>O seu evento. Em tempo real.</h2>
                     <p>
-                        Acompanhe vendas, pagamentos, produtos e zonas numa visão
-                        segura e preparada para decisões em tempo real.
+                        Todos os dados da operação numa única plataforma.
                     </p>
                 </div>
 
                 <div class="guest-security-note">
                     <span aria-hidden="true"></span>
-                    <p>
-                        <strong>Acesso protegido</strong>
-                        Área reservada a clientes e administradores.
-                    </p>
+                    <p>Acesso reservado a clientes</p>
                 </div>
             </section>
 

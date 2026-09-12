@@ -20,8 +20,8 @@ void main() {
       MaterialApp(home: LoginScreen(apiClient: ApiClient())),
     );
 
-    expect(find.text('O MEU EVENTO'), findsOneWidget);
-    expect(find.text('O seu evento,\nsempre por perto.'), findsOneWidget);
+    expect(find.text('ÁREA DO CLIENTE'), findsOneWidget);
+    expect(find.text('O seu evento.\nEm tempo real.'), findsOneWidget);
     expect(find.text('Email'), findsOneWidget);
     expect(find.text('Palavra-passe'), findsOneWidget);
     expect(find.text('Entrar no evento'), findsOneWidget);

@@ -1,4 +1,4 @@
-# Plano de Performance da Sincronização — Escala de 200 Máquinas
+Ω# Plano de Performance da Sincronização — Escala de 200 Máquinas
 
 **Projeto:** Contacto Digital
 **Estado do documento:** Proposta para aprovação

@@ -60,6 +60,35 @@ abstract final class AppTheme {
           textStyle: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
         ),
       ),
+      // Without this, OutlinedButton falls back to the seeded ColorScheme's
+      // `outline` (a blue-grey Material tone) instead of the app's own
+      // AppColors.border — every outlined button (date filters, "Limpar",
+      // "Tentar novamente"...) then looks like it belongs to a different app
+      // next to anything using AppColors.border directly, and sits at the
+      // Material-default 40dp height beside a 56dp FilledButton in the same
+      // row. Matching FilledButtonTheme's height/shape here keeps every
+      // outlined/filled button pair visually paired.
+      outlinedButtonTheme: OutlinedButtonThemeData(
+        style: OutlinedButton.styleFrom(
+          foregroundColor: AppColors.white,
+          disabledForegroundColor: AppColors.textMuted,
+          side: const BorderSide(color: AppColors.border),
+          minimumSize: const Size.fromHeight(56),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+          textStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+        ),
+      ),
+      chipTheme: ChipThemeData(
+        backgroundColor: AppColors.surfaceRaised,
+        selectedColor: AppColors.lime,
+        disabledColor: AppColors.surfaceRaised.withValues(alpha: 0.5),
+        side: const BorderSide(color: AppColors.border),
+        labelStyle: const TextStyle(color: AppColors.textSoft, fontSize: 13),
+        secondaryLabelStyle: const TextStyle(color: AppColors.navy, fontSize: 13),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(99)),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      ),
       progressIndicatorTheme: const ProgressIndicatorThemeData(
         color: AppColors.lime,
         linearTrackColor: AppColors.surfaceRaised,
