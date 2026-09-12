@@ -884,7 +884,7 @@ const highlightItems = computed<HighlightItem[]>(() => {
         return props.topStores.map((item) => ({
             key: `device-${item.code ?? item.label}`,
             label: getDeviceLabel(item),
-            helper: `${formatNumber(item.rows_count)} linhas`,
+            helper: '',
             value: item.sales_total,
         }));
     }
@@ -1691,19 +1691,26 @@ function getDifferenceClass(value: number | null) {
         <template #sidebar-navigation="{ isAdmin }">
             <section class="contacto-sidebar-navigation" aria-label="Navegação principal">
                 <div class="contacto-sidebar-menu">
-                    <Link
-                        v-for="section in mainSidebarSections"
-                        :key="section.key"
-                        :href="sidebarSectionUrl(section.key) || '#'"
-                        class="contacto-sidebar-menu-item"
-                        :class="{
-                            'is-active': sidebarSectionIsActive(section.key),
-                            'is-dashboard': section.key === 'summary',
-                        }"
-                    >
-                        <AppSidebarIcon :name="section.icon" />
-                        <span>{{ section.label }}</span>
-                    </Link>
+                    <template v-for="section in mainSidebarSections" :key="section.key">
+                        <span v-if="section.key === 'summary'" class="contacto-sidebar-menu-title">Operação</span>
+                        <span v-else-if="section.key === 'products'" class="contacto-sidebar-menu-title">Análise</span>
+                        <span v-else-if="section.key === 'reconciliation'" class="contacto-sidebar-menu-title">Financeiro</span>
+                        <span v-else-if="section.key === 'zones'" class="contacto-sidebar-menu-title">Análise operacional</span>
+
+                        <Link
+                            :href="sidebarSectionUrl(section.key) || '#'"
+                            class="contacto-sidebar-menu-item"
+                            :class="{
+                                'is-active': sidebarSectionIsActive(section.key),
+                                'is-dashboard': section.key === 'summary',
+                            }"
+                        >
+                            <AppSidebarIcon :name="section.icon" />
+                            <span>{{ section.label }}</span>
+                        </Link>
+                    </template>
+
+                    <span v-if="isAdmin" class="contacto-sidebar-menu-title">Administração</span>
 
                     <Link
                         v-if="isAdmin"
@@ -1715,6 +1722,8 @@ function getDifferenceClass(value: number | null) {
                         <span>Eventos</span>
                     </Link>
 
+                    <span v-if="comparisonSidebarSection" class="contacto-sidebar-menu-title">Fecho</span>
+
                     <Link
                         v-if="isAdmin"
                         :href="route('admin.clients.index')"
@@ -1724,6 +1733,8 @@ function getDifferenceClass(value: number | null) {
                         <AppSidebarIcon name="clients" />
                         <span>Clientes</span>
                     </Link>
+
+                    <span v-if="props.dashboardEditor?.enabled" class="contacto-sidebar-menu-title">Configuração</span>
 
                     <Link
                         v-if="comparisonSidebarSection"
@@ -1833,20 +1844,6 @@ function getDifferenceClass(value: number | null) {
         </template>
 
         <div class="dash-page">
-            <section
-                v-if="hasProcessingSync || props.syncStatus.is_stale"
-                class="report-dashboard-sync-status"
-                :class="{ 'is-processing': hasProcessingSync, 'is-failed': props.syncStatus.is_stale }"
-                role="status"
-            >
-                <span class="report-dashboard-sync-status-indicator" aria-hidden="true" />
-                <div>
-                    <strong>{{ hasProcessingSync ? 'Atualização dos dados em curso' : 'Atenção à última sincronização' }}</strong>
-                    <p>{{ props.syncStatus.message }}</p>
-                    <small>{{ syncProgressLabel }}</small>
-                </div>
-            </section>
-
             <section v-if="!hasImportedData" class="dash-card report-dashboard-empty">
                 Nenhum relatório sincronizado para este evento.
             </section>
@@ -1906,7 +1903,6 @@ function getDifferenceClass(value: number | null) {
                                 @click="applyBarGroupFilter(option.value)"
                             >
                                 <span>{{ option.label }}</span>
-                                <small>{{ formatNumber(option.rows_count) }} linhas</small>
                             </button>
                         </div>
 
@@ -2039,6 +2035,44 @@ function getDifferenceClass(value: number | null) {
                         v-if="activeSection === 'summary'"
                         class="contacto-live-dashboard"
                     >
+                        <section
+                            class="contacto-sync-overview"
+                            :class="{ 'has-sync-status': hasProcessingSync || props.syncStatus.is_stale }"
+                        >
+                            <section
+                                v-if="hasProcessingSync || props.syncStatus.is_stale"
+                                class="report-dashboard-sync-status"
+                                :class="{ 'is-processing': hasProcessingSync, 'is-failed': props.syncStatus.is_stale }"
+                                role="status"
+                            >
+                                <span class="report-dashboard-sync-status-indicator" aria-hidden="true" />
+                                <div>
+                                    <strong>{{ hasProcessingSync ? 'Atualização dos dados em curso' : 'Atenção à última sincronização' }}</strong>
+                                    <p>{{ props.syncStatus.message }}</p>
+                                    <small>{{ syncProgressLabel }}</small>
+                                </div>
+                            </section>
+
+                            <section class="contacto-stream-bar">
+                                <div>
+                                    <span :class="{ 'is-processing': hasProcessingSync, 'is-failed': props.syncStatus.is_stale }" />
+                                    <strong>{{ hasProcessingSync ? 'Sincronização em curso' : 'Dados atualizados' }}</strong>
+                                    <small>Última atualização: {{ formatDateTime(props.summary.last_synced_at) }}</small>
+                                </div>
+                                <div class="contacto-stream-meta">
+                                    <em v-if="props.autoSync.enabled">Próxima: {{ autoSyncCountdown }}</em>
+                                    <button
+                                        v-if="props.previewMode"
+                                        type="button"
+                                        :disabled="isSyncingReport || hasProcessingSync"
+                                        @click="submitReportSync"
+                                    >
+                                        {{ hasProcessingSync ? 'A sincronizar' : isSyncingReport ? 'A iniciar' : 'Sincronizar agora' }}
+                                    </button>
+                                </div>
+                            </section>
+                        </section>
+
                         <section class="contacto-zone-filter" aria-label="Filtrar por zona">
                             <div class="contacto-zone-filter-row">
                                 <span class="contacto-label">Zonas</span>
@@ -2069,6 +2103,7 @@ function getDifferenceClass(value: number | null) {
                                     +{{ hiddenQuickZoneCount }} zonas
                                 </button>
                                 <div class="contacto-zone-filter-actions">
+                                    <button type="button" @click="filtersOpen = true">Ajustar filtros</button>
                                     <button
                                         v-if="hasPendingFilterChanges"
                                         type="button"
@@ -2093,36 +2128,6 @@ function getDifferenceClass(value: number | null) {
                                     </button>
                                 </div>
                             </div>
-                            <div class="contacto-zone-total">
-                                <span>{{ selectedZoneLabel }}</span>
-                                <strong>{{ formatMoney(props.summary.total_sales) }}</strong>
-                            </div>
-                            <div class="contacto-zone-period">
-                                <span class="contacto-label">Período</span>
-                                <strong>{{ eventPeriodLabel }}</strong>
-                                <span class="contacto-zone-hours">Todas as horas do evento</span>
-                                <button type="button" @click="filtersOpen = true">Ajustar filtros</button>
-                            </div>
-                        </section>
-
-                        <section class="contacto-stream-bar">
-                            <div>
-                                <span :class="{ 'is-processing': hasProcessingSync, 'is-failed': props.syncStatus.is_stale }" />
-                                <strong>{{ hasProcessingSync ? 'Sincronização em curso' : 'Dados atualizados' }}</strong>
-                                <small>Última atualização: {{ formatDateTime(props.summary.last_synced_at) }}</small>
-                            </div>
-                            <div class="contacto-stream-meta">
-                                <span>{{ formatNumber(props.summary.filtered_rows) }} linhas analisadas</span>
-                                <em v-if="props.autoSync.enabled">Próxima: {{ autoSyncCountdown }}</em>
-                                <button
-                                    v-if="props.previewMode"
-                                    type="button"
-                                    :disabled="isSyncingReport || hasProcessingSync"
-                                    @click="submitReportSync"
-                                >
-                                    {{ hasProcessingSync ? 'A sincronizar' : isSyncingReport ? 'A iniciar' : 'Sincronizar agora' }}
-                                </button>
-                            </div>
                         </section>
 
                         <section class="contacto-dashboard-summary" aria-label="Resumo do evento">
@@ -2138,7 +2143,6 @@ function getDifferenceClass(value: number | null) {
                                     </span>
                                     <span class="contacto-summary-label">{{ blockLabel('overview', showZtCard ? 'Total sem ZT' : 'Total faturado') }}</span>
                                     <strong>{{ formatMoney(props.paymentSummary.total_without_zt) }}</strong>
-                                    <small>{{ formatNumber(props.summary.filtered_rows) }} linhas · dados reais</small>
                                 </button>
 
                                 <button type="button" class="contacto-summary-card" @click="openDetailModal('ticket')">
@@ -2147,7 +2151,6 @@ function getDifferenceClass(value: number | null) {
                                     </span>
                                     <span class="contacto-summary-label">{{ metricLabel('average_ticket', 'Ticket médio') }}</span>
                                     <strong>{{ formatMoney(props.summary.average_ticket) }}</strong>
-                                    <small>Por transação</small>
                                 </button>
 
                                 <article class="contacto-summary-card">
@@ -2156,7 +2159,6 @@ function getDifferenceClass(value: number | null) {
                                     </span>
                                     <span class="contacto-summary-label">Transações</span>
                                     <strong>{{ formatNumber(props.summary.tickets_count) }}</strong>
-                                    <small>{{ formatNumber(props.summary.total_quantity) }} unidades registadas</small>
                                 </article>
                             </div>
 
@@ -2183,7 +2185,6 @@ function getDifferenceClass(value: number | null) {
                                     </span>
                                     <span class="contacto-summary-label">Unidades vendidas</span>
                                     <strong>{{ formatNumber(props.summary.total_quantity) }} <em>un</em></strong>
-                                    <small>{{ formatNumber(props.summary.products_count) }} referências vendidas</small>
                                 </article>
                                 <article class="contacto-summary-card">
                                     <span class="contacto-summary-icon" aria-hidden="true">
@@ -2199,7 +2200,6 @@ function getDifferenceClass(value: number | null) {
                                     </span>
                                     <span class="contacto-summary-label">Média por hora</span>
                                     <strong>{{ formatMoney(averageSalesPerHour) }}</strong>
-                                    <small>{{ formatNumber(activeOperatingHours) }} horas com vendas</small>
                                 </article>
                                 <article class="contacto-summary-card is-devices">
                                     <span class="contacto-summary-icon" aria-hidden="true">
@@ -2434,10 +2434,6 @@ function getDifferenceClass(value: number | null) {
                                 </div>
                             </article>
 
-                        </section>
-
-                        <section class="contacto-summary-details">
-
                             <article class="contacto-panel contacto-event-sheet">
                                 <header>
                                     <span class="contacto-label">Ficha do evento</span>
@@ -2523,7 +2519,7 @@ function getDifferenceClass(value: number | null) {
                             >
                                 <header>
                                     <div>
-                                        <span>{{ blockHelper('chart_daily', 'Gráfico de linha') }}</span>
+                                        <span>{{ blockHelper('chart_daily', 'Tendência diária') }}</span>
                                         <h4>{{ blockLabel('chart_daily', 'Evolução diária da faturação') }}</h4>
                                     </div>
                                 </header>
@@ -2575,7 +2571,7 @@ function getDifferenceClass(value: number | null) {
                             >
                                 <header>
                                     <div>
-                                        <span>{{ blockHelper('chart_hourly', 'Gráfico de linha') }}</span>
+                                        <span>{{ blockHelper('chart_hourly', 'Tendência horária') }}</span>
                                         <h4>{{ blockLabel('chart_hourly', 'Picos de vendas por hora') }}</h4>
                                     </div>
                                     <label v-if="hourlyDateOptions.length > 1" class="report-dashboard-analytics-period-select">
@@ -2731,7 +2727,7 @@ function getDifferenceClass(value: number | null) {
                                                 <i :style="{ height: item.height, animationDelay: `${index * 90}ms` }" />
                                             </div>
                                             <span>{{ item.label }}</span>
-                                            <small>{{ item.helper }}</small>
+                                            <small v-if="item.helper">{{ item.helper }}</small>
                                         </article>
                                     </div>
                                     <div v-if="chartOperationalMoneyMetrics.length" class="report-dashboard-analytics-operational-money">
@@ -2877,7 +2873,6 @@ function getDifferenceClass(value: number | null) {
                                 <article>
                                     <span>Ticket médio</span>
                                     <strong>{{ formatMoney(props.summary.average_ticket) }}</strong>
-                                    <small>Por transação na seleção</small>
                                 </article>
                                 <article>
                                     <span>Transações</span>
@@ -3226,7 +3221,7 @@ function getDifferenceClass(value: number | null) {
                                     <span>{{ index + 1 }}º</span>
                                     <div>
                                         <strong>{{ item.label }}</strong>
-                                        <small>{{ item.helper }}</small>
+                                        <small v-if="item.helper">{{ item.helper }}</small>
                                     </div>
                                     <b>{{ formatMoney(item.value) }}</b>
                                     <em>{{ getHighlightShare(item.value) }}</em>
