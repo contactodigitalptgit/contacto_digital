@@ -1976,6 +1976,213 @@ body {
     margin-top: 0;
 }
 
+.contacto-dashboard-summary {
+    display: grid;
+    gap: 1rem;
+}
+
+.contacto-summary-primary,
+.contacto-summary-secondary {
+    display: grid;
+    gap: 1rem;
+}
+
+.contacto-summary-primary {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.contacto-summary-secondary {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.contacto-summary-card,
+.contacto-zone-leader-summary {
+    min-width: 0;
+    border: 1px solid rgba(47, 111, 208, 0.58);
+    border-radius: 1.25rem;
+    background: linear-gradient(145deg, #092c4d, #061f36 72%);
+}
+
+.contacto-summary-card {
+    display: grid;
+    min-height: 10.75rem;
+    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-areas:
+        'icon label'
+        'value value'
+        'helper helper';
+    align-content: start;
+    gap: 0.7rem 0.85rem;
+    padding: 1.5rem;
+    text-align: left;
+}
+
+.contacto-summary-card:hover {
+    border-color: rgba(231, 255, 73, 0.5);
+}
+
+.contacto-summary-icon {
+    display: grid;
+    width: 2.7rem;
+    height: 2.7rem;
+    grid-area: icon;
+    place-items: center;
+    border-radius: 0.7rem;
+    color: #9ec9eb;
+    background: rgba(28, 82, 135, 0.42);
+}
+
+.contacto-summary-icon.is-lime {
+    color: #e7ff49;
+    background: rgba(231, 255, 73, 0.12);
+}
+
+.contacto-summary-icon svg {
+    width: 1.45rem;
+    height: 1.45rem;
+    stroke: currentColor;
+    stroke-width: 1.75;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
+.contacto-summary-label {
+    align-self: center;
+    grid-area: label;
+    color: #a9b7db;
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+}
+
+.contacto-summary-card > strong {
+    overflow: hidden;
+    grid-area: value;
+    color: #f4f6fb;
+    font-size: clamp(2rem, 3vw, 3.15rem);
+    line-height: 1.05;
+    font-weight: 650;
+    letter-spacing: -0.045em;
+    text-overflow: ellipsis;
+}
+
+.contacto-summary-card > strong em {
+    color: #e7ff49;
+    font-size: 1rem;
+    font-style: normal;
+    letter-spacing: 0;
+}
+
+.contacto-summary-card > small {
+    grid-area: helper;
+    color: #9aacbf;
+    font-size: 0.75rem;
+}
+
+.contacto-summary-card.is-total {
+    border-color: rgba(47, 111, 208, 0.85);
+    background:
+        radial-gradient(circle at 90% 0%, rgba(231, 255, 73, 0.1) 0 15%, transparent 15.2%),
+        linear-gradient(145deg, #0a3154, #061f36 72%);
+}
+
+.contacto-summary-card.is-total > strong,
+.contacto-summary-card.is-devices > strong {
+    color: #e7ff49;
+}
+
+.contacto-zone-leader-summary {
+    display: grid;
+    min-height: 7.75rem;
+    grid-template-columns: auto minmax(10rem, 1fr) auto minmax(9rem, 1.25fr) auto;
+    grid-template-areas: 'icon name value progress share';
+    align-items: center;
+    gap: 1.15rem;
+    padding: 1.35rem 1.7rem;
+    border-color: rgba(231, 255, 73, 0.58);
+    background: linear-gradient(105deg, rgba(78, 91, 43, 0.47), #092d43 47%, #061f36);
+}
+
+.contacto-zone-leader-summary > .contacto-summary-icon {
+    grid-area: icon;
+}
+
+.contacto-zone-leader-name {
+    min-width: 0;
+    grid-area: name;
+}
+
+.contacto-zone-leader-name > span {
+    display: block;
+    color: #a9b7db;
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+}
+
+.contacto-zone-leader-name > strong {
+    display: block;
+    overflow: hidden;
+    margin-top: 0.3rem;
+    color: #f4f6fb;
+    font-size: 1.75rem;
+    line-height: 1.08;
+    font-weight: 650;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.contacto-zone-leader-value {
+    grid-area: value;
+    padding-left: 1.15rem;
+    border-left: 1px solid rgba(158, 201, 235, 0.35);
+}
+
+.contacto-zone-leader-value > strong,
+.contacto-zone-leader-value > small {
+    display: block;
+}
+
+.contacto-zone-leader-value > strong {
+    color: #f4f6fb;
+    font-size: 1.45rem;
+    font-weight: 650;
+    white-space: nowrap;
+}
+
+.contacto-zone-leader-value > small {
+    margin-top: 0.25rem;
+    color: #a9b7db;
+    font-size: 0.75rem;
+}
+
+.contacto-zone-leader-progress {
+    display: block;
+    height: 0.75rem;
+    overflow: hidden;
+    grid-area: progress;
+    border-radius: 999px;
+    background: #123b61;
+}
+
+.contacto-zone-leader-progress > b {
+    display: block;
+    height: 100%;
+    min-width: 0.75rem;
+    border-radius: inherit;
+    background: #e7ff49;
+    box-shadow: 0 0 18px rgba(231, 255, 73, 0.3);
+}
+
+.contacto-zone-leader-share {
+    grid-area: share;
+    color: #f4f6fb;
+    font-size: 1.5rem;
+    font-weight: 650;
+}
+
 .contacto-analysis-grid {
     display: grid;
     grid-template-columns: minmax(0, 1.35fr) minmax(24rem, 1fr);
@@ -2863,6 +3070,21 @@ body {
         grid-column: 1 / -1;
     }
 
+    .contacto-summary-primary {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .contacto-summary-secondary {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .contacto-zone-leader-summary {
+        grid-template-columns: auto minmax(0, 1fr) auto;
+        grid-template-areas:
+            'icon name value'
+            'progress progress share';
+    }
+
     .contacto-analysis-grid {
         grid-template-columns: 1fr;
     }
@@ -2985,6 +3207,39 @@ body {
     .contacto-metric-grid-financial,
     .contacto-metric-grid-operational {
         grid-template-columns: 1fr;
+    }
+
+    .contacto-summary-primary,
+    .contacto-summary-secondary {
+        grid-template-columns: 1fr;
+    }
+
+    .contacto-summary-card {
+        min-height: 9.5rem;
+        padding: 1.25rem;
+    }
+
+    .contacto-summary-card > strong {
+        font-size: 2.35rem;
+    }
+
+    .contacto-zone-leader-summary {
+        grid-template-columns: auto minmax(0, 1fr);
+        grid-template-areas:
+            'icon name'
+            'value value'
+            'progress share';
+        gap: 0.9rem;
+        padding: 1.25rem;
+    }
+
+    .contacto-zone-leader-value {
+        padding-left: 0;
+        border-left: 0;
+    }
+
+    .contacto-zone-leader-name > strong {
+        font-size: 1.4rem;
     }
 
     .contacto-event-bests > div {
