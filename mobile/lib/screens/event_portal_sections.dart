@@ -44,6 +44,35 @@ class DashboardFilters {
 
   String get signature => toQuery().toString();
 
+  /// `clearX: true` resets that field to null; passing a new value for it
+  /// at the same time is not supported (clear wins) since callers only ever
+  /// need one or the other.
+  DashboardFilters copyWith({
+    List<String>? zones,
+    String? store,
+    bool clearStore = false,
+    String? product,
+    bool clearProduct = false,
+    DateTime? dateFrom,
+    bool clearDateFrom = false,
+    DateTime? dateTo,
+    bool clearDateTo = false,
+    int? hourFrom,
+    bool clearHourFrom = false,
+    int? hourTo,
+    bool clearHourTo = false,
+  }) {
+    return DashboardFilters(
+      zones: zones ?? this.zones,
+      store: clearStore ? null : (store ?? this.store),
+      product: clearProduct ? null : (product ?? this.product),
+      dateFrom: clearDateFrom ? null : (dateFrom ?? this.dateFrom),
+      dateTo: clearDateTo ? null : (dateTo ?? this.dateTo),
+      hourFrom: clearHourFrom ? null : (hourFrom ?? this.hourFrom),
+      hourTo: clearHourTo ? null : (hourTo ?? this.hourTo),
+    );
+  }
+
   static String _date(DateTime value) =>
       '${value.year.toString().padLeft(4, '0')}-${value.month.toString().padLeft(2, '0')}-${value.day.toString().padLeft(2, '0')}';
 }
@@ -367,14 +396,92 @@ extension _EventPortalSections on _EventSummaryScreenState {
     );
   }
 
+  /// Human-readable label for a product code, resolved from the loaded
+  /// filter options. Falls back to the code itself if the options haven't
+  /// been fetched yet (should not normally happen: a product filter can
+  /// only be set from the sheet below, by which point options are cached).
+  String _productLabel(String code) {
+    final products = _maps(_filterOptions?['products']);
+    for (final item in products) {
+      if (item['value'] == code) return (item['label'] as String?) ?? code;
+    }
+    return code;
+  }
+
+  String _formatDateRange(DateTime? from, DateTime? to) {
+    final fmt = DateFormat('dd/MM', 'pt_PT');
+    if (from != null && to != null) return '${fmt.format(from)} – ${fmt.format(to)}';
+    if (from != null) return 'Desde ${fmt.format(from)}';
+    if (to != null) return 'Até ${fmt.format(to)}';
+    return 'Período';
+  }
+
+  String _formatHourRange(int? from, int? to) {
+    String h(int value) => '${value.toString().padLeft(2, '0')}h';
+    if (from != null && to != null) return '${h(from)} – ${h(to)}';
+    if (from != null) return 'Desde ${h(from)}';
+    if (to != null) return 'Até ${h(to)}';
+    return 'Horário';
+  }
+
+  /// Every active filter as its own removable pill: label plus the mutation
+  /// that clears just that one filter, so a client can back out of a single
+  /// choice without reopening the whole sheet.
+  List<({String label, VoidCallback onRemove})> _activeFilterChips() {
+    final chips = <({String label, VoidCallback onRemove})>[];
+
+    for (final zone in _filters.zones) {
+      chips.add((
+        label: zone,
+        onRemove: () => _applyFilters(_filters.copyWith(
+            zones: _filters.zones.where((z) => z != zone).toList())),
+      ));
+    }
+    if (_filters.store != null) {
+      chips.add((
+        label: _filters.store!,
+        onRemove: () => _applyFilters(_filters.copyWith(clearStore: true)),
+      ));
+    }
+    if (_filters.product != null) {
+      chips.add((
+        label: _productLabel(_filters.product!),
+        onRemove: () => _applyFilters(_filters.copyWith(clearProduct: true)),
+      ));
+    }
+    if (_filters.dateFrom != null || _filters.dateTo != null) {
+      chips.add((
+        label: _formatDateRange(_filters.dateFrom, _filters.dateTo),
+        onRemove: () => _applyFilters(
+            _filters.copyWith(clearDateFrom: true, clearDateTo: true)),
+      ));
+    }
+    if (_filters.hourFrom != null || _filters.hourTo != null) {
+      chips.add((
+        label: _formatHourRange(_filters.hourFrom, _filters.hourTo),
+        onRemove: () => _applyFilters(
+            _filters.copyWith(clearHourFrom: true, clearHourTo: true)),
+      ));
+    }
+    return chips;
+  }
+
+  Future<void> _applyFilters(DashboardFilters next) async {
+    if (next.signature == _filters.signature) return;
+    setState(() {
+      _filters = next;
+      _sectionSearch = '';
+      _sectionSearchController.clear();
+    });
+    if (_activeSection == 'summary') {
+      await _loadFilteredDashboard();
+    } else {
+      await _loadSection(_activeSection);
+    }
+  }
+
   Widget _filterToolbar() {
-    final labels = <String>[
-      ..._filters.zones,
-      if (_filters.store != null) _filters.store!,
-      if (_filters.product != null) 'Produto selecionado',
-      if (_filters.dateFrom != null || _filters.dateTo != null) 'Período',
-      if (_filters.hourFrom != null || _filters.hourTo != null) 'Horário',
-    ];
+    final chips = _activeFilterChips();
 
     return Container(
       padding: const EdgeInsets.all(12),
@@ -386,27 +493,38 @@ extension _EventPortalSections on _EventSummaryScreenState {
       child: Row(
         children: [
           Expanded(
-            child: labels.isEmpty
+            child: chips.isEmpty
                 ? const Text(
                     'Todo o evento',
-                    style: TextStyle(color: AppColors.textMuted),
+                    style: TextStyle(color: AppColors.textMuted, fontSize: 13),
                   )
                 : SingleChildScrollView(
                     scrollDirection: Axis.horizontal,
                     child: Row(
-                      children: labels
-                          .map(
-                            (label) => Padding(
-                              padding: const EdgeInsets.only(right: 7),
-                              child: Chip(
-                                label: Text(label),
+                      children: [
+                        for (final chip in chips)
+                          Padding(
+                            padding: const EdgeInsets.only(right: 7),
+                            child: _ActiveFilterPill(
+                                label: chip.label, onRemove: chip.onRemove),
+                          ),
+                        if (chips.length > 1)
+                          Padding(
+                            padding: const EdgeInsets.only(left: 3),
+                            child: TextButton(
+                              onPressed: () =>
+                                  _applyFilters(const DashboardFilters()),
+                              style: TextButton.styleFrom(
+                                foregroundColor: AppColors.textMuted,
                                 visualDensity: VisualDensity.compact,
-                                side: const BorderSide(color: AppColors.border),
-                                backgroundColor: AppColors.surfaceRaised,
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 8),
                               ),
+                              child: const Text('Limpar tudo',
+                                  style: TextStyle(fontSize: 12)),
                             ),
-                          )
-                          .toList(),
+                          ),
+                      ],
                     ),
                   ),
           ),
@@ -658,17 +776,8 @@ extension _EventPortalSections on _EventSummaryScreenState {
       ),
     );
 
-    if (selected != null && selected.signature != _filters.signature) {
-      setState(() {
-        _filters = selected;
-        _sectionSearch = '';
-        _sectionSearchController.clear();
-      });
-      if (_activeSection == 'summary') {
-        await _loadFilteredDashboard();
-      } else {
-        await _loadSection(_activeSection);
-      }
+    if (selected != null) {
+      await _applyFilters(selected);
     }
   }
 
@@ -1484,6 +1593,11 @@ class _PortalFieldLabel extends StatelessWidget {
       );
 }
 
+/// Mirrors the app's InputDecorationTheme (filled surfaceRaised box, floating
+/// label) rather than an OutlinedButton so the label ("Início"/"Fim") stays
+/// visible once a date is picked — a plain OutlinedButton.icon swaps its
+/// whole label for the date, so two filled-in buttons side by side read as
+/// two unlabelled dates with no way to tell which is the start.
 class _DateFilterButton extends StatelessWidget {
   const _DateFilterButton(
       {required this.label, required this.value, required this.onTap});
@@ -1494,13 +1608,99 @@ class _DateFilterButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final text = value == null
-        ? label
+        ? 'Selecionar'
         : '${value!.day.toString().padLeft(2, '0')}/${value!.month.toString().padLeft(2, '0')}/${value!.year}';
-    return OutlinedButton.icon(
-      onPressed: onTap,
-      icon: const Icon(Icons.calendar_today_outlined, size: 17),
-      label: Text(text),
-      style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(54)),
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(18),
+      child: Container(
+        height: 58,
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        decoration: BoxDecoration(
+          color: AppColors.surfaceRaised,
+          border: Border.all(color: AppColors.border),
+          borderRadius: BorderRadius.circular(18),
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                          color: AppColors.textMuted, fontSize: 11)),
+                  const SizedBox(height: 2),
+                  Text(text,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                          color: value == null
+                              ? AppColors.textMuted
+                              : AppColors.white,
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600)),
+                ],
+              ),
+            ),
+            const Icon(Icons.calendar_today_outlined,
+                size: 17, color: AppColors.textMuted),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// A removable "you filtered by X" pill for the toolbar — the same rounded,
+/// bordered pill language as the section kicker badges, with its own close
+/// affordance so one filter can be dropped without opening the sheet.
+class _ActiveFilterPill extends StatelessWidget {
+  const _ActiveFilterPill({required this.label, required this.onRemove});
+
+  final String label;
+  final VoidCallback onRemove;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.only(left: 12, right: 6),
+      height: 32,
+      decoration: BoxDecoration(
+        color: AppColors.surfaceRaised,
+        border: Border.all(color: AppColors.border),
+        borderRadius: BorderRadius.circular(99),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 140),
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                  color: AppColors.textSoft,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600),
+            ),
+          ),
+          const SizedBox(width: 4),
+          InkWell(
+            onTap: onRemove,
+            borderRadius: BorderRadius.circular(99),
+            child: const Padding(
+              padding: EdgeInsets.all(4),
+              child: Icon(Icons.close_rounded,
+                  size: 15, color: AppColors.textMuted),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

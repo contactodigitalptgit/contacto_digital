@@ -88,7 +88,7 @@ class _LoginScreenState extends State<LoginScreen> {
                               ),
                               const SizedBox(height: 34),
                               Text(
-                                'O seu evento,\nsempre por perto.',
+                                'O seu evento.\nEm tempo real.',
                                 style: Theme.of(context)
                                     .textTheme
                                     .displaySmall
@@ -100,7 +100,7 @@ class _LoginScreenState extends State<LoginScreen> {
                               ),
                               const SizedBox(height: 14),
                               const Text(
-                                'Acompanhe a faturação e o desempenho da operação em tempo real.',
+                                'Todos os dados da operação numa única plataforma.',
                                 style: TextStyle(
                                   color: AppColors.textMuted,
                                   fontSize: 16,
@@ -128,7 +128,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                       CrossAxisAlignment.stretch,
                                   children: [
                                     const Text(
-                                      'O MEU EVENTO',
+                                      'ÁREA DO CLIENTE',
                                       style: TextStyle(
                                         color: AppColors.textMuted,
                                         fontSize: 11,
@@ -251,7 +251,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                       size: 16, color: AppColors.textMuted),
                                   SizedBox(width: 7),
                                   Text(
-                                    'Acesso seguro Contacto Digital',
+                                    'Acesso reservado a clientes',
                                     style: TextStyle(
                                         color: AppColors.textMuted,
                                         fontSize: 12),

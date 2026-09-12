@@ -32,7 +32,7 @@ const submit = () => {
         <Head title="Entrar" />
 
         <div class="auth-header">
-            <p class="auth-eyebrow">Área reservada</p>
+            <p class="auth-eyebrow">Área do cliente</p>
             <h1 class="auth-title">Bem-vindo de volta</h1>
             <p class="auth-subtitle">
                 Entre com os seus dados para aceder ao Contacto Digital.

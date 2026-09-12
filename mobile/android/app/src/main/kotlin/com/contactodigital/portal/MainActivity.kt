@@ -1,4 +1,4 @@
-package pt.contactodigital.contacto_digital_mobile
+package com.contactodigital.portal
 
 import io.flutter.embedding.android.FlutterActivity
 
