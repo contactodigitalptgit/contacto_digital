@@ -1611,11 +1611,11 @@ function formatNumber(value: number) {
 
 function hourlyTooltipStyle(point: SummaryHourlyPoint) {
     const left = (point.x / 760) * 100;
-    const top = (Math.max(20, Math.min(point.sales_y, point.transaction_y) - 8) / 250) * 100;
+    const top = Math.min(74, Math.max(8, ((Math.min(point.sales_y, point.transaction_y) + 18) / 250) * 100));
 
     return {
         left: `${left}%`,
-        top: `${top}%`,
+        top: `calc(1.7rem + ${top}%)`,
     };
 }
 
