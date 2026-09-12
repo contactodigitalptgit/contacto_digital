@@ -389,6 +389,8 @@ const highlightSearch = ref('');
 const highlightViewMode = ref<ViewMode>('list');
 const selectedHourlyDate = ref('all');
 const hourlyPanelExpanded = ref(true);
+const hourlyHoverPoint = ref<SummaryHourlyPoint | null>(null);
+const activePayment = ref<ChartPaymentItem | null>(null);
 const zonePanelExpanded = ref(true);
 const detailModal = ref<DetailModal>(null);
 const filtersOpen = ref(false);
@@ -1607,6 +1609,16 @@ function formatNumber(value: number) {
     }).format(value);
 }
 
+function hourlyTooltipStyle(point: SummaryHourlyPoint) {
+    const left = (point.x / 760) * 100;
+    const top = (Math.max(20, Math.min(point.sales_y, point.transaction_y) - 8) / 250) * 100;
+
+    return {
+        left: `${left}%`,
+        top: `${top}%`,
+    };
+}
+
 function formatMetric(value: number, format: ComparisonMetric['format']) {
     return format === 'number' ? formatNumber(value) : formatMoney(value);
 }
@@ -2137,7 +2149,7 @@ function getDifferenceClass(value: number | null) {
 
                                 <button type="button" class="contacto-summary-card" @click="openDetailModal('ticket')">
                                     <span class="contacto-summary-icon" aria-hidden="true">
-                                        <svg viewBox="0 0 24 24" fill="none"><path d="M3 4h2l2.3 10.2a2 2 0 0 0 2 1.6h7.9a2 2 0 0 0 1.9-1.4L21 7H7" /><circle cx="10" cy="20" r="1.4" /><circle cx="18" cy="20" r="1.4" /></svg>
+                                        <svg viewBox="0 0 24 24" fill="none"><path d="M6 3h12v18l-2.3-1.6L13.5 21 12 19.4 10.5 21l-2.2-1.6L6 21V3Z" /><path d="M9 8h6M9 12h6M9 16h3" /></svg>
                                     </span>
                                     <span class="contacto-summary-label">{{ metricLabel('average_ticket', 'Ticket médio') }}</span>
                                     <strong>{{ formatMoney(props.summary.average_ticket) }}</strong>
@@ -2232,6 +2244,7 @@ function getDifferenceClass(value: number | null) {
                                     class="contacto-hourly-chart"
                                     role="img"
                                     :aria-label="hourlyChartAriaLabel"
+                                    @mouseleave="hourlyHoverPoint = null"
                                 >
                                     <div class="contacto-hourly-legend" aria-hidden="true">
                                         <span class="is-sales">Faturação (€)</span>
@@ -2275,9 +2288,11 @@ function getDifferenceClass(value: number | null) {
                                                 :width="point.bar_width"
                                                 :height="Math.max(point.sales_height, 1)"
                                                 rx="2"
-                                            >
-                                                <title>{{ point.hour_label }} · {{ formatMoney(point.sales_total) }} · {{ formatNumber(point.tickets_count) }} transações</title>
-                                            </rect>
+                                                tabindex="0"
+                                                @mouseenter="hourlyHoverPoint = point"
+                                                @focus="hourlyHoverPoint = point"
+                                                @blur="hourlyHoverPoint = null"
+                                            />
                                         </g>
                                         <path :d="summaryHourlyTransactionPath" class="contacto-hourly-transaction-line" />
                                         <g class="contacto-hourly-transaction-points">
@@ -2287,9 +2302,11 @@ function getDifferenceClass(value: number | null) {
                                                 :cx="point.x"
                                                 :cy="point.transaction_y"
                                                 r="3"
-                                            >
-                                                <title>{{ point.hour_label }} · {{ formatNumber(point.tickets_count) }} transações</title>
-                                            </circle>
+                                                tabindex="0"
+                                                @mouseenter="hourlyHoverPoint = point"
+                                                @focus="hourlyHoverPoint = point"
+                                                @blur="hourlyHoverPoint = null"
+                                            />
                                         </g>
                                         <g class="contacto-hourly-x-axis">
                                             <text
@@ -2301,6 +2318,22 @@ function getDifferenceClass(value: number | null) {
                                             >{{ point.hour_label }}</text>
                                         </g>
                                     </svg>
+                                    <div
+                                        v-if="hourlyHoverPoint"
+                                        class="contacto-hourly-tooltip"
+                                        :style="hourlyTooltipStyle(hourlyHoverPoint)"
+                                        aria-live="polite"
+                                    >
+                                        <strong>{{ hourlyHoverPoint.hour_label }}</strong>
+                                        <span>
+                                            <small>Faturação</small>
+                                            <b>{{ formatMoney(hourlyHoverPoint.sales_total) }}</b>
+                                        </span>
+                                        <span>
+                                            <small>Transações</small>
+                                            <b>{{ formatNumber(hourlyHoverPoint.tickets_count) }}</b>
+                                        </span>
+                                    </div>
                                 </div>
                                 <p v-else-if="!props.hourlySales.length" class="contacto-empty">Sem dados horários disponíveis.</p>
                             </article>
@@ -2331,6 +2364,7 @@ function getDifferenceClass(value: number | null) {
                                     class="contacto-zone-ranking-row"
                                     :class="{ 'is-active': zoneIsSelected(getZoneFilterValue(zone.label)) }"
                                     :aria-pressed="zoneIsSelected(getZoneFilterValue(zone.label))"
+                                    :data-insight="`${formatNumber(zone.devicesCount)} dispositivos · ${formatMoney(zone.averageSales)} por dispositivo`"
                                     @click="applyBarGroupFilter(getZoneFilterValue(zone.label))"
                                 >
                                     <span class="contacto-zone-ranking-name"><em>{{ index + 1 }}</em><i />{{ zone.label }}</span>
@@ -2352,7 +2386,12 @@ function getDifferenceClass(value: number | null) {
                                     <div class="contacto-top-products-head" aria-hidden="true">
                                         <span>Produto</span><span>Quantidade</span><span>Faturação</span><span>% total</span>
                                     </div>
-                                    <article v-for="(product, index) in summaryTopProducts" :key="`summary-product-${product.code || product.label}`">
+                                    <article
+                                        v-for="(product, index) in summaryTopProducts"
+                                        :key="`summary-product-${product.code || product.label}`"
+                                        :data-insight="`Valor médio: ${formatMoney(product.quantity_total > 0 ? product.sales_total / product.quantity_total : 0)} por unidade`"
+                                        tabindex="0"
+                                    >
                                         <span class="contacto-top-product-name"><em>{{ index + 1 }}</em><strong>{{ product.label }}</strong><small>{{ product.code }}</small></span>
                                         <span data-label="Quantidade">{{ formatNumber(product.quantity_total) }}</span>
                                         <strong data-label="Faturação">{{ formatMoney(product.sales_total) }}</strong>
@@ -2371,17 +2410,27 @@ function getDifferenceClass(value: number | null) {
                                     <button
                                         type="button"
                                         class="contacto-payment-donut"
-                                        :style="chartPaymentDonutStyle"
+                                        :class="{ 'has-active-payment': activePayment }"
+                                        :style="{ ...chartPaymentDonutStyle, '--payment-highlight': activePayment?.color ?? 'var(--accent)' }"
                                         :aria-label="chartPaymentAriaLabel"
                                         @click="openDetailModal('payments')"
+                                        @mouseleave="activePayment = null"
                                     >
                                         <span>
-                                            <small>Total</small>
-                                            <strong>{{ formatMoney(chartPaymentTotal) }}</strong>
+                                            <small>{{ activePayment ? activePayment.label : 'Total' }}</small>
+                                            <strong>{{ formatMoney(activePayment?.value ?? chartPaymentTotal) }}</strong>
                                         </span>
                                     </button>
                                     <div class="contacto-payment-legend">
-                                        <article v-for="payment in chartPaymentItems" :key="`summary-payment-${payment.key}`">
+                                        <article
+                                            v-for="payment in chartPaymentItems"
+                                            :key="`summary-payment-${payment.key}`"
+                                            :class="{ 'is-active': activePayment?.key === payment.key }"
+                                            tabindex="0"
+                                            @mouseenter="activePayment = payment"
+                                            @focus="activePayment = payment"
+                                            @blur="activePayment = null"
+                                        >
                                             <i :style="{ backgroundColor: payment.color }" />
                                             <span><strong>{{ payment.label }}</strong><small>{{ formatMoney(payment.value) }}</small></span>
                                             <b>{{ payment.percentage.toFixed(1).replace('.', ',') }}%</b>
