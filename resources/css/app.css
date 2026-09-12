@@ -1676,30 +1676,11 @@ body {
 }
 
 .contacto-sync-overview {
-    display: grid;
-    grid-template-columns: minmax(0, 1.45fr) minmax(22rem, 1fr);
-    gap: 1rem;
     margin-bottom: 1rem;
-}
-
-.contacto-sync-overview:not(.has-sync-status) .contacto-stream-bar {
-    grid-column: 1 / -1;
-}
-
-.contacto-sync-overview .report-dashboard-sync-status {
-    min-width: 0;
-    margin-bottom: 0;
 }
 
 .contacto-sync-overview .contacto-stream-bar {
     min-width: 0;
-    flex-direction: column;
-    align-items: stretch;
-    justify-content: center;
-}
-
-.contacto-sync-overview .contacto-stream-meta {
-    justify-content: space-between;
 }
 
 .contacto-stream-bar > div:first-child,
@@ -1723,7 +1704,11 @@ body {
 }
 
 .contacto-stream-bar > div:first-child > span.is-failed {
-    background: #d64545;
+    background: #f59e0b;
+}
+
+.contacto-stream-bar.is-failed {
+    border-color: rgba(245, 158, 11, 0.45);
 }
 
 .contacto-stream-meta {
@@ -3000,10 +2985,6 @@ body {
 }
 
 @media (max-width: 1023px) {
-    .contacto-sync-overview {
-        grid-template-columns: 1fr;
-    }
-
     .app-sidebar {
         width: auto;
         min-width: 0;

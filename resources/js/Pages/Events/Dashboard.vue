@@ -2037,29 +2037,19 @@ function getDifferenceClass(value: number | null) {
                     >
                         <section
                             class="contacto-sync-overview"
-                            :class="{ 'has-sync-status': hasProcessingSync || props.syncStatus.is_stale }"
                         >
                             <section
-                                v-if="hasProcessingSync || props.syncStatus.is_stale"
-                                class="report-dashboard-sync-status"
+                                class="contacto-stream-bar"
                                 :class="{ 'is-processing': hasProcessingSync, 'is-failed': props.syncStatus.is_stale }"
                                 role="status"
                             >
-                                <span class="report-dashboard-sync-status-indicator" aria-hidden="true" />
-                                <div>
-                                    <strong>{{ hasProcessingSync ? 'Atualização dos dados em curso' : 'Atenção à última sincronização' }}</strong>
-                                    <p>{{ props.syncStatus.message }}</p>
-                                    <small>{{ syncProgressLabel }}</small>
-                                </div>
-                            </section>
-
-                            <section class="contacto-stream-bar">
                                 <div>
                                     <span :class="{ 'is-processing': hasProcessingSync, 'is-failed': props.syncStatus.is_stale }" />
-                                    <strong>{{ hasProcessingSync ? 'Sincronização em curso' : 'Dados atualizados' }}</strong>
-                                    <small>Última atualização: {{ formatDateTime(props.summary.last_synced_at) }}</small>
+                                    <strong>{{ hasProcessingSync ? 'Atualização dos dados em curso' : props.syncStatus.is_stale ? 'Atenção à última sincronização' : 'Dados atualizados' }}</strong>
+                                    <small>{{ (hasProcessingSync || props.syncStatus.is_stale) ? props.syncStatus.message : `Última atualização: ${formatDateTime(props.summary.last_synced_at)}` }}</small>
                                 </div>
                                 <div class="contacto-stream-meta">
+                                    <small v-if="hasProcessingSync || props.syncStatus.is_stale">{{ syncProgressLabel }}</small>
                                     <em v-if="props.autoSync.enabled">Próxima: {{ autoSyncCountdown }}</em>
                                     <button
                                         v-if="props.previewMode"
