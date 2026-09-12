@@ -2138,67 +2138,77 @@ function getDifferenceClass(value: number | null) {
                             </div>
                         </section>
 
-                        <section class="contacto-kpi-mesh">
-                            <button
-                                v-if="isBlockVisible('overview')"
-                                type="button"
-                                class="contacto-kpi contacto-kpi-hero"
-                                @click="openDetailModal('payments')"
-                            >
-                                <span>{{ blockLabel('overview', showZtCard ? 'Total sem ZT' : 'Faturação do evento') }}</span>
-                                <strong>{{ formatMoney(props.paymentSummary.total_without_zt) }}</strong>
-                                <small>Total do evento · dados reais sincronizados</small>
-                            </button>
+                        <section class="contacto-metric-group">
+                            <header class="contacto-metric-group-label">
+                                <span>Resumo financeiro</span>
+                                <small>Leitura rápida do evento</small>
+                            </header>
+                            <div class="contacto-metric-grid contacto-metric-grid-financial">
+                                <button
+                                    v-if="isBlockVisible('overview')"
+                                    type="button"
+                                    class="contacto-metric-card is-hero"
+                                    @click="openDetailModal('payments')"
+                                >
+                                    <span class="contacto-metric-label">{{ blockLabel('overview', showZtCard ? 'Total sem ZT' : 'Faturação do evento') }}</span>
+                                    <strong class="contacto-metric-value">{{ formatMoney(props.paymentSummary.total_without_zt) }}</strong>
+                                    <span class="contacto-metric-helper">Total do evento · dados reais sincronizados</span>
+                                </button>
 
-                            <button type="button" class="contacto-kpi contacto-kpi-ticket" @click="openDetailModal('ticket')">
-                                <span>{{ metricLabel('average_ticket', 'Ticket médio') }}</span>
-                                <strong>{{ formatMoney(props.summary.average_ticket) }}</strong>
-                                <i><b :style="{ width: `${Math.min(100, Math.max(8, props.summary.average_ticket * 4))}%` }" /></i>
-                                <small>Por transação</small>
-                            </button>
+                                <button type="button" class="contacto-metric-card" @click="openDetailModal('ticket')">
+                                    <span class="contacto-metric-label">{{ metricLabel('average_ticket', 'Ticket médio') }}</span>
+                                    <strong class="contacto-metric-value">{{ formatMoney(props.summary.average_ticket) }}</strong>
+                                    <i class="contacto-metric-bar"><b :style="{ width: `${Math.min(100, Math.max(8, props.summary.average_ticket * 4))}%` }" /></i>
+                                    <span class="contacto-metric-helper">Por transação</span>
+                                </button>
 
-                            <article class="contacto-kpi contacto-kpi-transactions">
-                                <span>Transações</span>
-                                <strong>{{ formatNumber(props.summary.tickets_count) }}</strong>
-                                <small>{{ formatNumber(props.summary.total_quantity) }} unidades registadas</small>
-                            </article>
+                                <article class="contacto-metric-card">
+                                    <span class="contacto-metric-label">Transações</span>
+                                    <strong class="contacto-metric-value">{{ formatNumber(props.summary.tickets_count) }}</strong>
+                                    <span class="contacto-metric-helper">{{ formatNumber(props.summary.total_quantity) }} unidades registadas</span>
+                                </article>
 
-                            <article class="contacto-leader-banner">
-                                <div>
-                                    <span class="contacto-leader-mark" />
-                                    <p>
-                                        <small>Zona líder</small>
+                                <article class="contacto-metric-card is-leader">
+                                    <div class="contacto-leader-heading">
+                                        <span class="contacto-metric-label">Zona líder</span>
                                         <strong>{{ leadingZone?.label || 'Sem dados' }}</strong>
-                                    </p>
-                                </div>
-                                <p>
-                                    <strong>{{ leadingZoneShare.toFixed(1).replace('.', ',') }}%</strong>
-                                    <small>{{ leadingZone ? formatMoney(leadingZone.sales_total) : formatMoney(0) }} do total</small>
-                                </p>
-                            </article>
+                                    </div>
+                                    <div class="contacto-leader-result">
+                                        <strong>{{ leadingZoneShare.toFixed(1).replace('.', ',') }}%</strong>
+                                        <small>{{ leadingZone ? formatMoney(leadingZone.sales_total) : formatMoney(0) }} do total</small>
+                                    </div>
+                                    <i class="contacto-metric-bar"><b :style="{ width: `${leadingZoneShare}%` }" /></i>
+                                </article>
+                            </div>
                         </section>
 
-                        <section class="contacto-mini-stats">
-                            <article>
-                                <span>Total servido</span>
-                                <strong>{{ formatNumber(props.summary.total_quantity) }} <small>un</small></strong>
-                                <p>{{ formatNumber(props.summary.products_count) }} referências vendidas</p>
-                            </article>
-                            <article>
-                                <span>Pico horário</span>
-                                <strong>{{ primaryHourlyPeak?.hour_label || '—' }}</strong>
-                                <p>{{ primaryHourlyPeak ? formatMoney(primaryHourlyPeak.sales_total) : 'Sem dados horários' }}</p>
-                            </article>
-                            <article>
-                                <span>Média por hora</span>
-                                <strong>{{ formatMoney(averageSalesPerHour) }}</strong>
-                                <p>{{ formatNumber(activeOperatingHours) }} horas com vendas</p>
-                            </article>
-                            <article class="is-lime">
-                                <span>{{ metricLabel('devices', 'Máquinas sincronizadas') }}</span>
-                                <strong>{{ formatNumber(props.summary.machines_count) }}</strong>
-                                <p>{{ formatNumber(props.summary.bar_groups_count) }} zonas operacionais</p>
-                            </article>
+                        <section class="contacto-metric-group">
+                            <header class="contacto-metric-group-label">
+                                <span>Operação do evento</span>
+                                <small>Volume, ritmo e cobertura</small>
+                            </header>
+                            <div class="contacto-metric-grid contacto-metric-grid-operational">
+                                <article class="contacto-metric-card">
+                                    <span class="contacto-metric-label">Total servido</span>
+                                    <strong class="contacto-metric-value">{{ formatNumber(props.summary.total_quantity) }} <small>un</small></strong>
+                                    <span class="contacto-metric-helper">{{ formatNumber(props.summary.products_count) }} referências vendidas</span>
+                                </article>
+                                <article class="contacto-metric-card">
+                                    <span class="contacto-metric-label">Pico de faturação</span>
+                                    <strong class="contacto-metric-value">{{ primaryHourlyPeak?.hour_label || '—' }}</strong>
+                                    <span class="contacto-metric-helper">{{ primaryHourlyPeak ? formatMoney(primaryHourlyPeak.sales_total) : 'Sem dados horários' }}</span>
+                                </article>
+                                <article class="contacto-metric-card">
+                                    <span class="contacto-metric-label">Ritmo médio</span>
+                                    <strong class="contacto-metric-value">{{ formatMoney(averageSalesPerHour) }}</strong>
+                                    <span class="contacto-metric-helper">{{ formatNumber(activeOperatingHours) }} horas com vendas</span>
+                                </article>
+                                <article class="contacto-metric-card">
+                                    <span class="contacto-metric-label">{{ metricLabel('devices', 'Máquinas ativas') }}</span>
+                                    <strong class="contacto-metric-value">{{ formatNumber(props.summary.machines_count) }}</strong>
+                                    <span class="contacto-metric-helper">{{ formatNumber(props.summary.bar_groups_count) }} zonas operacionais</span>
+                                </article>
+                            </div>
                         </section>
 
                         <section class="contacto-analysis-grid">

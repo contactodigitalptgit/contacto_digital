@@ -1776,234 +1776,204 @@ body {
     font-style: normal;
 }
 
-.contacto-kpi-mesh {
+.contacto-metric-group + .contacto-metric-group {
+    margin-top: 1.5rem;
+}
+
+.contacto-metric-group-label {
+    display: flex;
+    align-items: baseline;
+    gap: 0.65rem;
+    margin-bottom: 0.85rem;
+}
+
+.contacto-metric-group-label span {
+    color: #8ea3b8;
+    font-size: 0.6875rem;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+}
+
+.contacto-metric-group-label small {
+    color: #667b91;
+    font-size: 0.6875rem;
+}
+
+.contacto-metric-group-label::after {
+    flex: 1;
+    height: 1px;
+    background: rgba(237, 237, 237, 0.1);
+    content: '';
+}
+
+.contacto-metric-grid {
     display: grid;
-    grid-template-columns: minmax(0, 1.45fr) minmax(13rem, 1fr) minmax(13rem, 1fr);
     gap: 1rem;
 }
 
-.contacto-kpi,
-.contacto-leader-banner,
+.contacto-metric-grid-financial {
+    grid-template-columns: minmax(18rem, 1.3fr) repeat(2, minmax(11rem, 1fr));
+    grid-template-rows: repeat(2, minmax(8.25rem, 1fr));
+}
+
+.contacto-metric-grid-operational {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.contacto-metric-card,
 .contacto-panel,
 .contacto-payment-summary {
     border: 1px solid rgba(237, 237, 237, 0.1);
     background: #061f36;
 }
 
-.contacto-kpi {
-    min-height: 9.9rem;
-    border-radius: 1.75rem;
-    padding: 1.65rem;
+.contacto-metric-card {
+    display: flex;
+    min-height: 9.25rem;
+    flex-direction: column;
+    border-radius: 1.25rem;
+    padding: 1.5rem;
     text-align: left;
 }
 
-.contacto-kpi > span,
-.contacto-mini-stats article > span,
+.contacto-metric-label,
 .contacto-payment-summary > header span,
 .contacto-payment-summary button > span {
     display: block;
     color: #8ea3b8;
     font-size: 0.6875rem;
     line-height: 1rem;
-    letter-spacing: 0.14em;
+    letter-spacing: 0.11em;
     text-transform: uppercase;
 }
 
-.contacto-kpi > strong {
-    display: block;
-    margin-top: 0.7rem;
+.contacto-metric-label b {
+    margin-left: 0.35rem;
     color: #ededed;
-    font-size: 2rem;
-    line-height: 1.1;
-    font-weight: 600;
-    letter-spacing: -0.03em;
+    font-weight: 700;
+    letter-spacing: 0;
+    text-transform: none;
 }
 
-.contacto-kpi > small {
+.contacto-metric-value {
     display: block;
-    margin-top: 1rem;
+    margin-top: auto;
+    padding-top: 0.85rem;
+    color: #ededed;
+    font-size: 1.85rem;
+    line-height: 1.1;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+}
+
+.contacto-metric-value small {
+    margin-left: 0.4rem;
+    color: #8ea3b8;
+    font-size: 0.95rem;
+    font-weight: 500;
+}
+
+.contacto-metric-helper {
+    display: block;
+    margin-top: 0.5rem;
     color: #8ea3b8;
     font-size: 0.6875rem;
 }
 
-.contacto-kpi-hero {
-    position: relative;
-    grid-row: span 2;
-    min-height: 12.8rem;
-    overflow: hidden;
-    border-color: rgba(0, 65, 155, 0.72);
-    background: #062442;
-}
-
-.contacto-kpi-hero::after {
-    position: absolute;
-    top: -4.5rem;
-    right: -3.2rem;
-    width: 11rem;
-    height: 11rem;
-    border-radius: 999px;
-    background: rgba(231, 255, 73, 0.07);
-    content: '';
-}
-
-.contacto-kpi-hero > strong {
-    color: #e7ff49;
-    font-size: clamp(2.4rem, 4vw, 3.35rem);
-}
-
-.contacto-kpi-ticket i {
+.contacto-metric-bar {
     display: block;
-    height: 0.25rem;
+    height: 0.22rem;
     overflow: hidden;
-    margin-top: 1.15rem;
+    margin-top: 0.85rem;
     border-radius: 999px;
     background: #14334f;
 }
 
-.contacto-kpi-ticket i b {
+.contacto-metric-bar b {
     display: block;
     height: 100%;
     border-radius: inherit;
-    background: #e7ff49;
+    background: #00419b;
 }
 
-.contacto-kpi-transactions {
-    border-color: rgba(0, 65, 155, 0.75);
-    background: #052a50;
-}
-
-.contacto-kpi-transactions > strong {
-    color: #e7ff49;
-}
-
-.contacto-leader-banner {
-    display: flex;
-    grid-column: 2 / 4;
-    min-height: 6rem;
-    align-items: center;
-    justify-content: space-between;
-    gap: 1rem;
-    border: 0;
-    border-radius: 2.25rem;
-    padding: 1.1rem 1.5rem;
-    color: #03182b;
-    background: #ededed;
-}
-
-.contacto-leader-banner > div {
-    display: flex;
-    min-width: 0;
-    align-items: center;
-    gap: 0.8rem;
-}
-
-.contacto-leader-mark {
-    width: 3rem;
-    height: 3rem;
-    flex: none;
-    border-radius: 0.75rem;
-    background: #03182b;
-}
-
-.contacto-leader-mark::after {
-    display: block;
-    width: 0.65rem;
-    height: 0.65rem;
-    margin: 1.175rem;
-    border-radius: 999px;
-    background: #e7ff49;
-    content: '';
-}
-
-.contacto-leader-banner p {
-    min-width: 0;
-}
-
-.contacto-leader-banner small,
-.contacto-leader-banner strong {
-    display: block;
-}
-
-.contacto-leader-banner small {
-    color: #6c7b88;
-    font-size: 0.625rem;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
-}
-
-.contacto-leader-banner strong {
+.contacto-metric-card.is-hero {
+    grid-row: span 2;
+    position: relative;
+    min-height: 17.5rem;
     overflow: hidden;
-    color: #03182b;
-    font-size: 1rem;
-    font-weight: 700;
-    text-overflow: ellipsis;
-    text-transform: uppercase;
-    white-space: nowrap;
+    border-color: rgba(231, 255, 73, 0.22);
+    background: linear-gradient(155deg, #0a2f52 0%, #061f36 65%);
 }
 
-.contacto-leader-banner > p {
-    flex: none;
+.contacto-metric-card.is-hero .contacto-metric-label {
+    color: rgba(237, 237, 237, 0.65);
+}
+
+.contacto-metric-card.is-hero .contacto-metric-value {
+    color: #e7ff49;
+    font-size: clamp(2.1rem, 3vw, 2.6rem);
+}
+
+.contacto-metric-card.is-hero .contacto-metric-helper {
+    color: rgba(237, 237, 237, 0.55);
+}
+
+.contacto-metric-card.is-leader .contacto-metric-bar b {
+    background: #e7ff49;
+}
+
+.contacto-metric-card.is-leader {
+    display: grid;
+    min-height: 0;
+    grid-column: span 2;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+        'heading result'
+        'bar bar';
+    align-items: end;
+    gap: 0.8rem 1rem;
+    border-color: rgba(47, 111, 208, 0.56);
+    background: linear-gradient(135deg, #082d52 0%, #061f36 70%);
+}
+
+.contacto-leader-heading {
+    grid-area: heading;
+}
+
+.contacto-leader-heading > strong {
+    display: block;
+    margin-top: 0.35rem;
+    color: #ededed;
+    font-size: 1.25rem;
+    font-weight: 650;
+}
+
+.contacto-leader-result {
+    grid-area: result;
     text-align: right;
 }
 
-.contacto-leader-banner > p strong {
-    font-size: 1.5rem;
-}
-
-.contacto-mini-stats {
-    display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 1rem;
-}
-
-.contacto-mini-stats article {
-    position: relative;
-    min-height: 6.8rem;
-    border-left: 2px solid #00419b;
-    border-radius: 0 0.75rem 0.75rem 0;
-    padding: 1.25rem 1.35rem;
-    background: #061f36;
-}
-
-.contacto-mini-stats article:nth-child(odd) {
-    border-left-color: #e7ff49;
-}
-
-.contacto-mini-stats article.is-lime {
-    border: 0;
-    border-radius: 1rem;
-    color: #03182b;
-    background: #e7ff49;
-}
-
-.contacto-mini-stats article.is-lime > span,
-.contacto-mini-stats article.is-lime p {
-    color: rgba(3, 24, 43, 0.74);
-}
-
-.contacto-mini-stats article.is-lime strong {
-    color: #03182b;
-}
-
-.contacto-mini-stats strong {
+.contacto-leader-result > strong {
     display: block;
-    margin-top: 0.5rem;
-    color: #ededed;
-    font-size: 1.45rem;
-    line-height: 1.1;
-    font-weight: 400;
-}
-
-.contacto-mini-stats strong small {
     color: #e7ff49;
-    font-size: 0.65rem;
-    font-weight: 700;
+    font-size: 1.75rem;
+    line-height: 1;
+    font-weight: 650;
+    letter-spacing: -0.03em;
 }
 
-.contacto-mini-stats p {
-    margin-top: 0.45rem;
+.contacto-leader-result > small {
+    display: block;
+    margin-top: 0.35rem;
     color: #8ea3b8;
-    font-size: 0.625rem;
+    font-size: 0.6875rem;
+}
+
+.contacto-metric-card.is-leader .contacto-metric-bar {
+    grid-area: bar;
+    width: 100%;
+    margin-top: 0;
 }
 
 .contacto-analysis-grid {
@@ -2859,8 +2829,8 @@ body {
         display: none;
     }
 
-    .contacto-kpi-mesh {
-        grid-template-columns: minmax(0, 1.2fr) repeat(2, minmax(11rem, 1fr));
+    .contacto-metric-grid-financial {
+        grid-template-columns: minmax(0, 1.15fr) repeat(2, minmax(9rem, 1fr));
     }
 
 }
@@ -2879,20 +2849,18 @@ body {
         margin: 0;
     }
 
-    .contacto-kpi-mesh {
+    .contacto-metric-grid-financial,
+    .contacto-metric-grid-operational {
         grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 
-    .contacto-kpi-hero {
+    .contacto-metric-card.is-hero {
+        grid-column: 1 / -1;
         grid-row: auto;
     }
 
-    .contacto-leader-banner {
+    .contacto-metric-card.is-leader {
         grid-column: 1 / -1;
-    }
-
-    .contacto-mini-stats {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 
     .contacto-analysis-grid {
@@ -3014,8 +2982,8 @@ body {
         display: none;
     }
 
-    .contacto-kpi-mesh,
-    .contacto-mini-stats {
+    .contacto-metric-grid-financial,
+    .contacto-metric-grid-operational {
         grid-template-columns: 1fr;
     }
 
@@ -3078,22 +3046,18 @@ body {
         text-transform: uppercase;
     }
 
-    .contacto-leader-banner {
-        grid-column: auto;
-        border-radius: 1.25rem;
-    }
-
-    .contacto-kpi {
+    .contacto-metric-card {
         min-height: 0;
         border-radius: 1.25rem;
         padding: 1.25rem;
     }
 
-    .contacto-kpi-hero {
+    .contacto-metric-card.is-hero {
+        grid-column: auto;
         min-height: 10rem;
     }
 
-    .contacto-kpi-hero > strong {
+    .contacto-metric-card.is-hero .contacto-metric-value {
         font-size: 2.25rem;
     }
 
