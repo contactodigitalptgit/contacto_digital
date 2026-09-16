@@ -36,9 +36,14 @@ class MobileEventAnalyticsService
         $tickets = $this->applyFilters($this->salesTickets($event->id), $event->id, $filters)->count();
         $totals = (clone $rows)
             ->selectRaw('COALESCE(SUM(total_sum), 0) as total_sales')
+            ->selectRaw('COALESCE(SUM(quantity_total), 0) as total_quantity')
             ->selectRaw("COUNT(DISTINCT CASE WHEN store_name IS NOT NULL AND store_name != '' THEN store_name END) as stores_count")
+            ->selectRaw("COUNT(DISTINCT CASE WHEN product_code IS NOT NULL AND product_code != '' THEN product_code END) as products_count")
             ->first();
         $totalSales = (float) ($totals?->total_sales ?? 0);
+        $products = $this->products($event, $filters);
+        $zones = $this->zones($event, $filters);
+        $zoneSummary = $zones['summary'];
 
         $topStores = (clone $rows)
             ->whereNotNull('store_name')
@@ -66,10 +71,14 @@ class MobileEventAnalyticsService
                 'tickets_count' => $tickets,
                 'average_ticket' => $tickets > 0 ? round($totalSales / $tickets, 4) : 0.0,
                 'machines_count' => (int) ($event->latestActiveReportImport?->summary['machines_count'] ?? 0),
+                'total_quantity' => round((float) ($totals?->total_quantity ?? 0), 4),
+                'products_count' => (int) ($totals?->products_count ?? 0),
+                'zones_count' => $zoneSummary['zones_count'],
+                'leading_zone' => $zoneSummary['leading_zone'],
                 'last_synced_at' => $event->latestActiveReportImport?->imported_at?->toISOString(),
             ],
             'hourly_sales' => $this->hourly($event->id, $filters),
-            'top_products' => $this->products($event, $filters)['items']->take(6)->values(),
+            'top_products' => $products['items']->take(6)->values(),
             'top_stores' => $topStores,
         ];
     }
@@ -146,18 +155,6 @@ class MobileEventAnalyticsService
     public function products(Event $event, array $filters): array
     {
         $query = $this->applyFilters($this->productRows($event), $event->id, $filters, true);
-        $totals = (clone $query)
-            ->selectRaw('COALESCE(SUM(sold_quantity_total), 0) as sold_quantity')
-            ->selectRaw('COALESCE(SUM(offered_quantity_total), 0) as offered_quantity')
-            ->selectRaw('COALESCE(SUM(total_sum), 0) as total_sales')
-            ->first();
-        $productsCount = (clone $query)
-            ->selectRaw("CASE WHEN doc_type = 'ZT' THEN 'ZT-CARD' ELSE product_code END as product_key")
-            ->selectRaw("CASE WHEN doc_type = 'ZT' THEN 'Contactless' ELSE description END as description_key")
-            ->groupByRaw("CASE WHEN doc_type = 'ZT' THEN 'ZT-CARD' ELSE product_code END")
-            ->groupByRaw("CASE WHEN doc_type = 'ZT' THEN 'Contactless' ELSE description END")
-            ->get()
-            ->count();
         $items = (clone $query)
             ->whereNotNull('description')
             ->where('description', '!=', '')
@@ -171,7 +168,7 @@ class MobileEventAnalyticsService
             ->groupByRaw("CASE WHEN doc_type = 'ZT' THEN 'Contactless' ELSE description END")
             ->orderByDesc('served_quantity')
             ->orderByDesc('total_sales')
-            ->limit(100)
+            ->limit(12)
             ->get()
             ->map(fn (object $row): array => [
                 'product_code' => (string) ($row->product_code ?? ''),
@@ -183,9 +180,12 @@ class MobileEventAnalyticsService
             ])
             ->values();
 
-        $sold = (float) ($totals?->sold_quantity ?? 0);
-        $offered = (float) ($totals?->offered_quantity ?? 0);
-        $served = $sold + $offered;
+        // Match the web Products page: its KPI cards summarize the same
+        // 12 references displayed in the ranking, not every event product.
+        $sold = (float) $items->sum('sold_quantity');
+        $offered = (float) $items->sum('offered_quantity');
+        $served = (float) $items->sum('served_quantity');
+        $totalSales = (float) $items->sum('total_sales');
 
         $daily = (clone $query)
             ->whereNotNull('sale_date')
@@ -211,8 +211,8 @@ class MobileEventAnalyticsService
                 'offered_quantity' => round($offered, 4),
                 'served_quantity' => round($served, 4),
                 'offer_share' => $served > 0 ? round(($offered / $served) * 100, 2) : 0.0,
-                'total_sales' => round((float) ($totals?->total_sales ?? 0), 4),
-                'products_count' => $productsCount,
+                'total_sales' => round($totalSales, 4),
+                'products_count' => $items->count(),
             ],
             'items' => $items,
             'daily' => $daily,
@@ -227,6 +227,7 @@ class MobileEventAnalyticsService
     {
         $rows = $this->applyFilters($this->salesRows($event->id), $event->id, $filters);
         $tickets = $this->applyFilters($this->salesTickets($event->id), $event->id, $filters);
+        $products = $this->applyFilters($this->productRows($event), $event->id, $filters, true);
 
         $ticketsByStore = (clone $tickets)
             ->selectRaw('store_name, store_code, COUNT(*) as tickets_count')
@@ -252,9 +253,40 @@ class MobileEventAnalyticsService
                 'total_sales' => round((float) $row->total_sales, 4),
             ]);
 
+        // Keep the zone popup responsive: aggregate its sold products once,
+        // then attach each result to the zone it belongs to.
+        $productsByZone = (clone $products)
+            ->whereNotNull('description')
+            ->where('description', '!=', '')
+            ->selectRaw('store_name')
+            ->selectRaw("CASE WHEN doc_type = 'ZT' THEN 'TOP-UP' ELSE product_code END as product_code")
+            ->selectRaw("CASE WHEN doc_type = 'ZT' THEN 'Top up' ELSE description END as description")
+            ->selectRaw('COALESCE(SUM(sold_quantity_total), 0) as sold_quantity')
+            ->selectRaw('COALESCE(SUM(offered_quantity_total), 0) as offered_quantity')
+            ->selectRaw('COALESCE(SUM(quantity_total), 0) as served_quantity')
+            ->selectRaw('COALESCE(SUM(total_sum), 0) as total_sales')
+            ->groupBy('store_name')
+            ->groupByRaw("CASE WHEN doc_type = 'ZT' THEN 'TOP-UP' ELSE product_code END")
+            ->groupByRaw("CASE WHEN doc_type = 'ZT' THEN 'Top up' ELSE description END")
+            ->get()
+            ->groupBy(fn (object $row): string => $this->zoneLabel($row->store_name))
+            ->map(fn (Collection $items): array => $items
+                ->map(fn (object $row): array => [
+                    'product_code' => (string) ($row->product_code ?? ''),
+                    'description' => (string) $row->description,
+                    'sold_quantity' => round((float) $row->sold_quantity, 4),
+                    'offered_quantity' => round((float) $row->offered_quantity, 4),
+                    'served_quantity' => round((float) $row->served_quantity, 4),
+                    'total_sales' => round((float) $row->total_sales, 4),
+                ])
+                ->sortByDesc('served_quantity')
+                ->sortByDesc('total_sales')
+                ->values()
+                ->all());
+
         $zones = $stores
             ->groupBy(fn (array $store): string => $this->zoneLabel($store['store_name']))
-            ->map(function (Collection $devices, string $label): array {
+            ->map(function (Collection $devices, string $label) use ($productsByZone): array {
                 $sales = (float) $devices->sum('total_sales');
                 $tickets = (int) $devices->sum('tickets_count');
 
@@ -266,6 +298,7 @@ class MobileEventAnalyticsService
                     'total_sales' => round($sales, 4),
                     'average_ticket' => $tickets > 0 ? round($sales / $tickets, 4) : 0.0,
                     'items' => $devices->sortByDesc('total_sales')->values(),
+                    'products' => $productsByZone->get($label, []),
                 ];
             })
             ->sortByDesc('total_sales')
@@ -501,7 +534,7 @@ class MobileEventAnalyticsService
             'payments' => collect([
                 ['key' => 'multibanco', 'label' => 'Multibanco'],
                 ['key' => 'cash', 'label' => 'Dinheiro'],
-                ['key' => 'zticket', 'label' => 'ZT - Card'],
+                ['key' => 'zticket', 'label' => 'Top up'],
                 ['key' => 'other', 'label' => 'Outros'],
             ])->map(fn (array $definition): array => [
                 ...$definition,

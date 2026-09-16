@@ -230,6 +230,44 @@ class EventSummaryTest extends TestCase
             ->assertJsonCount(2, 'top_stores');
     }
 
+    public function test_products_summary_matches_the_twelve_ranked_references_like_the_web_dashboard(): void
+    {
+        [$user, $client] = $this->makeClient();
+        $event = $this->makeEvent($client, 'Evento com muitos produtos');
+
+        foreach (range(1, 13) as $index) {
+            $this->seedAggregateRow(
+                $event->id,
+                'Bar 1 - POS A',
+                'FS',
+                $index * 10,
+                productCode: 'P'.$index,
+                description: 'Produto '.$index,
+                soldQuantity: $index,
+                offeredQuantity: 1,
+            );
+        }
+
+        $response = $this->authenticated($user)
+            ->getJson("/api/events/{$event->id}/products")
+            ->assertOk()
+            ->assertJsonCount(12, 'items')
+            ->assertJsonPath('summary.products_count', 12)
+            ->assertJsonPath('summary.sold_quantity', 90)
+            ->assertJsonPath('summary.offered_quantity', 12)
+            ->assertJsonPath('summary.served_quantity', 102)
+            ->assertJsonPath('summary.total_sales', 900);
+
+        $this->assertSame('P13', $response->json('items.0.product_code'));
+        $this->assertSame('P2', $response->json('items.11.product_code'));
+
+        $this->authenticated($user)
+            ->getJson("/api/events/{$event->id}/dashboard")
+            ->assertOk()
+            ->assertJsonPath('summary.total_quantity', 104)
+            ->assertJsonPath('summary.products_count', 13);
+    }
+
     public function test_mobile_groups_tpa_devices_by_operational_zone_prefix(): void
     {
         [$user, $client] = $this->makeClient();
