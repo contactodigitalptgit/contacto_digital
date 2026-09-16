@@ -27,7 +27,7 @@ class AuthController extends Controller
         // there is no web session to create for a token client.
         if (! Auth::once($credentials)) {
             throw ValidationException::withMessages([
-                'email' => 'Credenciais invalidas.',
+                'email' => 'Credenciais inválidas.',
             ]);
         }
 
@@ -37,7 +37,7 @@ class AuthController extends Controller
 
         if (! $user->isAdmin() && ! $client) {
             throw ValidationException::withMessages([
-                'email' => 'Esta conta nao e uma conta de cliente.',
+                'email' => 'Esta conta não é uma conta de cliente.',
             ]);
         }
 
@@ -64,6 +64,6 @@ class AuthController extends Controller
     {
         $request->user()->currentAccessToken()->delete();
 
-        return response()->json(['message' => 'Sessao terminada.']);
+        return response()->json(['message' => 'Sessão terminada.']);
     }
 }
