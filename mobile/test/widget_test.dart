@@ -133,7 +133,7 @@ void main() {
     final ticketCard = tester.widget<InkWell>(
       find
           .ancestor(
-            of: find.text('TICKET MEDIO'),
+            of: find.text('TICKET MÉDIO'),
             matching: find.byType(InkWell),
           )
           .first,

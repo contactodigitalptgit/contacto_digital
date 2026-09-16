@@ -1,7 +1,7 @@
 name: contacto_digital_mobile
 description: "App do cliente para acompanhar o seu evento em tempo real (Contacto Digital)."
 publish_to: "none"
-version: 1.0.0+6
+version: 1.0.0+7
 
 environment:
   sdk: ^3.5.0

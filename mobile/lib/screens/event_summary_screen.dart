@@ -797,7 +797,7 @@ class _EventSummaryScreenState extends State<EventSummaryScreen> {
         label: _configurationItemLabel(
           'metrics',
           'average_ticket',
-          'TICKET MEDIO',
+          'TICKET MÉDIO',
         ).toUpperCase(),
         value: _currency.format(summary['average_ticket']),
         caption: 'Por transação',
@@ -819,7 +819,7 @@ class _EventSummaryScreenState extends State<EventSummaryScreen> {
         ),
       ),
       _MetricData(
-        label: 'TRANSACOES',
+        label: 'TRANSAÇÕES',
         value: _integer.format(summary['tickets_count']),
         caption: totalQuantity > 0
             ? '${_formatQuantity(totalQuantity)} unidades registadas'
@@ -844,8 +844,8 @@ class _EventSummaryScreenState extends State<EventSummaryScreen> {
         label: 'UNIDADES VENDIDAS',
         value: totalQuantity > 0 ? '${_formatQuantity(totalQuantity)} un' : '—',
         caption: productsCount > 0
-            ? '$productsCount referencias no evento'
-            : 'Dados de produto indisponiveis',
+            ? '$productsCount referências no evento'
+            : 'Dados de produto indisponíveis',
         icon: Icons.inventory_2_outlined,
         accent: AppColors.lime,
         onTap: () => _showMetricDetails(
@@ -883,7 +883,7 @@ class _EventSummaryScreenState extends State<EventSummaryScreen> {
         ),
       ),
       _MetricData(
-        label: 'RITMO MEDIO',
+        label: 'RITMO MÉDIO',
         value: _currency.format(averagePerHour),
         caption: '$activeHours horas com vendas',
         icon: Icons.show_chart_rounded,
@@ -926,7 +926,7 @@ class _EventSummaryScreenState extends State<EventSummaryScreen> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         if (showTotal) ...[
-          _metricGroupLabel('Resumo financeiro', 'Leitura rapida do evento'),
+          _metricGroupLabel('Resumo financeiro', 'Leitura rápida do evento'),
           const SizedBox(height: 12),
           _salesHero(summary),
           const SizedBox(height: 12),
@@ -1162,7 +1162,7 @@ class _EventSummaryScreenState extends State<EventSummaryScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     const Text(
-                      'ZONA LIDER',
+                      'ZONA LÍDER',
                       style: TextStyle(
                         color: AppColors.textMuted,
                         fontSize: 9,
