@@ -999,7 +999,7 @@ const deleteEvent = async (event: EventItem) => {
                             <img src="/images/zicket-logo.png" alt="Zicket" />
                             <div>
                                 <span>Integrações</span>
-                                <strong>Zicket / ZT - Card</strong>
+                                <strong>Zicket / Top up</strong>
                             </div>
                         </div>
 
@@ -1010,8 +1010,8 @@ const deleteEvent = async (event: EventItem) => {
                                 type="checkbox"
                             />
                             <span>
-                                <strong>Mostrar ZT - Card no dashboard</strong>
-                                <small>Use quando o evento tiver carregamentos ou pagamentos ZT.</small>
+                                <strong>Mostrar Top up no dashboard</strong>
+                                <small>Use quando o evento tiver carregamentos ou pagamentos Top up.</small>
                             </span>
                         </label>
                         <p
@@ -1197,7 +1197,7 @@ const deleteEvent = async (event: EventItem) => {
                             <img src="/images/zicket-logo.png" alt="Zicket" />
                             <div>
                                 <span>Integrações</span>
-                                <strong>Zicket / ZT - Card</strong>
+                                <strong>Zicket / Top up</strong>
                             </div>
                         </div>
 
@@ -1208,8 +1208,8 @@ const deleteEvent = async (event: EventItem) => {
                                 type="checkbox"
                             />
                             <span>
-                                <strong>Mostrar ZT - Card no dashboard</strong>
-                                <small>Desligue para eventos sem carregamentos ZT.</small>
+                                <strong>Mostrar Top up no dashboard</strong>
+                                <small>Desligue para eventos sem carregamentos Top up.</small>
                             </span>
                         </label>
                         <p

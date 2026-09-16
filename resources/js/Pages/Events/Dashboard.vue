@@ -1242,7 +1242,7 @@ const detailModalTitle = computed(() => {
     }
 
     if (detailModal.value === 'topup') {
-        return `${props.event.title} — ZT - Card por dia`;
+        return `${props.event.title} — Top up por dia`;
     }
 
     return `${props.event.title} — Detalhe por dia`;
@@ -2143,7 +2143,7 @@ function getDifferenceClass(value: number | null) {
                                     <span class="contacto-summary-icon is-lime" aria-hidden="true">
                                         <svg viewBox="0 0 24 24" fill="none"><ellipse cx="12" cy="6" rx="6" ry="2.5" /><path d="M6 6v4c0 1.4 2.7 2.5 6 2.5s6-1.1 6-2.5V6M6 10v4c0 1.4 2.7 2.5 6 2.5s6-1.1 6-2.5v-4M6 14v4c0 1.4 2.7 2.5 6 2.5s6-1.1 6-2.5v-4" /></svg>
                                     </span>
-                                    <span class="contacto-summary-label">{{ blockLabel('overview', showZtCard ? 'Total sem ZT' : 'Total faturado') }}</span>
+                                    <span class="contacto-summary-label">{{ blockLabel('overview', showZtCard ? 'Total sem Top up' : 'Total faturado') }}</span>
                                     <strong>{{ formatMoney(props.paymentSummary.total_without_zt) }}</strong>
                                 </button>
 
@@ -2501,7 +2501,7 @@ function getDifferenceClass(value: number | null) {
                                 <header>
                                     <div>
                                         <span>{{ blockHelper('chart_financial', 'Leitura financeira') }}</span>
-                                        <h4>{{ blockLabel('chart_financial', 'Vendas e carregamentos ZT') }}</h4>
+                                        <h4>{{ blockLabel('chart_financial', 'Vendas e carregamentos Top up') }}</h4>
                                     </div>
                                 </header>
 
@@ -2510,22 +2510,22 @@ function getDifferenceClass(value: number | null) {
                                         class="report-dashboard-analytics-donut report-dashboard-analytics-financial-donut"
                                         :style="chartFinancialDonutStyle"
                                         role="img"
-                                        :aria-label="`Vendas de consumo: ${formatMoney(props.paymentSummary.total_without_zt)}, carregamentos ZT: ${formatMoney(props.paymentSummary.top_up_loaded)}`"
+                                        :aria-label="`Vendas de consumo: ${formatMoney(props.paymentSummary.total_without_zt)}, carregamentos Top up: ${formatMoney(props.paymentSummary.top_up_loaded)}`"
                                     >
                                         <div>
-                                            <small>{{ metricLabel('total_with_zt', 'Total com ZT') }}</small>
+                                            <small>{{ metricLabel('total_with_zt', 'Total com Top up') }}</small>
                                             <strong>{{ formatMoney(props.paymentSummary.total_with_zt) }}</strong>
                                         </div>
                                     </div>
                                     <div class="report-dashboard-analytics-financial-legend">
                                         <article v-if="metricIsVisible('total_without_zt')">
                                             <i class="is-sales" />
-                                            <span><small>{{ metricLabel('total_without_zt', 'Total sem ZT') }}</small><strong>{{ formatMoney(props.paymentSummary.total_without_zt) }}</strong></span>
+                                            <span><small>{{ metricLabel('total_without_zt', 'Total sem Top up') }}</small><strong>{{ formatMoney(props.paymentSummary.total_without_zt) }}</strong></span>
                                             <em>{{ chartFinancialSalesPercentage.toFixed(1).replace('.', ',') }}%</em>
                                         </article>
                                         <article v-if="metricIsVisible('top_up_value')">
                                             <i class="is-zt" />
-                                            <span><small>{{ metricLabel('top_up_value', 'Valor ZT') }}</small><strong>{{ formatMoney(props.paymentSummary.top_up_loaded) }}</strong></span>
+                                            <span><small>{{ metricLabel('top_up_value', 'Valor Top up') }}</small><strong>{{ formatMoney(props.paymentSummary.top_up_loaded) }}</strong></span>
                                             <em>{{ chartFinancialZtPercentage.toFixed(1).replace('.', ',') }}%</em>
                                         </article>
                                         <article v-if="metricIsVisible('other_movements')" class="is-outside-total">
@@ -2535,7 +2535,7 @@ function getDifferenceClass(value: number | null) {
                                         </article>
                                         <div class="report-dashboard-analytics-financial-zt-flow">
                                             <header>
-                                                <span>Distribuição do valor ZT</span>
+                                                <span>Distribuição do valor Top up</span>
                                                 <small>{{ formatNumber(props.paymentSummary.top_up_documents_count) }} carregamentos</small>
                                             </header>
                                             <div>
@@ -2988,7 +2988,7 @@ function getDifferenceClass(value: number | null) {
                     <div v-else-if="activeSection === 'reconciliation'" class="contacto-menu-page">
                         <section v-if="showZtCard" class="contacto-payment-overview">
                             <article class="contacto-payment-total">
-                                <span>Carregamentos ZT - Card</span>
+                                <span>Carregamentos Top up</span>
                                 <strong>{{ formatMoney(props.paymentSummary.top_up_loaded) }}</strong>
                                 <small>{{ formatNumber(props.paymentSummary.top_up_documents_count) }} carregamentos registados</small>
                             </article>
@@ -3006,10 +3006,10 @@ function getDifferenceClass(value: number | null) {
                                 <article>
                                     <span>Valor gasto</span>
                                     <strong>{{ formatMoney(props.paymentSummary.top_up_spent) }}</strong>
-                                    <small>Consumo ZT - Card</small>
+                                    <small>Consumo Top up</small>
                                 </article>
                                 <article>
-                                    <span>Total com ZT</span>
+                                    <span>Total com Top up</span>
                                     <strong>{{ formatMoney(props.paymentSummary.total_with_zt) }}</strong>
                                     <small>Vendas + carregamentos</small>
                                 </article>
@@ -3037,7 +3037,7 @@ function getDifferenceClass(value: number | null) {
                                 <small>{{ getPaymentShare(props.paymentSummary.multibanco) }}</small>
                             </article>
                             <article v-if="showZtCard && metricIsVisible('zticket')">
-                                <span>{{ metricLabel('zticket', 'ZT - Card') }}</span>
+                                <span>{{ metricLabel('zticket', 'Top up') }}</span>
                                 <strong>{{ formatMoney(props.paymentSummary.zticket) }}</strong>
                                 <small>{{ getPaymentShare(props.paymentSummary.zticket) }}</small>
                             </article>
@@ -3067,7 +3067,7 @@ function getDifferenceClass(value: number | null) {
                                         <tr>
                                             <th>Device</th>
                                             <th v-if="metricIsVisible('multibanco')" class="text-right">{{ metricLabel('multibanco', 'Multibanco') }}</th>
-                                            <th v-if="showZtCard && metricIsVisible('zticket')" class="text-right">{{ metricLabel('zticket', 'ZT - Card') }}</th>
+                                            <th v-if="showZtCard && metricIsVisible('zticket')" class="text-right">{{ metricLabel('zticket', 'Top up') }}</th>
                                             <th v-if="metricIsVisible('cash')" class="text-right">{{ metricLabel('cash', 'Dinheiro') }}</th>
                                             <th v-if="metricIsVisible('other_payments')" class="text-right">Outros</th>
                                             <th class="text-right">Pagamentos</th>
@@ -3299,7 +3299,7 @@ function getDifferenceClass(value: number | null) {
                             <h4>{{ day.label }}</h4>
                             <div class="report-dashboard-detail-grid">
                                 <span v-if="metricIsVisible('multibanco')">{{ metricLabel('multibanco', 'Multibanco') }}</span><strong v-if="metricIsVisible('multibanco')">{{ formatMoney(day.multibanco) }}</strong>
-                                <span v-if="showZtPaymentDetails && metricIsVisible('zticket')">{{ metricLabel('zticket', 'ZT - Card') }}</span><strong v-if="showZtPaymentDetails && metricIsVisible('zticket')">{{ formatMoney(day.zticket) }}</strong>
+                                <span v-if="showZtPaymentDetails && metricIsVisible('zticket')">{{ metricLabel('zticket', 'Top up') }}</span><strong v-if="showZtPaymentDetails && metricIsVisible('zticket')">{{ formatMoney(day.zticket) }}</strong>
                                 <span v-if="metricIsVisible('cash')">{{ metricLabel('cash', 'Dinheiro') }}</span><strong v-if="metricIsVisible('cash')">{{ formatMoney(day.cash) }}</strong>
                                 <span v-if="day.other !== 0 && metricIsVisible('other_payments')">{{ metricLabel('other_payments', 'Outros pagamentos') }}</span><strong v-if="day.other !== 0 && metricIsVisible('other_payments')">{{ formatMoney(day.other) }}</strong>
                             </div>
@@ -3319,7 +3319,7 @@ function getDifferenceClass(value: number | null) {
                                 <span v-if="metricIsVisible('loaded')">{{ metricLabel('loaded', 'Valor carregado') }}</span><strong v-if="metricIsVisible('loaded')">{{ formatMoney(day.top_up_loaded) }}</strong>
                                 <span v-if="metricIsVisible('spent')">{{ metricLabel('spent', 'Valor gasto') }}</span><strong v-if="metricIsVisible('spent')">{{ formatMoney(day.top_up_spent) }}</strong>
                                 <span v-if="metricIsVisible('remaining')">{{ metricLabel('remaining', 'Remanescente') }}</span><strong v-if="metricIsVisible('remaining')">{{ formatMoney(day.top_up_remaining) }}</strong>
-                                <span v-if="metricIsVisible('top_up_count')">{{ metricLabel('top_up_count', 'Carregamentos ZT') }}</span><strong v-if="metricIsVisible('top_up_count')">{{ formatNumber(day.top_up_documents_count) }}</strong>
+                                <span v-if="metricIsVisible('top_up_count')">{{ metricLabel('top_up_count', 'Carregamentos Top up') }}</span><strong v-if="metricIsVisible('top_up_count')">{{ formatNumber(day.top_up_documents_count) }}</strong>
                             </div>
                         </article>
 

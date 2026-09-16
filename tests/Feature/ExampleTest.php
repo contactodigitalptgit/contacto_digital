@@ -24,4 +24,12 @@ class ExampleTest extends TestCase
             ->get('/')
             ->assertRedirect(route('dashboard'));
     }
+
+    public function test_privacy_policy_is_publicly_available(): void
+    {
+        $this->get('/politica-de-privacidade')
+            ->assertOk()
+            ->assertSee('Política de Privacidade')
+            ->assertSee('info@contactodigital.pt');
+    }
 }

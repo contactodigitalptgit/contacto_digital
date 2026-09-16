@@ -83,7 +83,7 @@ extension _EventPortalSections on _EventSummaryScreenState {
     'products': 'Produtos',
     'payments': 'Pagamentos',
     'zones': 'Zonas',
-    'performance': 'Performance',
+    'performance': 'Ranking',
     'comparison': 'Comparar edições',
     'more': 'Mais',
   };
@@ -103,56 +103,330 @@ extension _EventPortalSections on _EventSummaryScreenState {
   Widget _portalNavigation() {
     if (_loading || _event == null) return const SizedBox.shrink();
 
-    final sections = _primarySections;
-    final selected = sections.contains(_activeSection)
-        ? sections.indexOf(_activeSection)
-        : sections.length - 1;
+    final sections =
+        _primarySections.where((section) => section != 'more').toList();
+    final selectedIndex = sections.indexOf(_activeSection);
+    final bottomInset = MediaQuery.paddingOf(context).bottom;
+    final navBottomGap = math.max(10.0, bottomInset - 18);
 
-    return Container(
-      decoration: const BoxDecoration(
-        color: Color(0xF503182B),
-        border: Border(top: BorderSide(color: AppColors.border)),
-      ),
-      child: SafeArea(
-        top: false,
-        child: NavigationBar(
-          height: 72,
-          selectedIndex: selected,
-          backgroundColor: Colors.transparent,
-          indicatorColor: AppColors.lime,
-          labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
-          onDestinationSelected: (index) => _openSection(sections[index]),
-          destinations: sections
-              .map(
-                (section) => NavigationDestination(
-                  icon: Icon(_sectionIcon(section)),
-                  selectedIcon: Icon(
-                    _sectionIcon(section),
-                    color: AppColors.navy,
-                  ),
-                  label: _configuredSectionLabel(section),
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 420),
+      curve: Curves.easeOutBack,
+      height: (_quickMenuOpen ? 342 : 72) + navBottomGap,
+      padding: EdgeInsets.fromLTRB(14, 0, 14, navBottomGap),
+      child: Stack(
+        alignment: Alignment.bottomCenter,
+        children: [
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 74,
+            child: AnimatedSwitcher(
+              duration: const Duration(milliseconds: 280),
+              switchInCurve: Curves.easeOutBack,
+              switchOutCurve: Curves.easeInCubic,
+              transitionBuilder: (child, animation) => FadeTransition(
+                opacity: animation,
+                child: ScaleTransition(
+                  scale: Tween<double>(begin: 0.82, end: 1).animate(animation),
+                  alignment: Alignment.bottomRight,
+                  child: child,
                 ),
-              )
-              .toList(),
+              ),
+              child: _quickMenuOpen
+                  ? _quickActionsPanel(key: const ValueKey('quick-actions'))
+                  : const SizedBox.shrink(
+                      key: ValueKey('quick-actions-hidden')),
+            ),
+          ),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Expanded(
+                child: _liquidTabBar(
+                  sections: sections,
+                  selectedIndex: selectedIndex,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Semantics(
+                button: true,
+                label: _quickMenuOpen ? 'Fechar atalhos' : 'Abrir atalhos',
+                child: Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    key: const ValueKey('quick-menu-button'),
+                    onTap: () {
+                      HapticFeedback.mediumImpact();
+                      setState(() => _quickMenuOpen = !_quickMenuOpen);
+                    },
+                    customBorder: const CircleBorder(),
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 300),
+                      width: 64,
+                      height: 64,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: _quickMenuOpen
+                            ? AppColors.lime
+                            : AppColors.surfaceRaised.withValues(alpha: 0.92),
+                        border: Border.all(
+                          color: _quickMenuOpen
+                              ? AppColors.lime
+                              : Colors.white.withValues(alpha: 0.16),
+                        ),
+                        boxShadow: const [
+                          BoxShadow(
+                            color: Color(0x55000000),
+                            blurRadius: 24,
+                            offset: Offset(0, 10),
+                          ),
+                        ],
+                      ),
+                      child: AnimatedRotation(
+                        turns: _quickMenuOpen ? 0.125 : 0,
+                        duration: const Duration(milliseconds: 300),
+                        curve: Curves.easeOutBack,
+                        child: Icon(
+                          Icons.add_rounded,
+                          size: 30,
+                          color:
+                              _quickMenuOpen ? AppColors.navy : AppColors.white,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _liquidTabBar({
+    required List<String> sections,
+    required int selectedIndex,
+  }) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(34),
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+        child: Container(
+          height: 64,
+          decoration: BoxDecoration(
+            color: const Color(0xDC09253D),
+            borderRadius: BorderRadius.circular(34),
+            border: Border.all(color: Colors.white.withValues(alpha: 0.13)),
+            boxShadow: const [
+              BoxShadow(
+                color: Color(0x55000000),
+                blurRadius: 24,
+                offset: Offset(0, 10),
+              ),
+            ],
+          ),
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final itemWidth = constraints.maxWidth / sections.length;
+              return Stack(
+                children: [
+                  if (selectedIndex >= 0)
+                    AnimatedPositioned(
+                      duration: const Duration(milliseconds: 430),
+                      curve: Curves.easeOutBack,
+                      left: selectedIndex * itemWidth + 4,
+                      top: 4,
+                      width: itemWidth - 8,
+                      height: 56,
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(28),
+                        child: BackdropFilter(
+                          filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+                          child: DecoratedBox(
+                            decoration: BoxDecoration(
+                              gradient: LinearGradient(
+                                begin: Alignment.topLeft,
+                                end: Alignment.bottomRight,
+                                colors: [
+                                  Colors.white.withValues(alpha: 0.2),
+                                  AppColors.blueBright.withValues(alpha: 0.16),
+                                ],
+                              ),
+                              borderRadius: BorderRadius.circular(28),
+                              border: Border.all(
+                                color: Colors.white.withValues(alpha: 0.2),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  Row(
+                    children: sections.indexed.map((entry) {
+                      final index = entry.$1;
+                      final section = entry.$2;
+                      final selected = index == selectedIndex;
+                      return Expanded(
+                        child: InkWell(
+                          borderRadius: BorderRadius.circular(28),
+                          onTap: () {
+                            HapticFeedback.selectionClick();
+                            _openSection(section);
+                          },
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              AnimatedScale(
+                                scale: selected ? 1.08 : 1,
+                                duration: const Duration(milliseconds: 260),
+                                curve: Curves.easeOutBack,
+                                child: Icon(
+                                  _sectionIcon(section),
+                                  size: 22,
+                                  color: selected
+                                      ? AppColors.lime
+                                      : AppColors.textSoft,
+                                ),
+                              ),
+                              const SizedBox(height: 3),
+                              Text(
+                                _configuredSectionLabel(section),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  color: selected
+                                      ? AppColors.white
+                                      : AppColors.textMuted,
+                                  fontSize: 8,
+                                  fontWeight: selected
+                                      ? FontWeight.w700
+                                      : FontWeight.w500,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                ],
+              );
+            },
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _quickActionsPanel({Key? key}) {
+    final actions = _moreActions;
+    return ClipRRect(
+      key: key,
+      borderRadius: BorderRadius.circular(28),
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 22, sigmaY: 22),
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(14, 16, 14, 14),
+          decoration: BoxDecoration(
+            color: const Color(0xEE09253D),
+            borderRadius: BorderRadius.circular(28),
+            border: Border.all(color: Colors.white.withValues(alpha: 0.14)),
+            boxShadow: const [
+              BoxShadow(
+                color: Color(0x66000000),
+                blurRadius: 34,
+                offset: Offset(0, 16),
+              ),
+            ],
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 4),
+                child: Text(
+                  'ATALHOS',
+                  style: TextStyle(
+                    color: AppColors.textMuted,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 1.5,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 10),
+              LayoutBuilder(
+                builder: (context, constraints) {
+                  const gap = 10.0;
+                  final width = (constraints.maxWidth - gap) / 2;
+                  return Wrap(
+                    spacing: gap,
+                    runSpacing: gap,
+                    children: actions.map((action) {
+                      final color = action.destructive
+                          ? Colors.redAccent
+                          : AppColors.lime;
+                      return SizedBox(
+                        width: width,
+                        height: 62,
+                        child: Material(
+                          color:
+                              AppColors.surfaceRaised.withValues(alpha: 0.72),
+                          borderRadius: BorderRadius.circular(18),
+                          child: InkWell(
+                            borderRadius: BorderRadius.circular(18),
+                            onTap: () {
+                              setState(() => _quickMenuOpen = false);
+                              action.onTap();
+                            },
+                            child: Padding(
+                              padding:
+                                  const EdgeInsets.symmetric(horizontal: 12),
+                              child: Row(
+                                children: [
+                                  Icon(action.icon, color: color, size: 21),
+                                  const SizedBox(width: 9),
+                                  Expanded(
+                                    child: Text(
+                                      action.title,
+                                      maxLines: 2,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      );
+                    }).toList(),
+                  );
+                },
+              ),
+            ],
+          ),
         ),
       ),
     );
   }
 
   List<String> get _primarySections {
-    final configured = _configuration?['sections'];
-    if (configured is List) {
-      final sections = configured
-          .whereType<Map>()
-          .where(
-              (item) => item['visible'] != false && item['available'] != false)
-          .map((item) => _apiSectionForConfiguration(item['key']?.toString()))
-          .whereType<String>()
-          .toList();
-      if (sections.isNotEmpty) return [...sections, 'more'];
-    }
-
-    return const ['summary', 'products', 'payments', 'zones', 'more'];
+    // Keep the four daily destinations comfortable on compact phones.
+    // Zone analysis remains one tap away inside the expandable shortcut menu.
+    return [
+      if (_sectionIsVisible('summary')) 'summary',
+      if (_sectionIsVisible('products')) 'products',
+      if (_sectionIsVisible('reconciliation')) 'payments',
+      if (_sectionIsVisible('highlights')) 'performance',
+      'more',
+    ];
   }
 
   String? _apiSectionForConfiguration(String? key) => switch (key) {
@@ -170,6 +444,9 @@ extension _EventPortalSections on _EventSummaryScreenState {
       };
 
   String _configuredSectionLabel(String section) {
+    if (section == 'payments' || section == 'performance') {
+      return _sectionLabels[section]!;
+    }
     if (section == 'more') return _sectionLabels[section]!;
     final sections = _configuration?['sections'];
     if (sections is List) {
@@ -177,7 +454,7 @@ extension _EventPortalSections on _EventSummaryScreenState {
       for (final item in sections.whereType<Map>()) {
         if (item['key'] == key && item['label'] is String) {
           final label = (item['label'] as String).trim();
-          if (label.isNotEmpty) return label;
+          if (label.isNotEmpty) return _clientFacingLabel(label);
         }
       }
     }
@@ -227,7 +504,7 @@ extension _EventPortalSections on _EventSummaryScreenState {
         }
       }
     }
-    return fallback;
+    return _clientFacingLabel(fallback);
   }
 
   IconData _sectionIcon(String section) => switch (section) {
@@ -243,6 +520,7 @@ extension _EventPortalSections on _EventSummaryScreenState {
   Future<void> _openSection(String section) async {
     setState(() {
       _activeSection = section;
+      _quickMenuOpen = false;
       _sectionError = null;
       _sectionSearch = '';
       _sectionSearchController.clear();
@@ -403,14 +681,18 @@ extension _EventPortalSections on _EventSummaryScreenState {
   String _productLabel(String code) {
     final products = _maps(_filterOptions?['products']);
     for (final item in products) {
-      if (item['value'] == code) return (item['label'] as String?) ?? code;
+      if (item['value'] == code) {
+        return _clientFacingLabel(item['label'], fallback: code);
+      }
     }
-    return code;
+    return _clientFacingLabel(code, fallback: code);
   }
 
   String _formatDateRange(DateTime? from, DateTime? to) {
     final fmt = DateFormat('dd/MM', 'pt_PT');
-    if (from != null && to != null) return '${fmt.format(from)} – ${fmt.format(to)}';
+    if (from != null && to != null) {
+      return '${fmt.format(from)} – ${fmt.format(to)}';
+    }
     if (from != null) return 'Desde ${fmt.format(from)}';
     if (to != null) return 'Até ${fmt.format(to)}';
     return 'Período';
@@ -517,8 +799,8 @@ extension _EventPortalSections on _EventSummaryScreenState {
                               style: TextButton.styleFrom(
                                 foregroundColor: AppColors.textMuted,
                                 visualDensity: VisualDensity.compact,
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 8),
+                                padding:
+                                    const EdgeInsets.symmetric(horizontal: 8),
                               ),
                               child: const Text('Limpar tudo',
                                   style: TextStyle(fontSize: 12)),
@@ -618,7 +900,7 @@ extension _EventPortalSections on _EventSummaryScreenState {
                     final value = zone['value'] as String;
                     return FilterChip(
                       selected: zones.contains(value),
-                      label: Text(zone['label'] as String),
+                      label: Text(_clientFacingLabel(zone['label'])),
                       onSelected: (checked) => setModalState(() {
                         checked ? zones.add(value) : zones.remove(value);
                       }),
@@ -636,14 +918,14 @@ extension _EventPortalSections on _EventSummaryScreenState {
                 const SizedBox(height: 20),
                 DropdownButtonFormField<String?>(
                   value: store,
-                  decoration: const InputDecoration(labelText: 'Device / loja'),
+                  decoration: const InputDecoration(labelText: 'Device'),
                   items: [
                     const DropdownMenuItem(value: null, child: Text('Todos')),
                     ...storeOptions.map(
                       (item) => DropdownMenuItem(
                         value: item['value'] as String,
                         child: Text(
-                          item['label'] as String,
+                          _clientFacingLabel(item['label']),
                           overflow: TextOverflow.ellipsis,
                         ),
                       ),
@@ -663,7 +945,7 @@ extension _EventPortalSections on _EventSummaryScreenState {
                         (item) => DropdownMenuItem(
                           value: item['value'] as String,
                           child: Text(
-                            item['label'] as String,
+                            _clientFacingLabel(item['label']),
                             overflow: TextOverflow.ellipsis,
                           ),
                         ),
@@ -822,7 +1104,18 @@ extension _EventPortalSections on _EventSummaryScreenState {
 
   Widget _productsPage(Map<String, dynamic> data) {
     final summary = _map(data['summary']);
-    final items = _filteredItems(_maps(data['items']), ['description']);
+    final items = [
+      ..._filteredItems(
+        _maps(data['items']),
+        ['description', 'product_code'],
+      ),
+    ]..sort((left, right) {
+        final field = _productSortBySales ? 'total_sales' : 'served_quantity';
+        final leftValue = (left[field] as num?)?.toDouble() ?? 0;
+        final rightValue = (right[field] as num?)?.toDouble() ?? 0;
+        return rightValue.compareTo(leftValue);
+      });
+    final eventSalesTotal = (_summary?['total_sales'] as num?)?.toDouble() ?? 0;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -837,21 +1130,43 @@ extension _EventPortalSections on _EventSummaryScreenState {
               Icons.card_giftcard_rounded),
           _PortalMetric('TOTAL SERVIDO', _quantity(summary['served_quantity']),
               'vendido + oferecido', Icons.inventory_2_outlined),
-          _PortalMetric('FATURAÇÃO', _money(summary['total_sales']),
-              '${summary['products_count'] ?? 0} produtos', Icons.euro_rounded,
-              accent: true),
-        ]),
-        const SizedBox(height: 18),
+          _PortalMetric(
+            'PESO DAS OFERTAS',
+            '${_decimal(summary['offer_share'])}%',
+            'do total servido',
+            Icons.percent_rounded,
+            accent: true,
+          ),
+        ], compact: true, interactive: true),
+        const SizedBox(height: 24),
         _searchField('Pesquisar produto'),
         const SizedBox(height: 12),
         _rankedPanel(
           title: 'RANKING DE PRODUTOS',
+          helper: '${items.length} referências apresentadas',
+          action: TextButton.icon(
+            onPressed: () => setState(
+              () => _productSortBySales = !_productSortBySales,
+            ),
+            icon: const Icon(Icons.swap_vert_rounded, size: 17),
+            label: Text(
+              _productSortBySales ? 'Por quantidade' : 'Por faturação',
+            ),
+          ),
           empty: 'Não existem produtos neste filtro.',
           items: items,
-          titleOf: (item) => item['description'] as String? ?? 'Produto',
-          subtitleOf: (item) =>
-              '${_quantity(item['sold_quantity'])} vendidas · ${_quantity(item['offered_quantity'])} oferecidas',
+          titleOf: (item) =>
+              _clientFacingLabel(item['description'], fallback: 'Produto'),
+          subtitleOf: (item) {
+            final reference =
+                _clientFacingLabel(item['product_code'], fallback: '—');
+            return 'Ref. $reference · ${_quantity(item['served_quantity'])} servidos';
+          },
           valueOf: (item) => _money(item['total_sales']),
+          onTap: (item) => _showProductRankingDetails(
+            item,
+            eventSalesTotal: eventSalesTotal,
+          ),
         ),
       ],
     );
@@ -861,6 +1176,22 @@ extension _EventPortalSections on _EventSummaryScreenState {
     final summary = _map(data['summary']);
     final reconciliation = _map(data['reconciliation']);
     final totals = _map(reconciliation['totals']);
+    final topUpLoaded = (summary['top_up_loaded'] as num?)?.toDouble() ?? 0;
+    final topUpSpent = (summary['top_up_spent'] as num?)?.toDouble() ?? 0;
+    final topUpDocuments =
+        (summary['top_up_documents_count'] as num?)?.toInt() ?? 0;
+    final hasTopUp = topUpLoaded.abs() > 0.001 || topUpSpent.abs() > 0.001;
+    final averageTopUp =
+        topUpDocuments > 0 ? topUpLoaded / topUpDocuments : 0.0;
+    final paymentMethodsTotal = [
+      summary['multibanco'],
+      summary['cash'],
+      summary['zticket'],
+      summary['other'],
+    ].fold<double>(
+      0,
+      (total, value) => total + ((value as num?)?.toDouble() ?? 0),
+    );
     final items = _filteredItems(
       _maps(reconciliation['items']),
       ['store_name', 'store_code'],
@@ -874,35 +1205,67 @@ extension _EventPortalSections on _EventSummaryScreenState {
             'Pagamentos ainda indisponíveis',
             'A sincronização deste evento ainda não guardou documentos de pagamento.',
           ),
-        _metricWrap([
-          _PortalMetric('MULTIBANCO', _money(summary['multibanco']),
-              'pagamentos com cartão', Icons.credit_card_rounded,
-              accent: true),
-          _PortalMetric('DINHEIRO', _money(summary['cash']),
-              'pagamentos em numerário', Icons.payments_outlined),
-          _PortalMetric('ZT · CARD', _money(summary['zticket']),
-              'consumo cashless', Icons.nfc_rounded),
-          _PortalMetric('OUTROS', _money(summary['other']), 'outros pagamentos',
-              Icons.more_horiz_rounded),
-        ]),
-        const SizedBox(height: 18),
-        _heroValue(
-          'TOTAL DAS VENDAS',
-          _money(summary['sales_total']),
-          '${summary['documents_count'] ?? 0} documentos de venda',
-        ),
-        if ((summary['top_up_loaded'] as num?)?.toDouble() != 0) ...[
-          const SizedBox(height: 18),
+        if (hasTopUp) ...[
+          _heroValue(
+            'CARREGAMENTOS TOP UP',
+            _money(topUpLoaded),
+            '$topUpDocuments carregamentos registados',
+          ),
+          const SizedBox(height: 24),
           _metricWrap([
-            _PortalMetric('CARREGADO', _money(summary['top_up_loaded']),
-                'carregamentos ZT', Icons.add_card_rounded),
-            _PortalMetric('CONSUMIDO', _money(summary['top_up_spent']),
-                'saldo utilizado', Icons.shopping_cart_checkout_rounded),
-            _PortalMetric('REMANESCENTE', _money(summary['top_up_remaining']),
-                'saldo não utilizado', Icons.savings_outlined,
+            _PortalMetric('CARREGAMENTO MÉDIO', _money(averageTopUp),
+                'por cartão carregado', Icons.add_card_rounded),
+            _PortalMetric(
+                'SALDO POR CONSUMIR',
+                _money(summary['top_up_remaining']),
+                'carregado menos gasto',
+                Icons.savings_outlined,
                 accent: true),
+            _PortalMetric('VALOR GASTO', _money(topUpSpent), 'consumo Top up',
+                Icons.shopping_cart_checkout_rounded),
+            _PortalMetric(
+                'TOTAL COM TOP UP',
+                _money(summary['total_with_zt']),
+                'vendas + carregamentos',
+                Icons.account_balance_wallet_outlined),
           ]),
+        ] else ...[
+          _heroValue(
+            'PAGAMENTOS DAS VENDAS',
+            _money(paymentMethodsTotal),
+            '${summary['documents_count'] ?? 0} documentos',
+          ),
         ],
+        const SizedBox(height: 24),
+        _sectionTitle('Formas de pagamento', 'POR MÉTODO'),
+        const SizedBox(height: 10),
+        _metricWrap([
+          _PortalMetric(
+              'MULTIBANCO',
+              _money(summary['multibanco']),
+              _paymentShare(summary['multibanco'], paymentMethodsTotal),
+              Icons.credit_card_rounded,
+              accent: true),
+          if (hasTopUp)
+            _PortalMetric(
+                'TOP UP',
+                _money(summary['zticket']),
+                _paymentShare(summary['zticket'], paymentMethodsTotal),
+                Icons.nfc_rounded),
+          _PortalMetric(
+              'DINHEIRO',
+              _money(summary['cash']),
+              _paymentShare(summary['cash'], paymentMethodsTotal),
+              Icons.payments_outlined),
+          _PortalMetric(
+              'OUTROS',
+              _money(summary['other']),
+              _paymentShare(summary['other'], paymentMethodsTotal),
+              Icons.more_horiz_rounded),
+          if (!hasTopUp)
+            _PortalMetric('TOTAL FATURADO', _money(totals['sales_total']),
+                'vendas sincronizadas', Icons.euro_rounded),
+        ]),
         const SizedBox(height: 24),
         _sectionTitle(
             'Conciliação por device', _differenceLabel(totals['difference'])),
@@ -913,7 +1276,8 @@ extension _EventPortalSections on _EventSummaryScreenState {
           title: 'PAGAMENTOS × VENDAS',
           empty: 'Não existem devices neste filtro.',
           items: items,
-          titleOf: (item) => item['store_name'] as String? ?? 'Sem device',
+          titleOf: (item) =>
+              _clientFacingLabel(item['store_name'], fallback: 'Sem device'),
           subtitleOf: (item) =>
               'Pagamentos ${_money(item['payments_total'])} · Vendas ${_money(item['sales_total'])}',
           valueOf: (item) => _differenceLabel(item['difference']),
@@ -921,9 +1285,17 @@ extension _EventPortalSections on _EventSummaryScreenState {
               ((item['difference'] as num?)?.abs() ?? 0) < 0.01
                   ? AppColors.success
                   : AppColors.warning,
+          onTap: _showReconciliationDetails,
         ),
       ],
     );
+  }
+
+  String _paymentShare(dynamic value, double total) {
+    if (total <= 0) return '0,0% dos pagamentos';
+    final amount = (value as num?)?.toDouble() ?? 0;
+    final share = (amount / total) * 100;
+    return '${share.toStringAsFixed(1).replaceAll('.', ',')}% dos pagamentos';
   }
 
   Widget _zonesPage(Map<String, dynamic> data) {
@@ -934,22 +1306,21 @@ extension _EventPortalSections on _EventSummaryScreenState {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        _heroValue(
-          'FATURAÇÃO DA SELEÇÃO',
-          _money(summary['total_sales']),
-          '${summary['zones_count'] ?? 0} zonas · ${summary['devices_count'] ?? 0} devices',
-        ),
-        const SizedBox(height: 18),
         _metricWrap([
-          _PortalMetric('ZONA LÍDER', leader['label']?.toString() ?? '—',
-              _money(leader['total_sales']), Icons.emoji_events_outlined,
+          _PortalMetric(
+              'FATURAÇÃO',
+              _money(summary['total_sales']),
+              '${summary['zones_count'] ?? 0} zonas selecionadas',
+              Icons.euro_rounded,
               accent: true),
+          _PortalMetric('ZONA LÍDER', _clientFacingLabel(leader['label']),
+              _money(leader['total_sales']), Icons.emoji_events_outlined),
           _PortalMetric('TRANSAÇÕES', _quantity(summary['tickets_count']),
               'documentos de venda', Icons.receipt_long_outlined),
           _PortalMetric('DEVICES', _quantity(summary['devices_count']),
-              'equipamentos com dados', Icons.point_of_sale_outlined),
-        ]),
-        const SizedBox(height: 22),
+              'pontos com dados', Icons.storefront_outlined),
+        ], compact: true, interactive: true),
+        const SizedBox(height: 24),
         _searchField('Pesquisar zona'),
         const SizedBox(height: 12),
         ...zones.map(_zoneCard),
@@ -958,43 +1329,148 @@ extension _EventPortalSections on _EventSummaryScreenState {
   }
 
   Widget _zoneCard(Map<String, dynamic> zone) {
-    final devices = _maps(zone['items']);
+    final products = _maps(zone['products']);
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
-      decoration: BoxDecoration(
-        color: AppColors.surface.withValues(alpha: 0.92),
+      child: InkWell(
         borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: AppColors.border),
-      ),
-      child: ExpansionTile(
-        shape: const Border(),
-        collapsedShape: const Border(),
-        iconColor: AppColors.lime,
-        collapsedIconColor: AppColors.textMuted,
-        title: Text(
-          zone['label'] as String? ?? 'Zona',
-          style: const TextStyle(fontWeight: FontWeight.w700),
-        ),
-        subtitle: Text(
-          '${_decimal(zone['share'])}% do evento · ${zone['devices_count']} devices',
-          style: const TextStyle(color: AppColors.textMuted),
-        ),
-        trailing: Text(
-          _money(zone['total_sales']),
-          style: const TextStyle(
-              color: AppColors.lime, fontWeight: FontWeight.w700),
-        ),
-        children: devices
-            .map(
-              (device) => ListTile(
-                dense: true,
-                leading: const Icon(Icons.point_of_sale_outlined, size: 18),
-                title: Text(device['store_name'] as String? ?? 'Device'),
-                subtitle: Text('${device['tickets_count']} transações'),
-                trailing: Text(_money(device['total_sales'])),
+        onTap: () => _showZoneProducts(zone, products),
+        child: Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: AppColors.surface.withValues(alpha: 0.92),
+            borderRadius: BorderRadius.circular(22),
+            border: Border.all(color: AppColors.border),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: AppColors.surfaceRaised,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Icon(Icons.layers_outlined, color: AppColors.lime),
               ),
-            )
-            .toList(),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      _clientFacingLabel(zone['label'], fallback: 'Zona'),
+                      style: const TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      '${_decimal(zone['share'])}% do evento · ${zone['devices_count']} devices',
+                      style: const TextStyle(color: AppColors.textMuted),
+                    ),
+                  ],
+                ),
+              ),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Text(
+                    _money(zone['total_sales']),
+                    style: const TextStyle(
+                        color: AppColors.lime, fontWeight: FontWeight.w700),
+                  ),
+                  const SizedBox(height: 4),
+                  const Text('Ver produtos',
+                      style:
+                          TextStyle(color: AppColors.textMuted, fontSize: 11)),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _showZoneProducts(
+    Map<String, dynamic> zone,
+    List<Map<String, dynamic>> products,
+  ) {
+    final zoneName = _clientFacingLabel(zone['label'], fallback: 'Zona');
+    return showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => DraggableScrollableSheet(
+        initialChildSize: 0.7,
+        minChildSize: 0.45,
+        maxChildSize: 0.9,
+        builder: (context, controller) => Container(
+          decoration: const BoxDecoration(
+            color: AppColors.navy,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+          ),
+          child: ListView(
+            controller: controller,
+            padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
+            children: [
+              Center(
+                child: Container(
+                  width: 42,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: AppColors.border,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 20),
+              const Text('PRODUTOS VENDIDOS',
+                  style: TextStyle(
+                    color: AppColors.textMuted,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 11,
+                    letterSpacing: 1.5,
+                  )),
+              const SizedBox(height: 5),
+              Text(zoneName,
+                  style: const TextStyle(
+                      fontSize: 26, fontWeight: FontWeight.w800)),
+              const SizedBox(height: 4),
+              Text(
+                  '${products.length} produtos · ${_money(zone['total_sales'])}',
+                  style: const TextStyle(color: AppColors.textMuted)),
+              const SizedBox(height: 18),
+              if (products.isEmpty)
+                _emptyPanel('Ainda não existem produtos vendidos nesta zona.')
+              else
+                ...products.map(
+                  (product) => ListTile(
+                    contentPadding: const EdgeInsets.symmetric(vertical: 4),
+                    leading: Container(
+                      width: 34,
+                      height: 34,
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(
+                        color: AppColors.surfaceRaised,
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Text(
+                        _quantity(product['sold_quantity']),
+                        style: const TextStyle(
+                            color: AppColors.lime, fontWeight: FontWeight.w800),
+                      ),
+                    ),
+                    title: Text(_clientFacingLabel(product['description'],
+                        fallback: 'Produto')),
+                    subtitle: Text(
+                        '${_quantity(product['served_quantity'])} unidades servidas'),
+                    trailing: Text(_money(product['total_sales']),
+                        style: const TextStyle(fontWeight: FontWeight.w700)),
+                  ),
+                ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -1005,10 +1481,24 @@ extension _EventPortalSections on _EventSummaryScreenState {
     final served = _map(summary['most_served_product']);
     final peak = _map(summary['peak_hour']);
     final leader = _map(summary['leading_zone']);
-    final devices = _filteredItems(
-      _maps(data['devices']),
-      ['store_name', 'zone'],
-    );
+    final zones = _maps(data['zones']);
+    final devices = _maps(data['devices']);
+    final products = _maps(data['products']);
+    final rankingItems = switch (_rankingScope) {
+      'devices' => _filteredItems(devices, ['store_name', 'zone']),
+      'products' => _filteredItems(products, ['description', 'product_code']),
+      _ => _filteredItems(zones, ['label']),
+    };
+    final rankingTitle = switch (_rankingScope) {
+      'devices' => 'RANKING DE DEVICES',
+      'products' => 'RANKING DE PRODUTOS',
+      _ => 'RANKING DE ZONAS',
+    };
+    final rankingEmpty = switch (_rankingScope) {
+      'devices' => 'Não existem devices neste filtro.',
+      'products' => 'Não existem produtos neste filtro.',
+      _ => 'Não existem zonas neste filtro.',
+    };
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1016,35 +1506,122 @@ extension _EventPortalSections on _EventSummaryScreenState {
         _metricWrap([
           _PortalMetric(
               'MELHOR PRODUTO',
-              best['description']?.toString() ?? '—',
+              _clientFacingLabel(best['description']),
               _money(best['total_sales']),
               Icons.workspace_premium_outlined,
               accent: true),
           _PortalMetric(
               'MAIS SERVIDO',
-              served['description']?.toString() ?? '—',
+              _clientFacingLabel(served['description']),
               '${_quantity(served['served_quantity'])} unidades',
               Icons.inventory_2_outlined),
           _PortalMetric('PICO HORÁRIO', peak['hour_label']?.toString() ?? '—',
               _money(peak['total_sales']), Icons.schedule_rounded),
-          _PortalMetric('ZONA LÍDER', leader['label']?.toString() ?? '—',
+          _PortalMetric('ZONA LÍDER', _clientFacingLabel(leader['label']),
               _money(leader['total_sales']), Icons.layers_outlined),
-        ]),
-        const SizedBox(height: 22),
-        _searchField('Pesquisar no ranking de devices'),
+        ], compact: true, interactive: true),
+        const SizedBox(height: 24),
+        _sectionTitle('Destaques', 'RANKING POR'),
+        const SizedBox(height: 12),
+        _rankingScopeSelector(),
+        const SizedBox(height: 12),
+        _searchField(switch (_rankingScope) {
+          'devices' => 'Pesquisar device',
+          'products' => 'Pesquisar produto',
+          _ => 'Pesquisar zona',
+        }),
         const SizedBox(height: 12),
         _rankedPanel(
-          title: 'DESEMPENHO DOS DEVICES',
-          empty: 'Não existem devices neste filtro.',
-          items: devices,
-          titleOf: (item) => item['store_name'] as String? ?? 'Device',
-          subtitleOf: (item) =>
-              '${item['zone']} · ${item['tickets_count']} transações',
+          title: rankingTitle,
+          empty: rankingEmpty,
+          items: rankingItems,
+          titleOf: (item) => _rankingItemTitle(_rankingScope, item),
+          subtitleOf: (item) => _rankingItemSubtitle(_rankingScope, item),
           valueOf: (item) => _money(item['total_sales']),
+          onTap: (item) => _showRankingDetails(_rankingScope, item),
         ),
       ],
     );
   }
+
+  Widget _rankingScopeSelector() {
+    const options = [
+      ('zones', 'Zonas', Icons.layers_outlined),
+      ('devices', 'Devices', Icons.storefront_outlined),
+      ('products', 'Produtos', Icons.inventory_2_outlined),
+    ];
+
+    return Container(
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+        color: AppColors.surface.withValues(alpha: 0.92),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Row(
+        children: options.map((option) {
+          final selected = _rankingScope == option.$1;
+          return Expanded(
+            child: InkWell(
+              borderRadius: BorderRadius.circular(14),
+              onTap: () {
+                HapticFeedback.selectionClick();
+                _sectionSearchController.clear();
+                setState(() {
+                  _rankingScope = option.$1;
+                  _sectionSearch = '';
+                });
+              },
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 220),
+                padding: const EdgeInsets.symmetric(vertical: 7),
+                decoration: BoxDecoration(
+                  color: selected ? AppColors.lime : Colors.transparent,
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(option.$3,
+                        size: 16,
+                        color: selected ? AppColors.navy : AppColors.textMuted),
+                    const SizedBox(height: 2),
+                    Text(option.$2,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: selected ? AppColors.navy : AppColors.textSoft,
+                          fontSize: 10.5,
+                          fontWeight: FontWeight.w700,
+                        )),
+                  ],
+                ),
+              ),
+            ),
+          );
+        }).toList(),
+      ),
+    );
+  }
+
+  String _rankingItemTitle(String scope, Map<String, dynamic> item) =>
+      switch (scope) {
+        'devices' => _clientFacingLabel(item['store_name'], fallback: 'Device'),
+        'products' =>
+          _clientFacingLabel(item['description'], fallback: 'Produto'),
+        _ => _clientFacingLabel(item['label'], fallback: 'Zona'),
+      };
+
+  String _rankingItemSubtitle(String scope, Map<String, dynamic> item) =>
+      switch (scope) {
+        'devices' =>
+          '${_clientFacingLabel(item['zone'], fallback: 'Sem zona')} · ${_quantity(item['tickets_count'])} transações',
+        'products' =>
+          '${_quantity(item['served_quantity'])} servidos · ${_quantity(item['offered_quantity'])} oferecidos',
+        _ =>
+          '${_quantity(item['devices_count'])} devices · ${_quantity(item['tickets_count'])} transações',
+      };
 
   Widget _comparisonPage(Map<String, dynamic> data) {
     if (data['available'] == false) {
@@ -1081,24 +1658,24 @@ extension _EventPortalSections on _EventSummaryScreenState {
             ],
           ),
         ),
-        const SizedBox(height: 18),
+        const SizedBox(height: 24),
         _rankedPanel(
           title: 'INDICADORES OPERACIONAIS',
           empty: 'Sem indicadores.',
           items: metrics,
-          titleOf: (item) => item['label'] as String,
+          titleOf: (item) => _clientFacingLabel(item['label']),
           subtitleOf: (item) =>
               'Anterior: ${_comparisonValue(item, item['previous'])}',
           valueOf: (item) =>
               '${_comparisonValue(item, item['current'])}  ${_variationLabel(item['variation'])}',
           valueColor: (item) => _variationColor(item['variation']),
         ),
-        const SizedBox(height: 18),
+        const SizedBox(height: 24),
         _rankedPanel(
           title: 'FORMAS DE PAGAMENTO',
           empty: 'Sem pagamentos.',
           items: payments,
-          titleOf: (item) => item['label'] as String,
+          titleOf: (item) => _clientFacingLabel(item['label']),
           subtitleOf: (item) => 'Anterior: ${_money(item['previous'])}',
           valueOf: (item) =>
               '${_money(item['current'])}  ${_variationLabel(item['variation'])}',
@@ -1138,7 +1715,7 @@ extension _EventPortalSections on _EventSummaryScreenState {
                 ),
               ),
               Text(
-                event['title'] as String? ?? 'Evento',
+                _clientFacingLabel(event['title'], fallback: 'Evento'),
                 style: const TextStyle(fontWeight: FontWeight.w700),
               ),
             ],
@@ -1155,31 +1732,32 @@ extension _EventPortalSections on _EventSummaryScreenState {
     );
   }
 
-  Widget _morePage() {
-    final items = <_MoreAction>[
-      if (_sectionIsVisible('highlights'))
-        _MoreAction('Performance', 'Produtos, horários, zonas e devices',
-            Icons.query_stats_rounded, () => _openSection('performance')),
-      if (_sectionIsVisible('comparison'))
+  List<_MoreAction> get _moreActions => <_MoreAction>[
+        if (_sectionIsVisible('zones'))
+          _MoreAction(
+            _configuredSectionLabel('zones'),
+            'Ver faturação, devices e produtos por zona',
+            Icons.layers_outlined,
+            () => _openSection('zones'),
+          ),
+        if (_sectionIsVisible('comparison'))
+          _MoreAction(
+              'Comparar edições',
+              'Compare o evento com a edição anterior',
+              Icons.compare_arrows_rounded,
+              () => _openSection('comparison')),
         _MoreAction(
-            'Comparar edições',
-            'Compare o evento com a edição anterior',
-            Icons.compare_arrows_rounded,
-            () => _openSection('comparison')),
-      _MoreAction(
-          'Exportar relatório',
-          'Abrir o dashboard completo para imprimir ou guardar PDF',
-          Icons.download_outlined,
-          _openPortalReport),
-      _MoreAction(
-          'Equipa Contacto Digital',
-          'Falar com o suporte pelo WhatsApp',
-          Icons.support_agent_rounded,
-          _openSupport),
-      _MoreAction('Terminar sessão', 'Sair com segurança deste dispositivo',
-          Icons.logout_rounded, _logout,
-          destructive: true),
-    ];
+            'Equipa Contacto Digital',
+            'Falar com o suporte pelo WhatsApp',
+            Icons.support_agent_rounded,
+            _openSupport),
+        _MoreAction('Terminar sessão', 'Sair com segurança deste dispositivo',
+            Icons.logout_rounded, _logout,
+            destructive: true),
+      ];
+
+  Widget _morePage() {
+    final items = _moreActions;
 
     return Column(
       children: items
@@ -1235,16 +1813,6 @@ extension _EventPortalSections on _EventSummaryScreenState {
     }
   }
 
-  Future<void> _openPortalReport() async {
-    final uri = Uri.parse(
-      'https://portal.contactodigital.pt/events/$_selectedEventId/dashboard',
-    );
-    if (!await launchUrl(uri, mode: LaunchMode.externalApplication) &&
-        mounted) {
-      _showLaunchError('Não foi possível abrir o relatório no navegador.');
-    }
-  }
-
   void _showLaunchError(String message) {
     ScaffoldMessenger.of(context)
         .showSnackBar(SnackBar(content: Text(message)));
@@ -1293,7 +1861,11 @@ extension _EventPortalSections on _EventSummaryScreenState {
     );
   }
 
-  Widget _metricWrap(List<_PortalMetric> metrics) {
+  Widget _metricWrap(
+    List<_PortalMetric> metrics, {
+    bool compact = false,
+    bool interactive = false,
+  }) {
     return LayoutBuilder(
       builder: (context, constraints) {
         final columns = constraints.maxWidth >= 900
@@ -1306,13 +1878,129 @@ extension _EventPortalSections on _EventSummaryScreenState {
           spacing: 10,
           runSpacing: 10,
           children: metrics
-              .map((metric) =>
-                  SizedBox(width: width, child: _PortalMetricCard(metric)))
+              .map((metric) => SizedBox(
+                    width: width,
+                    child: _PortalMetricCard(
+                      metric,
+                      compact: compact,
+                      onTap: interactive
+                          ? () => _showPortalMetricDetails(metric)
+                          : null,
+                    ),
+                  ))
               .toList(),
         );
       },
     );
   }
+
+  Future<void> _showPortalMetricDetails(_PortalMetric metric) =>
+      _showMetricDetails(
+        title: metric.label,
+        value: metric.value,
+        description: metric.caption,
+        icon: metric.icon,
+        accent: metric.accent ? AppColors.lime : AppColors.blueBright,
+        details: [
+          MapEntry('Indicador', metric.label),
+          MapEntry('Valor atual', metric.value),
+        ],
+      );
+
+  Future<void> _showProductRankingDetails(
+    Map<String, dynamic> item, {
+    required double eventSalesTotal,
+  }) =>
+      _showMetricDetails(
+        title: 'Produto',
+        value: _clientFacingLabel(item['description'], fallback: 'Produto'),
+        description: 'Desempenho do produto na seleção atual.',
+        icon: Icons.inventory_2_outlined,
+        accent: AppColors.lime,
+        details: [
+          MapEntry(
+            'Referência',
+            _clientFacingLabel(item['product_code'], fallback: '—'),
+          ),
+          MapEntry('Vendido', '${_quantity(item['sold_quantity'])} un'),
+          MapEntry('Oferecido', '${_quantity(item['offered_quantity'])} un'),
+          MapEntry('Total servido', '${_quantity(item['served_quantity'])} un'),
+          MapEntry('Valor faturado', _money(item['total_sales'])),
+          MapEntry(
+            '% das vendas',
+            eventSalesTotal > 0
+                ? '${_decimal(((item['total_sales'] as num?)?.toDouble() ?? 0) / eventSalesTotal * 100)}%'
+                : '0,0%',
+          ),
+        ],
+      );
+
+  Future<void> _showReconciliationDetails(Map<String, dynamic> item) {
+    final difference = (item['difference'] as num?)?.toDouble() ?? 0;
+    final deviceCode = item['store_code']?.toString().trim() ?? '';
+
+    return _showMetricDetails(
+      title: 'Device',
+      value: _clientFacingLabel(item['store_name'], fallback: 'Sem device'),
+      description: difference.abs() < 0.01
+          ? 'Pagamentos e vendas estão conciliados.'
+          : 'Foi detetada uma diferença entre pagamentos e vendas.',
+      icon: Icons.point_of_sale_outlined,
+      accent: difference.abs() < 0.01 ? AppColors.success : AppColors.warning,
+      details: [
+        if (deviceCode.isNotEmpty) MapEntry('Código', deviceCode),
+        MapEntry('Pagamentos', _money(item['payments_total'])),
+        MapEntry('Vendas', _money(item['sales_total'])),
+        MapEntry('Diferença', _differenceLabel(difference)),
+        MapEntry(
+          'Estado',
+          difference.abs() < 0.01 ? 'Conciliado' : 'Diferença detetada',
+        ),
+      ],
+    );
+  }
+
+  Future<void> _showRankingDetails(
+    String scope,
+    Map<String, dynamic> item,
+  ) =>
+      _showMetricDetails(
+        title: switch (scope) {
+          'devices' => 'Device',
+          'products' => 'Produto',
+          _ => 'Zona',
+        },
+        value: _rankingItemTitle(scope, item),
+        description: 'Detalhes do ranking para a seleção atual.',
+        icon: switch (scope) {
+          'devices' => Icons.storefront_outlined,
+          'products' => Icons.inventory_2_outlined,
+          _ => Icons.layers_outlined,
+        },
+        accent: AppColors.lime,
+        details: switch (scope) {
+          'devices' => [
+              MapEntry('Zona',
+                  _clientFacingLabel(item['zone'], fallback: 'Sem zona')),
+              MapEntry('Transações', _quantity(item['tickets_count'])),
+              MapEntry('Faturação', _money(item['total_sales'])),
+            ],
+          'products' => [
+              MapEntry('Vendido', '${_quantity(item['sold_quantity'])} un'),
+              MapEntry(
+                  'Oferecido', '${_quantity(item['offered_quantity'])} un'),
+              MapEntry(
+                  'Total servido', '${_quantity(item['served_quantity'])} un'),
+              MapEntry('Faturação', _money(item['total_sales'])),
+            ],
+          _ => [
+              MapEntry('Devices', _quantity(item['devices_count'])),
+              MapEntry('Transações', _quantity(item['tickets_count'])),
+              MapEntry('Participação', '${_decimal(item['share'])}%'),
+              MapEntry('Faturação', _money(item['total_sales'])),
+            ],
+        },
+      );
 
   Widget _heroValue(String label, String value, String caption) {
     return Container(
@@ -1374,12 +2062,15 @@ extension _EventPortalSections on _EventSummaryScreenState {
 
   Widget _rankedPanel({
     required String title,
+    String? helper,
+    Widget? action,
     required String empty,
     required List<Map<String, dynamic>> items,
     required String Function(Map<String, dynamic>) titleOf,
     required String Function(Map<String, dynamic>) subtitleOf,
     required String Function(Map<String, dynamic>) valueOf,
     Color Function(Map<String, dynamic>)? valueColor,
+    ValueChanged<Map<String, dynamic>>? onTap,
   }) {
     return Container(
       decoration: BoxDecoration(
@@ -1392,12 +2083,34 @@ extension _EventPortalSections on _EventSummaryScreenState {
         children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(18, 18, 18, 12),
-            child: Text(title,
-                style: const TextStyle(
-                    color: AppColors.textMuted,
-                    fontSize: 10,
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: 1.7)),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(title,
+                          style: const TextStyle(
+                              color: AppColors.textMuted,
+                              fontSize: 10,
+                              fontWeight: FontWeight.w700,
+                              letterSpacing: 1.7)),
+                      if (helper != null) ...[
+                        const SizedBox(height: 3),
+                        Text(
+                          helper,
+                          style: const TextStyle(
+                            color: AppColors.textMuted,
+                            fontSize: 10,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+                if (action != null) action,
+              ],
+            ),
           ),
           if (items.isEmpty)
             Padding(
@@ -1408,58 +2121,77 @@ extension _EventPortalSections on _EventSummaryScreenState {
           else
             ...items.take(50).toList().asMap().entries.map((entry) {
               final item = entry.value;
-              return Container(
-                padding: const EdgeInsets.fromLTRB(16, 13, 16, 13),
-                decoration: BoxDecoration(
-                  border: entry.key == items.take(50).length - 1
+              return Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  onTap: onTap == null
                       ? null
-                      : const Border(top: BorderSide(color: AppColors.border)),
-                ),
-                child: Row(
-                  children: [
-                    Container(
-                      width: 32,
-                      height: 32,
-                      alignment: Alignment.center,
-                      decoration: BoxDecoration(
-                        color: entry.key == 0
-                            ? AppColors.lime
-                            : AppColors.surfaceRaised,
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: Text('${entry.key + 1}',
-                          style: TextStyle(
-                              color: entry.key == 0
-                                  ? AppColors.navy
-                                  : AppColors.textSoft,
-                              fontWeight: FontWeight.w800)),
+                      : () {
+                          HapticFeedback.selectionClick();
+                          onTap(item);
+                        },
+                  child: Container(
+                    padding: const EdgeInsets.fromLTRB(16, 13, 16, 13),
+                    decoration: BoxDecoration(
+                      border: entry.key == items.take(50).length - 1
+                          ? null
+                          : const Border(
+                              top: BorderSide(color: AppColors.border)),
                     ),
-                    const SizedBox(width: 11),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(titleOf(item),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style:
-                                  const TextStyle(fontWeight: FontWeight.w700)),
-                          const SizedBox(height: 2),
-                          Text(subtitleOf(item),
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                  color: AppColors.textMuted, fontSize: 11)),
+                    child: Row(
+                      children: [
+                        Container(
+                          width: 32,
+                          height: 32,
+                          alignment: Alignment.center,
+                          decoration: BoxDecoration(
+                            color: entry.key == 0
+                                ? AppColors.lime
+                                : AppColors.surfaceRaised,
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Text('${entry.key + 1}',
+                              style: TextStyle(
+                                  color: entry.key == 0
+                                      ? AppColors.navy
+                                      : AppColors.textSoft,
+                                  fontWeight: FontWeight.w800)),
+                        ),
+                        const SizedBox(width: 11),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(titleOf(item),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                      fontWeight: FontWeight.w700)),
+                              const SizedBox(height: 2),
+                              Text(subtitleOf(item),
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                      color: AppColors.textMuted,
+                                      fontSize: 11)),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Text(valueOf(item),
+                            textAlign: TextAlign.end,
+                            style: TextStyle(
+                                color:
+                                    valueColor?.call(item) ?? AppColors.white,
+                                fontWeight: FontWeight.w700)),
+                        if (onTap != null) ...[
+                          const SizedBox(width: 5),
+                          const Icon(Icons.chevron_right_rounded,
+                              size: 17, color: AppColors.textMuted),
                         ],
-                      ),
+                      ],
                     ),
-                    const SizedBox(width: 10),
-                    Text(valueOf(item),
-                        textAlign: TextAlign.end,
-                        style: TextStyle(
-                            color: valueColor?.call(item) ?? AppColors.white,
-                            fontWeight: FontWeight.w700)),
-                  ],
+                  ),
                 ),
               );
             }),
@@ -1527,52 +2259,79 @@ class _PortalMetric {
 }
 
 class _PortalMetricCard extends StatelessWidget {
-  const _PortalMetricCard(this.metric);
+  const _PortalMetricCard(
+    this.metric, {
+    this.compact = false,
+    this.onTap,
+  });
   final _PortalMetric metric;
+  final bool compact;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      height: 180,
-      padding: const EdgeInsets.all(17),
-      decoration: BoxDecoration(
-        color: metric.accent ? const Color(0xFF082D59) : AppColors.surface,
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
         borderRadius: BorderRadius.circular(22),
-        border: Border.all(
-            color: metric.accent ? AppColors.blueBright : AppColors.border),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
+        child: Ink(
+          height: compact ? 126 : 180,
+          padding: EdgeInsets.all(compact ? 14 : 17),
+          decoration: BoxDecoration(
+            color: metric.accent ? const Color(0xFF082D59) : AppColors.surface,
+            borderRadius: BorderRadius.circular(22),
+            border: Border.all(
+                color: metric.accent ? AppColors.blueBright : AppColors.border),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Expanded(
-                  child: Text(metric.label,
-                      style: const TextStyle(
-                          color: AppColors.textMuted,
-                          fontSize: 9,
-                          fontWeight: FontWeight.w700,
-                          letterSpacing: 1.3))),
-              Icon(metric.icon,
-                  size: 18,
-                  color: metric.accent ? AppColors.lime : AppColors.textMuted),
+              Row(
+                children: [
+                  Expanded(
+                      child: Text(metric.label,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                              color: AppColors.textMuted,
+                              fontSize: 9,
+                              fontWeight: FontWeight.w700,
+                              letterSpacing: 1.3))),
+                  Icon(metric.icon,
+                      size: 18,
+                      color:
+                          metric.accent ? AppColors.lime : AppColors.textMuted),
+                ],
+              ),
+              const Spacer(),
+              Text(metric.value,
+                  maxLines: compact ? 1 : 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                      color: metric.accent ? AppColors.lime : AppColors.white,
+                      fontSize: compact ? 19 : 23,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: -0.5)),
+              const SizedBox(height: 3),
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(metric.caption,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                            color: AppColors.textMuted, fontSize: 10)),
+                  ),
+                  if (onTap != null) const SizedBox(width: 4),
+                  if (onTap != null)
+                    const Icon(Icons.touch_app_outlined,
+                        size: 14, color: AppColors.textMuted),
+                ],
+              ),
             ],
           ),
-          const Spacer(),
-          Text(metric.value,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                  color: metric.accent ? AppColors.lime : AppColors.white,
-                  fontSize: 23,
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: -0.5)),
-          const SizedBox(height: 4),
-          Text(metric.caption,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(color: AppColors.textMuted, fontSize: 11)),
-        ],
+        ),
       ),
     );
   }

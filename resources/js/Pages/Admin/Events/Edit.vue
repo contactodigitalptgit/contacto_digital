@@ -165,7 +165,7 @@ const submit = () => {
                                         Integrações
                                     </p>
                                     <h3 class="text-sm font-semibold text-gray-900">
-                                        Zicket / ZT - Card
+                                        Zicket / Top up
                                     </h3>
                                 </div>
                             </div>
@@ -177,8 +177,8 @@ const submit = () => {
                                     class="mt-1 rounded border-gray-300 text-blue-600 shadow-sm focus:ring-blue-500"
                                 />
                                 <span>
-                                    <strong class="block text-gray-900">Mostrar ZT - Card no dashboard</strong>
-                                    Desligue para eventos sem carregamentos ZT.
+                                    <strong class="block text-gray-900">Mostrar Top up no dashboard</strong>
+                                    Desligue para eventos sem carregamentos Top up.
                                 </span>
                             </label>
                             <InputError

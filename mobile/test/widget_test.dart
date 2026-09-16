@@ -25,6 +25,7 @@ void main() {
     expect(find.text('Email'), findsOneWidget);
     expect(find.text('Palavra-passe'), findsOneWidget);
     expect(find.text('Entrar no evento'), findsOneWidget);
+    expect(find.text('Política de privacidade'), findsOneWidget);
   });
 
   testWidgets('event dashboard fits a compact phone viewport',
@@ -43,7 +44,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Festival de Verão'), findsOneWidget);
-    expect(find.text('FATURAÇÃO DO EVENTO'), findsOneWidget);
+    expect(find.text('TOTAL'), findsOneWidget);
     await tester.scrollUntilVisible(
       find.text('Vendas por hora'),
       300,
@@ -57,11 +58,11 @@ void main() {
     );
     expect(find.text('Produtos em destaque'), findsOneWidget);
     await tester.scrollUntilVisible(
-      find.text('Desempenho por loja'),
+      find.text('Desempenho por device'),
       300,
       scrollable: find.byType(Scrollable).first,
     );
-    expect(find.text('Desempenho por loja'), findsOneWidget);
+    expect(find.text('Desempenho por device'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
@@ -110,7 +111,52 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Festival de Verão'), findsOneWidget);
-    expect(find.text('FATURAÇÃO DO EVENTO'), findsOneWidget);
+    expect(find.text('TOTAL'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('summary cards and hourly chart expose touch details',
+      (WidgetTester tester) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: AppTheme.dark,
+        home: EventSummaryScreen(apiClient: _FakeApiClient()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final ticketCard = tester.widget<InkWell>(
+      find
+          .ancestor(
+            of: find.text('TICKET MEDIO'),
+            matching: find.byType(InkWell),
+          )
+          .first,
+    );
+    ticketCard.onTap!();
+    await tester.pumpAndSettle();
+    expect(
+        find.text('Valor médio faturado em cada transação.'), findsOneWidget);
+
+    tester.state<NavigatorState>(find.byType(Navigator)).pop();
+    await tester.pumpAndSettle();
+    final hourBar = tester.widget<GestureDetector>(
+      find
+          .ancestor(
+            of: find.text('20:00'),
+            matching: find.byType(GestureDetector),
+          )
+          .first,
+    );
+    hourBar.onTap!();
+    await tester.pumpAndSettle();
+
+    expect(find.text('20:00'), findsNWidgets(2));
     expect(tester.takeException(), isNull);
   });
 
@@ -132,11 +178,32 @@ void main() {
 
     await tester.tap(find.text('Produtos').last);
     await tester.pumpAndSettle();
+    expect(find.text('PESO DAS OFERTAS'), findsOneWidget);
+    expect(find.text('FATURAÇÃO'), findsNothing);
     expect(find.text('RANKING DE PRODUTOS'), findsOneWidget);
+    expect(find.text('2 referências apresentadas'), findsOneWidget);
+    expect(find.text('Por faturação'), findsOneWidget);
+    expect(find.text('Ref. 727 · 432 servidos'), findsOneWidget);
+
+    final productRow = tester.widget<InkWell>(
+      find
+          .ancestor(
+            of: find.text('Cerveja'),
+            matching: find.byType(InkWell),
+          )
+          .first,
+    );
+    productRow.onTap!();
+    await tester.pumpAndSettle();
+    expect(find.text('Referência'), findsOneWidget);
+    expect(find.text('Valor faturado'), findsOneWidget);
+    expect(find.text('% das vendas'), findsOneWidget);
+    tester.state<NavigatorState>(find.byType(Navigator)).pop();
+    await tester.pumpAndSettle();
 
     await tester.tap(find.byTooltip('Ajustar filtros'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Bar 1'));
+    await tester.tap(find.text('Bar 1').last);
     await tester.tap(find.text('Bar 2'));
     await tester.tap(find.text('Aplicar filtros'));
     await tester.pumpAndSettle();
@@ -164,22 +231,34 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('Pagamentos'));
+    await tester.tap(find.text('Pagamentos').last);
     await tester.pumpAndSettle();
     expect(find.text('PAGAMENTOS × VENDAS'), findsOneWidget);
+    await tester.ensureVisible(find.text('Bar 2 - POS A'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Bar 2 - POS A'));
+    await tester.pumpAndSettle();
+    expect(find.text('Pagamentos e vendas estão conciliados.'), findsOneWidget);
+    expect(find.text('Conciliado'), findsOneWidget);
+    tester.state<NavigatorState>(find.byType(Navigator)).pop();
+    await tester.pumpAndSettle();
 
-    await tester.tap(find.text('Zonas').last);
+    await tester.tap(find.byKey(const ValueKey('quick-menu-button')));
     await tester.pumpAndSettle();
-    expect(find.text('FATURAÇÃO DA SELEÇÃO'), findsOneWidget);
+    await tester.tap(find.text('Zonas'));
+    await tester.pumpAndSettle();
+    expect(find.text('DEVICES'), findsOneWidget);
 
-    await tester.tap(find.text('Mais'));
+    await tester.tap(find.text('Ranking'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Performance'));
+    expect(find.text('RANKING DE ZONAS'), findsOneWidget);
+    await tester.tap(find.text('Devices'));
     await tester.pumpAndSettle();
-    expect(find.text('DESEMPENHO DOS DEVICES'), findsOneWidget);
+    expect(find.text('RANKING DE DEVICES'), findsOneWidget);
 
-    await tester.tap(find.text('Mais'));
+    await tester.tap(find.byKey(const ValueKey('quick-menu-button')));
     await tester.pumpAndSettle();
+    expect(find.text('Exportar relatório'), findsNothing);
     await tester.tap(find.text('Comparar edições'));
     await tester.pumpAndSettle();
     expect(find.text('INDICADORES OPERACIONAIS'), findsOneWidget);
@@ -258,6 +337,20 @@ class _FakeApiClient extends ApiClient {
   @override
   Future<Map<String, dynamic>> fetchConfiguration(int eventId) async => {
         'preset': 'complete',
+        'blocks': [
+          {
+            'key': 'overview',
+            'label': 'TOTAL SEM ZT',
+            'visible': true,
+            'available': true,
+          },
+          {
+            'key': 'operations',
+            'label': 'OPERAÇÃO DO EVENTO',
+            'visible': true,
+            'available': true,
+          },
+        ],
         'sections': [
           {'key': 'summary', 'visible': true, 'available': true},
           {'key': 'products', 'visible': true, 'available': true},
@@ -308,6 +401,7 @@ class _FakeApiClient extends ApiClient {
         },
         'items': [
           {
+            'product_code': '727',
             'description': 'Cerveja',
             'sold_quantity': 420,
             'offered_quantity': 12,
@@ -315,6 +409,7 @@ class _FakeApiClient extends ApiClient {
             'total_sales': 27836.31,
           },
           {
+            'product_code': '730',
             'description': 'Água',
             'sold_quantity': 210,
             'offered_quantity': 0,
@@ -323,6 +418,70 @@ class _FakeApiClient extends ApiClient {
           },
         ],
         'daily': [],
+      };
+    }
+
+    if (section == 'payments') {
+      return {
+        'summary': {
+          'available': true,
+          'multibanco': 30000.0,
+          'cash': 8970.0,
+          'zticket': 0.0,
+          'other': 0.0,
+          'documents_count': 4872,
+        },
+        'reconciliation': {
+          'totals': {
+            'payments_total': 38970.0,
+            'sales_total': 38970.0,
+            'difference': 0.0,
+          },
+          'items': [
+            {
+              'store_name': 'Bar 2 - POS A',
+              'store_code': 'POS-A',
+              'payments_total': 20000.0,
+              'sales_total': 20000.0,
+              'difference': 0.0,
+            },
+          ],
+        },
+      };
+    }
+
+    if (section == 'zones') {
+      return {
+        'summary': {
+          'total_sales': 38970.0,
+          'tickets_count': 4872,
+          'devices_count': 2,
+          'zones_count': 1,
+          'leading_zone': {'label': 'Bar 1', 'total_sales': 38970.0},
+        },
+        'items': [
+          {
+            'label': 'Bar 1',
+            'share': 100.0,
+            'devices_count': 2,
+            'total_sales': 38970.0,
+            'products': [
+              {
+                'description': 'Cerveja',
+                'sold_quantity': 420,
+                'served_quantity': 432,
+                'total_sales': 27836.31,
+              },
+            ],
+            'items': [
+              {
+                'store_name': 'Bar 1 - POS A',
+                'tickets_count': 120,
+                'total_sales': 20000.0,
+              },
+            ],
+          },
+        ],
       };
     }
 

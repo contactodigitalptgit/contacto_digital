@@ -24,9 +24,9 @@ class DashboardConfigurationService
         'overview' => ['area' => 'summary', 'label' => 'Total faturado', 'helper' => 'Visão geral', 'requires_zt' => false],
         'movement' => ['area' => 'summary', 'label' => 'Vendas do evento', 'helper' => 'Leitura financeira', 'requires_zt' => false],
         'payments' => ['area' => 'summary', 'label' => 'Pagamentos das vendas', 'helper' => 'Formas de pagamento', 'requires_zt' => false],
-        'top_up' => ['area' => 'summary', 'label' => 'Top-Up ZT - Card', 'helper' => 'Fluxo de cartões', 'requires_zt' => true],
+        'top_up' => ['area' => 'summary', 'label' => 'Top up', 'helper' => 'Fluxo de cartões', 'requires_zt' => true],
         'operations' => ['area' => 'summary', 'label' => 'Indicadores operacionais', 'helper' => 'Operação', 'requires_zt' => false],
-        'chart_financial' => ['area' => 'charts', 'label' => 'Vendas e carregamentos ZT', 'helper' => 'Leitura financeira', 'requires_zt' => true],
+        'chart_financial' => ['area' => 'charts', 'label' => 'Vendas e carregamentos Top up', 'helper' => 'Leitura financeira', 'requires_zt' => true],
         'chart_daily' => ['area' => 'charts', 'label' => 'Evolução diária da faturação', 'helper' => 'Gráfico de linha', 'requires_zt' => false],
         'chart_hourly' => ['area' => 'charts', 'label' => 'Picos de vendas por hora', 'helper' => 'Gráfico de linha', 'requires_zt' => false],
         'chart_payments' => ['area' => 'charts', 'label' => 'Formas de pagamento', 'helper' => 'Gráfico de pizza', 'requires_zt' => false],
@@ -36,16 +36,16 @@ class DashboardConfigurationService
 
     private const METRIC_DEFINITIONS = [
         'total_without_zt' => ['group' => 'movement', 'label' => 'Total faturado', 'helper' => 'Vendas de consumo', 'requires_zt' => false],
-        'top_up_count' => ['group' => 'movement', 'label' => 'Carregamentos ZT', 'helper' => 'Cartões carregados', 'requires_zt' => true],
-        'top_up_value' => ['group' => 'movement', 'label' => 'Valor ZT', 'helper' => 'Total carregado', 'requires_zt' => true],
-        'total_with_zt' => ['group' => 'movement', 'label' => 'Total com ZT', 'helper' => 'Vendas + carregamentos', 'requires_zt' => true],
+        'top_up_count' => ['group' => 'movement', 'label' => 'Carregamentos Top up', 'helper' => 'Cartões carregados', 'requires_zt' => true],
+        'top_up_value' => ['group' => 'movement', 'label' => 'Valor Top up', 'helper' => 'Total carregado', 'requires_zt' => true],
+        'total_with_zt' => ['group' => 'movement', 'label' => 'Total com Top up', 'helper' => 'Vendas + carregamentos', 'requires_zt' => true],
         'other_movements' => ['group' => 'movement', 'label' => 'Outros movimentos', 'helper' => 'Fora das vendas', 'requires_zt' => false],
         'multibanco' => ['group' => 'payments', 'label' => 'Multibanco', 'helper' => '', 'requires_zt' => false],
-        'zticket' => ['group' => 'payments', 'label' => 'ZT - Card', 'helper' => '', 'requires_zt' => true],
+        'zticket' => ['group' => 'payments', 'label' => 'Top up', 'helper' => '', 'requires_zt' => true],
         'cash' => ['group' => 'payments', 'label' => 'Dinheiro', 'helper' => '', 'requires_zt' => false],
         'other_payments' => ['group' => 'payments', 'label' => 'Outros pagamentos', 'helper' => '', 'requires_zt' => false],
-        'loaded' => ['group' => 'top_up', 'label' => 'Valor carregado', 'helper' => 'carregamentos ZT', 'requires_zt' => true],
-        'spent' => ['group' => 'top_up', 'label' => 'Valor gasto', 'helper' => 'Consumo ZT - Card', 'requires_zt' => true],
+        'loaded' => ['group' => 'top_up', 'label' => 'Valor carregado', 'helper' => 'carregamentos Top up', 'requires_zt' => true],
+        'spent' => ['group' => 'top_up', 'label' => 'Valor gasto', 'helper' => 'Consumo Top up', 'requires_zt' => true],
         'remaining' => ['group' => 'top_up', 'label' => 'Remanescente', 'helper' => 'Saldo não utilizado', 'requires_zt' => true],
         'devices' => ['group' => 'operations', 'label' => 'Total devices', 'helper' => 'Máquinas sincronizadas', 'requires_zt' => false],
         'zones' => ['group' => 'operations', 'label' => 'Zonas', 'helper' => 'Grupos operacionais', 'requires_zt' => false],
@@ -85,12 +85,12 @@ class DashboardConfigurationService
             'customized' => false,
             'sections' => $this->defaultItems(self::SECTION_DEFINITIONS, $showZt),
             'blocks' => $this->defaultItems(self::BLOCK_DEFINITIONS, $showZt, [
-                'overview' => ['label' => $showZt ? 'Total sem ZT' : 'Total faturado'],
-                'movement' => ['label' => $showZt ? 'Vendas e carregamentos ZT' : 'Vendas do evento'],
+                'overview' => ['label' => $showZt ? 'Total sem Top up' : 'Total faturado'],
+                'movement' => ['label' => $showZt ? 'Vendas e carregamentos Top up' : 'Vendas do evento'],
             ]),
             'metrics' => $this->defaultItems(self::METRIC_DEFINITIONS, $showZt, [
-                'total_without_zt' => ['label' => $showZt ? 'Total sem ZT' : 'Total faturado'],
-                'other_movements' => ['helper' => $showZt ? 'Fora de vendas e ZT' : 'Fora das vendas'],
+                'total_without_zt' => ['label' => $showZt ? 'Total sem Top up' : 'Total faturado'],
+                'other_movements' => ['helper' => $showZt ? 'Fora de vendas e Top up' : 'Fora das vendas'],
             ]),
         ];
     }
@@ -260,8 +260,8 @@ class DashboardConfigurationService
 
             $key = $item['key'] ?? null;
             $visible = $item['visible'] ?? null;
-            $label = trim((string) ($item['label'] ?? ''));
-            $helper = trim((string) ($item['helper'] ?? ''));
+            $label = $this->clientFacingText(trim((string) ($item['label'] ?? '')));
+            $helper = $this->clientFacingText(trim((string) ($item['helper'] ?? '')));
 
             if (! is_string($key) || ! isset($definitions[$key]) || ! is_bool($visible)) {
                 $this->invalid(sprintf('Um item de %s contém dados inválidos.', $itemLabel));
@@ -284,6 +284,22 @@ class DashboardConfigurationService
                 'available' => ! $requiresZt || $showZt,
             ];
         }, $items);
+    }
+
+    /**
+     * Legacy event configurations may still store the provider name. Keep the
+     * saved setup intact while ensuring every client-facing response uses the
+     * product language selected for the portal.
+     */
+    private function clientFacingText(string $value): string
+    {
+        $value = str_ireplace(
+            ['Top-Up ZT - Card', 'ZT - Card'],
+            ['Top up', 'Top up'],
+            $value,
+        );
+
+        return preg_replace('/\bzt\b/ui', 'Top up', $value) ?? $value;
     }
 
     /**

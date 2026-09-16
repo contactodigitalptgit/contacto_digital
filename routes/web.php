@@ -24,6 +24,9 @@ Route::get('/manifest.webmanifest', function () {
 
 Route::redirect('/manifest.json', '/manifest.webmanifest', 301);
 
+Route::view('/politica-de-privacidade', 'legal.privacy')
+    ->name('privacy-policy');
+
 Route::get('/sw.js', function () {
     $legacyWorkerPath = resource_path('pwa/legacy-sw.js');
 

@@ -1879,7 +1879,7 @@ class EventDashboardController extends Controller
         ];
         $paymentDefinitions = [
             ['key' => 'multibanco', 'label' => 'Multibanco'],
-            ['key' => 'zticket', 'label' => 'ZT - Card'],
+            ['key' => 'zticket', 'label' => 'Top up'],
             ['key' => 'cash', 'label' => 'Dinheiro'],
             ['key' => 'other', 'label' => 'Outros'],
         ];

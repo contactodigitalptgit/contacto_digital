@@ -1,7 +1,7 @@
 name: contacto_digital_mobile
 description: "App do cliente para acompanhar o seu evento em tempo real (Contacto Digital)."
 publish_to: "none"
-version: 0.2.0+3
+version: 1.0.0+6
 
 environment:
   sdk: ^3.5.0
@@ -24,13 +24,15 @@ dev_dependencies:
 flutter_launcher_icons:
   android: true
   ios: true
-  image_path: assets/images/logo-contacto-digital.webp
-  adaptive_icon_background: "#041B2D"
-  adaptive_icon_foreground: assets/images/logo-contacto-digital.webp
+  image_path: assets/images/app_icon.png
+  adaptive_icon_background: "#FFFFFF"
+  adaptive_icon_foreground: assets/images/app_icon_foreground.png
   remove_alpha_ios: true
-  background_color_ios: "#041B2D"
+  background_color_ios: "#FFFFFF"
 
 flutter:
   uses-material-design: true
   assets:
     - assets/images/logo-contacto-digital.webp
+    - assets/images/app_icon.png
+    - assets/images/app_icon_foreground.png

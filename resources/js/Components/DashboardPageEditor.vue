@@ -38,7 +38,7 @@ const chartBlocks = computed(() => draft.value.blocks.filter((block) => block.ar
 const metricGroups: Array<{ key: DashboardMetricGroup; label: string }> = [
     { key: 'movement', label: 'Leitura financeira' },
     { key: 'payments', label: 'Formas de pagamento' },
-    { key: 'top_up', label: 'Fluxo ZT - Card' },
+    { key: 'top_up', label: 'Fluxo Top up' },
     { key: 'operations', label: 'Indicadores operacionais' },
 ];
 
@@ -202,7 +202,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleKeydown));
                         <div class="dashboard-page-editor__item-toolbar">
                             <label class="dashboard-page-editor__visibility">
                                 <input v-model="block.visible" type="checkbox" :disabled="!block.available" />
-                                <span>{{ !block.available ? 'Sem ZT neste evento' : (block.visible ? 'Visível' : 'Oculto') }}</span>
+                                <span>{{ !block.available ? 'Sem Top up neste evento' : (block.visible ? 'Visível' : 'Oculto') }}</span>
                             </label>
                             <div class="dashboard-page-editor__order">
                                 <button
@@ -242,7 +242,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', handleKeydown));
                         <div class="dashboard-page-editor__item-toolbar">
                             <label class="dashboard-page-editor__visibility">
                                 <input v-model="metric.visible" type="checkbox" :disabled="!metric.available" />
-                                <span>{{ !metric.available ? 'Sem ZT neste evento' : (metric.visible ? 'Visível' : 'Oculto') }}</span>
+                                <span>{{ !metric.available ? 'Sem Top up neste evento' : (metric.visible ? 'Visível' : 'Oculto') }}</span>
                             </label>
                             <div class="dashboard-page-editor__order">
                                 <button

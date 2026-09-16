@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../api_client.dart';
 import '../theme/app_theme.dart';
@@ -14,6 +15,9 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginScreenState extends State<LoginScreen> {
+  static final Uri _privacyPolicyUri =
+      Uri.parse('https://portal.contactodigital.pt/politica-de-privacidade');
+
   final _formKey = GlobalKey<FormState>();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
@@ -53,6 +57,20 @@ class _LoginScreenState extends State<LoginScreen> {
       setState(() => _error = e.message);
     } finally {
       if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _openPrivacyPolicy() async {
+    if (!await launchUrl(
+      _privacyPolicyUri,
+      mode: LaunchMode.externalApplication,
+    )) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Não foi possível abrir a política de privacidade.'),
+        ),
+      );
     }
   }
 
@@ -257,6 +275,13 @@ class _LoginScreenState extends State<LoginScreen> {
                                         fontSize: 12),
                                   ),
                                 ],
+                              ),
+                              const SizedBox(height: 6),
+                              Center(
+                                child: TextButton(
+                                  onPressed: _openPrivacyPolicy,
+                                  child: const Text('Política de privacidade'),
+                                ),
                               ),
                             ],
                           ),

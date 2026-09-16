@@ -1,7 +1,9 @@
 import 'dart:async';
 import 'dart:math' as math;
+import 'dart:ui';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -43,6 +45,10 @@ class _EventSummaryScreenState extends State<EventSummaryScreen> {
   bool _sectionLoading = false;
   String? _sectionError;
   String _sectionSearch = '';
+  int? _selectedHourIndex;
+  bool _quickMenuOpen = false;
+  String _rankingScope = 'zones';
+  bool _productSortBySales = false;
 
   int? _selectedEventId;
   int _requestVersion = 0;
@@ -113,9 +119,33 @@ class _EventSummaryScreenState extends State<EventSummaryScreen> {
               )
             : widget.apiClient.fetchDashboard(selectedId),
         _fetchConfigurationSafely(selectedId),
+        _fetchZonesSafely(selectedId),
       ]);
       final dashboard = (responses[0] as Map).cast<String, dynamic>();
       final configuration = responses[1] as Map<String, dynamic>?;
+      final zones = responses[2] as Map<String, dynamic>?;
+      final summary = (dashboard['summary'] as Map).cast<String, dynamic>();
+      final leadingZone = _map(zones?['summary'])['leading_zone'];
+      if (leadingZone is Map && leadingZone.isNotEmpty) {
+        summary['leading_zone'] = leadingZone.cast<String, dynamic>();
+      }
+      // Older API responses do not include the aggregate quantity. The zones
+      // response is already loaded for the leader card and provides it safely.
+      final zoneItems = _mapList(zones?['items']);
+      final zoneQuantity = zoneItems.fold<double>(
+        0,
+        (total, zone) =>
+            total + ((zone['quantity_total'] as num?)?.toDouble() ?? 0),
+      );
+      final summaryQuantity =
+          (summary['total_quantity'] as num?)?.toDouble() ?? 0;
+      if (summaryQuantity <= 0 && zoneQuantity > 0) {
+        summary['total_quantity'] = zoneQuantity;
+      }
+      final summaryZones = (summary['zones_count'] as num?)?.toInt() ?? 0;
+      if (summaryZones <= 0 && zoneItems.isNotEmpty) {
+        summary['zones_count'] = zoneItems.length;
+      }
 
       if (!mounted || requestVersion != _requestVersion) return;
       String? sectionToLoad;
@@ -124,7 +154,7 @@ class _EventSummaryScreenState extends State<EventSummaryScreen> {
         _events = events;
         _selectedEventId = selectedId;
         _event = selectedEvent;
-        _summary = (dashboard['summary'] as Map).cast<String, dynamic>();
+        _summary = summary;
         _topStores = _mapList(dashboard['top_stores']);
         _topProducts = _mapList(dashboard['top_products']);
         _hourlySales = _mapList(dashboard['hourly_sales']);
@@ -169,6 +199,18 @@ class _EventSummaryScreenState extends State<EventSummaryScreen> {
   Future<Map<String, dynamic>?> _fetchConfigurationSafely(int eventId) async {
     try {
       return await widget.apiClient.fetchConfiguration(eventId);
+    } on ApiException {
+      return null;
+    }
+  }
+
+  Future<Map<String, dynamic>?> _fetchZonesSafely(int eventId) async {
+    try {
+      return await widget.apiClient.fetchEventSection(
+        eventId,
+        'zones',
+        filters: _filters.toQuery(),
+      );
     } on ApiException {
       return null;
     }
@@ -257,7 +299,7 @@ class _EventSummaryScreenState extends State<EventSummaryScreen> {
                             isSelected ? AppColors.lime : AppColors.textMuted,
                       ),
                       title: Text(
-                        event['title'] as String? ?? 'Evento',
+                        _clientFacingLabel(event['title'], fallback: 'Evento'),
                         style: const TextStyle(fontWeight: FontWeight.w600),
                       ),
                       subtitle: Text(
@@ -342,7 +384,7 @@ class _EventSummaryScreenState extends State<EventSummaryScreen> {
                     const SizedBox(height: 18),
                     _overview(_summary!, isWide: isWide),
                     if (_sectionIsVisible('charts')) ...[
-                      const SizedBox(height: 28),
+                      const SizedBox(height: 24),
                       _sectionTitle(
                         'Vendas por hora',
                         '${_hourlySales.length} HORAS',
@@ -351,7 +393,7 @@ class _EventSummaryScreenState extends State<EventSummaryScreen> {
                       _hourlyChart(),
                     ],
                     if (_sectionIsVisible('products')) ...[
-                      const SizedBox(height: 28),
+                      const SizedBox(height: 24),
                       _sectionTitle(
                         _configuredSectionHeading(
                           'products',
@@ -363,11 +405,11 @@ class _EventSummaryScreenState extends State<EventSummaryScreen> {
                       _productsPanel(),
                     ],
                     if (_sectionIsVisible('zones')) ...[
-                      const SizedBox(height: 28),
+                      const SizedBox(height: 24),
                       _sectionTitle(
                         _configuredSectionHeading(
                           'zones',
-                          'Desempenho por loja',
+                          'Desempenho por device',
                         ),
                         'TOP 10',
                       ),
@@ -543,7 +585,7 @@ class _EventSummaryScreenState extends State<EventSummaryScreen> {
 
   Widget _eventSelector() {
     final canSwitch = _events.length > 1;
-    final eventTitle = _event?['title'] as String? ?? 'Evento';
+    final eventTitle = _clientFacingLabel(_event?['title'], fallback: 'Evento');
 
     return Semantics(
       container: true,
@@ -594,7 +636,8 @@ class _EventSummaryScreenState extends State<EventSummaryScreen> {
                         ),
                         const SizedBox(height: 5),
                         Text(
-                          _event?['title'] as String? ?? 'Evento',
+                          _clientFacingLabel(_event?['title'],
+                              fallback: 'Evento'),
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
@@ -732,46 +775,225 @@ class _EventSummaryScreenState extends State<EventSummaryScreen> {
     final showOperations = _configurationItemVisible('blocks', 'operations');
     if (!showTotal && !showOperations) return const SizedBox.shrink();
 
-    if (!isWide) {
-      return Column(
-        children: [
-          if (showTotal) _salesHero(summary),
-          if (showTotal && showOperations) const SizedBox(height: 14),
-          if (showOperations)
-            _metricGrid(summary, crossAxisCount: 2, childAspectRatio: 1.18),
-        ],
-      );
-    }
+    final peak = _peakHour();
+    final activeHours = _hourlySales
+        .where((item) => ((item['total_sales'] as num?) ?? 0) > 0)
+        .length;
+    final totalSales = (summary['total_sales'] as num?)?.toDouble() ?? 0;
+    // The mobile release can run against a server that has not yet returned
+    // the expanded summary fields. Keep the dashboard usable during rollout.
+    final totalQuantity = (summary['total_quantity'] as num?)?.toDouble() ?? 0;
+    final productsCount = (summary['products_count'] as num?)?.toInt() ?? 0;
+    final zonesCount = (summary['zones_count'] as num?)?.toInt() ?? 0;
+    final averagePerHour = activeHours > 0 ? totalSales / activeHours : 0.0;
+    final leadingZone = _map(summary['leading_zone']);
+    final leadingZoneSales =
+        (leadingZone['total_sales'] as num?)?.toDouble() ?? 0;
+    final leaderShare = totalSales > 0 ? leadingZoneSales / totalSales : 0.0;
+    final compact = !isWide;
 
-    if (!showTotal) {
-      return _metricGrid(summary, crossAxisCount: 4, childAspectRatio: 1.5);
-    }
-    if (!showOperations) return _salesHero(summary);
-
-    return SizedBox(
-      height: 300,
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Expanded(flex: 5, child: _salesHero(summary)),
-          const SizedBox(width: 14),
-          Expanded(
-            flex: 6,
-            child: _metricGrid(
-              summary,
-              crossAxisCount: 2,
-              childAspectRatio: 2.15,
+    final financialCards = [
+      _MetricData(
+        label: _configurationItemLabel(
+          'metrics',
+          'average_ticket',
+          'TICKET MEDIO',
+        ).toUpperCase(),
+        value: _currency.format(summary['average_ticket']),
+        caption: 'Por transação',
+        icon: Icons.sell_outlined,
+        accent: AppColors.lime,
+        onTap: () => _showMetricDetails(
+          title: 'Ticket médio',
+          value: _currency.format(summary['average_ticket']),
+          description: 'Valor médio faturado em cada transação.',
+          icon: Icons.sell_outlined,
+          accent: AppColors.lime,
+          details: [
+            MapEntry('Faturação', _currency.format(totalSales)),
+            MapEntry(
+              'Transações',
+              _integer.format(summary['tickets_count'] ?? 0),
             ),
+          ],
+        ),
+      ),
+      _MetricData(
+        label: 'TRANSACOES',
+        value: _integer.format(summary['tickets_count']),
+        caption: totalQuantity > 0
+            ? '${_formatQuantity(totalQuantity)} unidades registadas'
+            : 'Vendas registadas no evento',
+        icon: Icons.receipt_long_outlined,
+        accent: AppColors.blueBright,
+        onTap: () => _showMetricDetails(
+          title: 'Transações',
+          value: _integer.format(summary['tickets_count'] ?? 0),
+          description: 'Movimentos de venda registados durante o evento.',
+          icon: Icons.receipt_long_outlined,
+          accent: AppColors.blueBright,
+          details: [
+            MapEntry('Faturação', _currency.format(totalSales)),
+            MapEntry('Unidades', _formatQuantity(totalQuantity)),
+          ],
+        ),
+      ),
+    ];
+    final operationalCards = [
+      _MetricData(
+        label: 'UNIDADES VENDIDAS',
+        value: totalQuantity > 0 ? '${_formatQuantity(totalQuantity)} un' : '—',
+        caption: productsCount > 0
+            ? '$productsCount referencias no evento'
+            : 'Dados de produto indisponiveis',
+        icon: Icons.inventory_2_outlined,
+        accent: AppColors.lime,
+        onTap: () => _showMetricDetails(
+          title: 'Unidades vendidas',
+          value: totalQuantity > 0 ? _formatQuantity(totalQuantity) : '—',
+          description: 'Quantidade total de artigos vendidos no evento.',
+          icon: Icons.inventory_2_outlined,
+          accent: AppColors.lime,
+          details: [
+            MapEntry('Referências', _integer.format(productsCount)),
+            MapEntry(
+                'Transações', _integer.format(summary['tickets_count'] ?? 0)),
+          ],
+        ),
+      ),
+      _MetricData(
+        label: 'PICO DE FATURAÇÃO',
+        value: peak['hour_label']?.toString() ?? 'Sem dados',
+        caption: _currency.format(peak['total_sales'] ?? 0),
+        icon: Icons.schedule_outlined,
+        accent: AppColors.blueBright,
+        onTap: () => _showMetricDetails(
+          title: 'Pico de faturação',
+          value: peak['hour_label']?.toString() ?? 'Sem dados',
+          description: 'Hora com maior faturação durante o evento.',
+          icon: Icons.schedule_outlined,
+          accent: AppColors.blueBright,
+          details: [
+            MapEntry('Faturação', _currency.format(peak['total_sales'] ?? 0)),
+            MapEntry(
+              'Transações',
+              _integer.format(peak['tickets_count'] ?? 0),
+            ),
+          ],
+        ),
+      ),
+      _MetricData(
+        label: 'RITMO MEDIO',
+        value: _currency.format(averagePerHour),
+        caption: '$activeHours horas com vendas',
+        icon: Icons.show_chart_rounded,
+        accent: AppColors.lime,
+        onTap: () => _showMetricDetails(
+          title: 'Ritmo médio',
+          value: _currency.format(averagePerHour),
+          description: 'Faturação média por cada hora com vendas.',
+          icon: Icons.show_chart_rounded,
+          accent: AppColors.lime,
+          details: [
+            MapEntry('Horas com vendas', _integer.format(activeHours)),
+            MapEntry('Faturação', _currency.format(totalSales)),
+          ],
+        ),
+      ),
+      _MetricData(
+        label: 'DEVICES',
+        value: _integer.format(summary['stores_count'] ?? 0),
+        caption: zonesCount > 0
+            ? '$zonesCount zonas com vendas'
+            : 'Devices com vendas no evento',
+        icon: Icons.storefront_outlined,
+        accent: AppColors.blueBright,
+        onTap: () => _showMetricDetails(
+          title: 'Devices',
+          value: _integer.format(summary['stores_count'] ?? 0),
+          description: 'Devices que registaram atividade durante o evento.',
+          icon: Icons.storefront_outlined,
+          accent: AppColors.blueBright,
+          details: [
+            MapEntry('Zonas com vendas', _integer.format(zonesCount)),
+            MapEntry('Faturação', _currency.format(totalSales)),
+          ],
+        ),
+      ),
+    ];
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (showTotal) ...[
+          _metricGroupLabel('Resumo financeiro', 'Leitura rapida do evento'),
+          const SizedBox(height: 12),
+          _salesHero(summary),
+          const SizedBox(height: 12),
+          _leaderCard(
+            leadingZone,
+            share: leaderShare,
+            fallbackLabel: 'Zona líder indisponível',
+          ),
+          const SizedBox(height: 12),
+          _metricGrid(
+            financialCards,
+            crossAxisCount: compact ? 2 : 2,
+            childAspectRatio: compact ? 1.4 : 1.9,
+            mainAxisExtent: compact ? 112 : null,
           ),
         ],
-      ),
+        if (showTotal && showOperations) const SizedBox(height: 24),
+        if (showOperations) ...[
+          _metricGroupLabel('Operação do evento', 'Volume, ritmo e cobertura'),
+          const SizedBox(height: 8),
+          _metricGrid(
+            operationalCards,
+            crossAxisCount: compact ? 2 : 4,
+            childAspectRatio: compact ? 1.4 : 1.48,
+            mainAxisExtent: compact ? 112 : null,
+          ),
+        ],
+      ],
+    );
+  }
+
+  Map<String, dynamic> _peakHour() {
+    if (_hourlySales.isEmpty) return const {};
+
+    return _hourlySales.reduce((current, item) {
+      final currentSales = (current['total_sales'] as num?)?.toDouble() ?? 0;
+      final itemSales = (item['total_sales'] as num?)?.toDouble() ?? 0;
+      return itemSales > currentSales ? item : current;
+    });
+  }
+
+  Widget _metricGroupLabel(String title, String subtitle) {
+    return Row(
+      children: [
+        Expanded(
+          child: Text(
+            title.toUpperCase(),
+            style: const TextStyle(
+              color: AppColors.textMuted,
+              fontSize: 10,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 1.55,
+            ),
+          ),
+        ),
+        Text(
+          subtitle,
+          style: const TextStyle(color: AppColors.textMuted, fontSize: 10),
+        ),
+      ],
     );
   }
 
   Widget _salesHero(Map<String, dynamic> summary) {
     return Container(
-      constraints: const BoxConstraints(minHeight: 230),
-      padding: const EdgeInsets.all(24),
+      constraints: const BoxConstraints(minHeight: 166),
+      padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
         gradient: const LinearGradient(
           begin: Alignment.topLeft,
@@ -806,27 +1028,23 @@ class _EventSummaryScreenState extends State<EventSummaryScreen> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Row(
+              const Row(
                 children: [
                   Text(
-                    _configurationItemLabel(
-                      'blocks',
-                      'overview',
-                      'FATURAÇÃO DO EVENTO',
-                    ).toUpperCase(),
-                    style: const TextStyle(
+                    'TOTAL',
+                    style: TextStyle(
                       color: AppColors.textMuted,
                       fontSize: 11,
                       fontWeight: FontWeight.w700,
                       letterSpacing: 1.7,
                     ),
                   ),
-                  const Spacer(),
-                  const Icon(Icons.trending_up_rounded,
+                  Spacer(),
+                  Icon(Icons.trending_up_rounded,
                       color: AppColors.lime, size: 21),
                 ],
               ),
-              const SizedBox(height: 34),
+              const SizedBox(height: 20),
               FittedBox(
                 fit: BoxFit.scaleDown,
                 alignment: Alignment.centerLeft,
@@ -840,12 +1058,7 @@ class _EventSummaryScreenState extends State<EventSummaryScreen> {
                   ),
                 ),
               ),
-              const SizedBox(height: 9),
-              const Text(
-                'Total confirmado nas vendas sincronizadas',
-                style: TextStyle(color: AppColors.textMuted, fontSize: 13),
-              ),
-              const SizedBox(height: 18),
+              const SizedBox(height: 14),
               ClipRRect(
                 borderRadius: BorderRadius.circular(99),
                 child: const LinearProgressIndicator(value: 1, minHeight: 4),
@@ -858,110 +1071,326 @@ class _EventSummaryScreenState extends State<EventSummaryScreen> {
   }
 
   Widget _metricGrid(
-    Map<String, dynamic> summary, {
+    List<_MetricData> cards, {
     required int crossAxisCount,
     required double childAspectRatio,
+    double? mainAxisExtent,
   }) {
-    final cards = [
-      _MetricData(
-        label: 'TRANSAÇÕES',
-        value: _integer.format(summary['tickets_count']),
-        caption: 'vendas registadas',
-        icon: Icons.receipt_long_outlined,
-        accent: AppColors.blueBright,
-      ),
-      _MetricData(
-        label: _configurationItemLabel(
-          'metrics',
-          'average_ticket',
-          'TICKET MÉDIO',
-        ).toUpperCase(),
-        value: _currency.format(summary['average_ticket']),
-        caption: 'por transação',
-        icon: Icons.payments_outlined,
-        accent: AppColors.lime,
-      ),
-      _MetricData(
-        label: 'LOJAS',
-        value: _integer.format(summary['stores_count']),
-        caption: 'com vendas',
-        icon: Icons.storefront_outlined,
-        accent: AppColors.success,
-      ),
-      _MetricData(
-        label: _configurationItemLabel(
-          'metrics',
-          'devices',
-          'MÁQUINAS',
-        ).toUpperCase(),
-        value: _integer.format(summary['machines_count']),
-        caption: 'na sincronização',
-        icon: Icons.point_of_sale_outlined,
-        accent: AppColors.blueBright,
-      ),
-    ];
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        const crossAxisSpacing = 12.0;
+        final itemWidth =
+            (constraints.maxWidth - (crossAxisCount - 1) * crossAxisSpacing) /
+                crossAxisCount;
+        final itemHeight = mainAxisExtent ?? itemWidth / childAspectRatio;
 
-    return GridView.builder(
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      itemCount: cards.length,
-      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: crossAxisCount,
-        crossAxisSpacing: 12,
-        mainAxisSpacing: 12,
-        childAspectRatio: childAspectRatio,
+        return Wrap(
+          spacing: crossAxisSpacing,
+          runSpacing: 8,
+          children: cards
+              .map(
+                (card) => SizedBox(
+                  width: itemWidth,
+                  height: itemHeight,
+                  child: _metricCard(card),
+                ),
+              )
+              .toList(),
+        );
+      },
+    );
+  }
+
+  Widget _leaderCard(
+    Map<String, dynamic> zone, {
+    required double share,
+    required String fallbackLabel,
+  }) {
+    final label = _clientFacingLabel(zone['label'], fallback: fallbackLabel);
+    final sales = (zone['total_sales'] as num?)?.toDouble() ?? 0;
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(22),
+        onTap: () => _showMetricDetails(
+          title: 'Zona líder',
+          value: label,
+          description: 'Zona com maior faturação na seleção atual.',
+          icon: Icons.star_rounded,
+          accent: AppColors.lime,
+          details: [
+            MapEntry('Faturação', _currency.format(sales)),
+            MapEntry(
+              'Peso no total',
+              '${(share * 100).toStringAsFixed(1).replaceAll('.', ',')}%',
+            ),
+            if (zone['quantity_total'] != null)
+              MapEntry(
+                'Unidades vendidas',
+                _formatQuantity(
+                    (zone['quantity_total'] as num?)?.toDouble() ?? 0),
+              ),
+          ],
+        ),
+        child: Ink(
+          padding: const EdgeInsets.all(18),
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              colors: [
+                AppColors.lime.withValues(alpha: 0.12),
+                AppColors.surface.withValues(alpha: 0.92),
+              ],
+            ),
+            border: Border.all(color: AppColors.lime.withValues(alpha: 0.55)),
+            borderRadius: BorderRadius.circular(22),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 42,
+                height: 42,
+                decoration: BoxDecoration(
+                  color: AppColors.lime.withValues(alpha: 0.13),
+                  borderRadius: BorderRadius.circular(13),
+                ),
+                child: const Icon(Icons.star_rounded, color: AppColors.lime),
+              ),
+              const SizedBox(width: 13),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'ZONA LIDER',
+                      style: TextStyle(
+                        color: AppColors.textMuted,
+                        fontSize: 9,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 1.25,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                          fontSize: 17, fontWeight: FontWeight.w700),
+                    ),
+                    const SizedBox(height: 7),
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(99),
+                      child: LinearProgressIndicator(
+                        value: share.clamp(0, 1),
+                        minHeight: 4,
+                        backgroundColor: AppColors.surfaceRaised,
+                        color: AppColors.lime,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 12),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Text(
+                    _currency.format(sales),
+                    style: const TextStyle(
+                        fontSize: 14, fontWeight: FontWeight.w700),
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    '${(share * 100).toStringAsFixed(1).replaceAll('.', ',')}% do total',
+                    style: const TextStyle(
+                        color: AppColors.textMuted, fontSize: 10),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
       ),
-      itemBuilder: (context, index) => _metricCard(cards[index]),
     );
   }
 
   Widget _metricCard(_MetricData data) {
-    return Container(
-      padding: const EdgeInsets.all(17),
-      decoration: BoxDecoration(
-        color: AppColors.surface.withValues(alpha: 0.88),
-        border: Border.all(color: AppColors.border),
-        borderRadius: BorderRadius.circular(24),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  data.label,
+    return Semantics(
+      button: true,
+      label: '${data.label}: ${data.value}',
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: data.onTap,
+          borderRadius: BorderRadius.circular(24),
+          child: Ink(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: AppColors.surface.withValues(alpha: 0.88),
+              border: Border.all(color: AppColors.border),
+              borderRadius: BorderRadius.circular(24),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        data.label,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: AppColors.textMuted,
+                          fontSize: 9,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 1.3,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Icon(data.icon, size: 18, color: data.accent),
+                  ],
+                ),
+                const Spacer(),
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    data.value,
+                    style: const TextStyle(
+                        fontSize: 25, fontWeight: FontWeight.w600),
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  data.caption,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: AppColors.textMuted,
-                    fontSize: 9,
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: 1.3,
+                  style:
+                      const TextStyle(color: AppColors.textMuted, fontSize: 11),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _showMetricDetails({
+    required String title,
+    required String value,
+    required String description,
+    required IconData icon,
+    required Color accent,
+    required List<MapEntry<String, String>> details,
+  }) async {
+    unawaited(HapticFeedback.selectionClick());
+    if (!mounted) return;
+
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (context) => SafeArea(
+        top: false,
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(22, 12, 22, 28),
+          decoration: const BoxDecoration(
+            color: AppColors.navy,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(
+                  width: 42,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: AppColors.border,
+                    borderRadius: BorderRadius.circular(8),
                   ),
                 ),
               ),
-              const SizedBox(width: 6),
-              Icon(data.icon, size: 18, color: data.accent),
+              const SizedBox(height: 22),
+              Row(
+                children: [
+                  Container(
+                    width: 44,
+                    height: 44,
+                    decoration: BoxDecoration(
+                      color: accent.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: Icon(icon, color: accent),
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          _clientFacingLabel(title).toUpperCase(),
+                          style: const TextStyle(
+                            color: AppColors.textMuted,
+                            fontSize: 10,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: 1.4,
+                          ),
+                        ),
+                        const SizedBox(height: 3),
+                        Text(
+                          _clientFacingLabel(value),
+                          style: const TextStyle(
+                            fontSize: 26,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 18),
+              Text(
+                _clientFacingLabel(description),
+                style: const TextStyle(
+                  color: AppColors.textSoft,
+                  fontSize: 14,
+                  height: 1.4,
+                ),
+              ),
+              const SizedBox(height: 18),
+              ...details.map(
+                (detail) => Container(
+                  padding: const EdgeInsets.symmetric(vertical: 13),
+                  decoration: const BoxDecoration(
+                    border: Border(bottom: BorderSide(color: AppColors.border)),
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          _clientFacingLabel(detail.key),
+                          style: const TextStyle(color: AppColors.textMuted),
+                        ),
+                      ),
+                      const SizedBox(width: 14),
+                      Text(
+                        _clientFacingLabel(detail.value),
+                        style: const TextStyle(fontWeight: FontWeight.w700),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
             ],
           ),
-          const Spacer(),
-          FittedBox(
-            fit: BoxFit.scaleDown,
-            alignment: Alignment.centerLeft,
-            child: Text(
-              data.value,
-              style: const TextStyle(fontSize: 25, fontWeight: FontWeight.w600),
-            ),
-          ),
-          const SizedBox(height: 3),
-          Text(
-            data.caption,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(color: AppColors.textMuted, fontSize: 11),
-          ),
-        ],
+        ),
       ),
     );
   }
@@ -1014,6 +1443,17 @@ class _EventSummaryScreenState extends State<EventSummaryScreen> {
           ? item
           : current,
     );
+    final peakIndex = _hourlySales.indexOf(peakHour);
+    final selectedIndex = _selectedHourIndex != null &&
+            _selectedHourIndex! >= 0 &&
+            _selectedHourIndex! < _hourlySales.length
+        ? _selectedHourIndex!
+        : peakIndex;
+    final selectedHour = _hourlySales[selectedIndex];
+    final selectedSales =
+        (selectedHour['total_sales'] as num?)?.toDouble() ?? 0;
+    final selectedTransactions =
+        (selectedHour['tickets_count'] as num?)?.toInt() ?? 0;
 
     return Container(
       padding: const EdgeInsets.fromLTRB(18, 20, 18, 18),
@@ -1046,62 +1486,124 @@ class _EventSummaryScreenState extends State<EventSummaryScreen> {
               ),
             ],
           ),
-          const SizedBox(height: 22),
+          const SizedBox(height: 14),
+          AnimatedContainer(
+            duration: const Duration(milliseconds: 180),
+            padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 10),
+            decoration: BoxDecoration(
+              color: AppColors.surfaceRaised.withValues(alpha: 0.82),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(
+                color: AppColors.lime.withValues(alpha: 0.32),
+              ),
+            ),
+            child: Row(
+              children: [
+                Text(
+                  selectedHour['hour_label']?.toString() ?? '—',
+                  style: const TextStyle(
+                    color: AppColors.lime,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text.rich(
+                    TextSpan(
+                      children: [
+                        TextSpan(
+                          text: _currency.format(selectedSales),
+                          style: const TextStyle(fontWeight: FontWeight.w700),
+                        ),
+                        TextSpan(
+                          text: ' · ${_integer.format(selectedTransactions)}',
+                          style: const TextStyle(
+                            color: AppColors.textMuted,
+                            fontSize: 11,
+                          ),
+                        ),
+                      ],
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    textAlign: TextAlign.right,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 18),
           SingleChildScrollView(
             scrollDirection: Axis.horizontal,
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.end,
-              children: _hourlySales.map((item) {
+              children: _hourlySales.indexed.map((entry) {
+                final index = entry.$1;
+                final item = entry.$2;
                 final sales = (item['total_sales'] as num?)?.toDouble() ?? 0.0;
                 final ratio = maxSales > 0 ? sales / maxSales : 0.0;
-                final isPeak = identical(item, peakHour);
+                final isSelected = index == selectedIndex;
 
                 return Tooltip(
                   message:
                       '${item['hour_label']}\n${_currency.format(sales)} · ${_transactionLabel((item['tickets_count'] as num?)?.toInt() ?? 0)}',
-                  child: SizedBox(
-                    width: 48,
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.end,
-                      children: [
-                        Text(
-                          _compactCurrency(sales),
-                          style: TextStyle(
-                            color:
-                                isPeak ? AppColors.lime : AppColors.textMuted,
-                            fontSize: 8,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                        const SizedBox(height: 6),
-                        Container(
-                          width: 25,
-                          height: 14 + (ratio * 105),
-                          decoration: BoxDecoration(
-                            gradient: LinearGradient(
-                              begin: Alignment.topCenter,
-                              end: Alignment.bottomCenter,
-                              colors: isPeak
-                                  ? [AppColors.lime, const Color(0xFFAFCB24)]
-                                  : [
-                                      AppColors.blueBright,
-                                      AppColors.blue.withValues(alpha: 0.75),
-                                    ],
-                            ),
-                            borderRadius: const BorderRadius.vertical(
-                              top: Radius.circular(7),
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTap: () {
+                      HapticFeedback.selectionClick();
+                      setState(() => _selectedHourIndex = index);
+                    },
+                    child: SizedBox(
+                      width: 48,
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.end,
+                        children: [
+                          Text(
+                            _compactCurrency(sales),
+                            style: TextStyle(
+                              color: isSelected
+                                  ? AppColors.lime
+                                  : AppColors.textMuted,
+                              fontSize: 8,
+                              fontWeight: FontWeight.w600,
                             ),
                           ),
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          item['hour_label'] as String? ?? '',
-                          style: const TextStyle(
-                            color: AppColors.textMuted,
-                            fontSize: 9,
+                          const SizedBox(height: 6),
+                          AnimatedContainer(
+                            duration: const Duration(milliseconds: 180),
+                            width: isSelected ? 29 : 25,
+                            height: 14 + (ratio * 105),
+                            decoration: BoxDecoration(
+                              gradient: LinearGradient(
+                                begin: Alignment.topCenter,
+                                end: Alignment.bottomCenter,
+                                colors: isSelected
+                                    ? [AppColors.lime, const Color(0xFFAFCB24)]
+                                    : [
+                                        AppColors.blueBright,
+                                        AppColors.blue.withValues(alpha: 0.75),
+                                      ],
+                              ),
+                              borderRadius: const BorderRadius.vertical(
+                                top: Radius.circular(7),
+                              ),
+                            ),
                           ),
-                        ),
-                      ],
+                          const SizedBox(height: 8),
+                          Text(
+                            item['hour_label'] as String? ?? '',
+                            style: TextStyle(
+                              color: isSelected
+                                  ? AppColors.white
+                                  : AppColors.textMuted,
+                              fontSize: 9,
+                              fontWeight: isSelected
+                                  ? FontWeight.w700
+                                  : FontWeight.w400,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                 );
@@ -1174,7 +1676,8 @@ class _EventSummaryScreenState extends State<EventSummaryScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        product['description'] as String? ?? 'Sem descrição',
+                        _clientFacingLabel(product['description'],
+                            fallback: 'Sem descrição'),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
@@ -1216,9 +1719,20 @@ class _EventSummaryScreenState extends State<EventSummaryScreen> {
     return value.toStringAsFixed(1).replaceAll('.', ',');
   }
 
+  String _clientFacingLabel(Object? value, {String fallback = '—'}) {
+    final label = value?.toString().trim() ?? '';
+    if (label.isEmpty) return fallback;
+
+    // Keep legacy technical payment labels out of client-facing screens.
+    return label.replaceAll(
+      RegExp(r'\bzt\b', caseSensitive: false),
+      'Top up',
+    );
+  }
+
   Widget _storesPanel(Map<String, dynamic> summary) {
     if (_topStores.isEmpty) {
-      return _emptyPanel('Ainda não existem vendas por loja.');
+      return _emptyPanel('Ainda não existem vendas por device.');
     }
 
     final totalSales = (summary['total_sales'] as num?)?.toDouble() ?? 0;
@@ -1267,7 +1781,8 @@ class _EventSummaryScreenState extends State<EventSummaryScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        store['store_name'] as String? ?? 'Sem nome',
+                        _clientFacingLabel(store['store_name'],
+                            fallback: 'Sem nome'),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
@@ -1339,6 +1854,7 @@ class _MetricData {
     required this.caption,
     required this.icon,
     required this.accent,
+    required this.onTap,
   });
 
   final String label;
@@ -1346,4 +1862,5 @@ class _MetricData {
   final String caption;
   final IconData icon;
   final Color accent;
+  final VoidCallback onTap;
 }

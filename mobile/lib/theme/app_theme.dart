@@ -85,7 +85,8 @@ abstract final class AppTheme {
         disabledColor: AppColors.surfaceRaised.withValues(alpha: 0.5),
         side: const BorderSide(color: AppColors.border),
         labelStyle: const TextStyle(color: AppColors.textSoft, fontSize: 13),
-        secondaryLabelStyle: const TextStyle(color: AppColors.navy, fontSize: 13),
+        secondaryLabelStyle:
+            const TextStyle(color: AppColors.navy, fontSize: 13),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(99)),
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       ),
