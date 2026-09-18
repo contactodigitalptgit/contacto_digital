@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout.vue';
+import Modal from '@/Components/Modal.vue';
 import { confirmAction, showErrorToast, showSuccessToast } from '@/lib/swal';
 import axios from 'axios';
 import { Head, Link, router, useForm } from '@inertiajs/vue3';
-import { computed, ref } from 'vue';
+import { computed, onMounted, onUnmounted, ref } from 'vue';
 
 interface ApplicationData {
     id: number;
@@ -94,6 +95,27 @@ const importPayload = ref('');
 const importPreview = ref<ImportPreview | null>(null);
 const previewingImport = ref(false);
 const importingMachines = ref(false);
+const showApplicationModal = ref(false);
+const showMachineModal = ref(false);
+const showImportModal = ref(false);
+const openErrorMachineId = ref<number | null>(null);
+
+const toggleErrorPopover = (machineId: number) => {
+    openErrorMachineId.value = openErrorMachineId.value === machineId ? null : machineId;
+};
+
+const closeErrorPopoverOnOutsideClick = (event: MouseEvent) => {
+    if (openErrorMachineId.value === null) {
+        return;
+    }
+
+    if (!(event.target as HTMLElement).closest('[data-zs-error-popover]')) {
+        openErrorMachineId.value = null;
+    }
+};
+
+onMounted(() => document.addEventListener('click', closeErrorPopoverOnOutsideClick));
+onUnmounted(() => document.removeEventListener('click', closeErrorPopoverOnOutsideClick));
 
 const applicationForm = useForm({
     application_id: props.application?.id ?? null as number | null,
@@ -174,6 +196,15 @@ const clearImportPreview = () => {
     importPreview.value = null;
 };
 
+const openImportModal = () => {
+    showImportModal.value = true;
+};
+
+const closeImportModal = () => {
+    showImportModal.value = false;
+    clearImportPreview();
+};
+
 const parseImportPayload = (): Record<string, unknown> => {
     if (importClientId.value === '') {
         throw new Error('Selecione o cliente que será proprietário das integrações.');
@@ -249,6 +280,7 @@ const importMachines = async () => {
         importPayload.value = '';
         clearImportPreview();
         void showSuccessToast(String(response.data.message ?? 'Lote importado com sucesso.'));
+        showImportModal.value = false;
         router.reload({ only: ['machines'] });
     } catch (error: unknown) {
         clearImportPreview();
@@ -270,6 +302,30 @@ const resetMachineForm = () => {
     machineForm.reset();
     machineForm.clearErrors();
     storeValidationMessage.value = '';
+};
+
+const closeMachineModal = () => {
+    showMachineModal.value = false;
+    resetMachineForm();
+};
+
+const openCreateMachineModal = () => {
+    resetMachineForm();
+    showMachineModal.value = true;
+};
+
+const openApplicationModal = () => {
+    showApplicationModal.value = true;
+};
+
+const closeApplicationModal = () => {
+    showApplicationModal.value = false;
+    applicationForm.clearErrors();
+};
+
+const openCreateApplicationModal = () => {
+    createApplication();
+    showApplicationModal.value = true;
 };
 
 const selectApplication = () => {
@@ -314,7 +370,7 @@ const editMachine = (machine: MachineItem) => {
     machineForm.is_active = machine.is_active;
     machineForm.clearErrors();
     storeValidationMessage.value = '';
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    showMachineModal.value = true;
 };
 
 const saveApplication = () => {
@@ -323,6 +379,7 @@ const saveApplication = () => {
         onSuccess: () => {
             applicationForm.app_secret = '';
             applicationForm.create_new = false;
+            showApplicationModal.value = false;
             void showSuccessToast('Aplicação ZoneSoft guardada com sucesso.');
         },
         onError: () => void showErrorToast('Não foi possível guardar a aplicação ZoneSoft.'),
@@ -368,7 +425,7 @@ const submitMachine = () => {
     const options = {
         preserveScroll: true,
         onSuccess: () => {
-            resetMachineForm();
+            closeMachineModal();
             void showSuccessToast('Integração global guardada com sucesso.');
         },
         onError: () => void showErrorToast('Não foi possível guardar a integração global.'),
@@ -462,274 +519,62 @@ const deleteMachine = async (machine: MachineItem) => {
                 </article>
             </section>
 
-            <section class="dash-card space-y-5">
-                <div class="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+            <section class="dash-card space-y-4">
+                <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                     <div>
-                        <h3 class="dash-card-title mb-0">Aplicações ZoneSoft</h3>
-                        <p class="dash-recent-subtitle">Cada catálogo mantém as credenciais da aplicação que o originou.</p>
+                        <h3 class="dash-card-title mb-0">Aplicação ZoneSoft</h3>
+                        <p class="dash-recent-subtitle">
+                            <template v-if="props.application">
+                                {{ props.application.name }} · APP-KEY {{ props.application.app_key }}
+                            </template>
+                            <template v-else>Nenhuma aplicação configurada ainda.</template>
+                        </p>
                     </div>
-                    <button type="button" class="dash-link-button w-full justify-center sm:w-auto" @click="createApplication">Nova aplicação</button>
-                </div>
-
-                <form class="dash-modal-grid" @submit.prevent="saveApplication">
-                    <div v-if="props.applications.length && !applicationForm.create_new" class="dash-modal-field dash-modal-field-full">
-                        <label class="dash-modal-label" for="zs_application_select">Aplicação configurada</label>
-                        <select
-                            id="zs_application_select"
-                            v-model.number="applicationForm.application_id"
-                            class="dash-modal-input"
-                            @change="selectApplication"
+                    <div class="flex flex-col gap-2 sm:flex-row">
+                        <button
+                            v-if="props.applications.length"
+                            type="button"
+                            class="dash-link-button w-full justify-center sm:w-auto"
+                            @click="openApplicationModal"
                         >
-                            <option v-for="application in props.applications" :key="application.id" :value="application.id">
-                                {{ application.name }}{{ application.external_id ? ` · ID ${application.external_id}` : '' }}
-                            </option>
-                        </select>
-                    </div>
-                    <p v-if="applicationForm.create_new" class="dash-modal-field-full rounded-xl border border-sky-500/25 bg-sky-500/5 p-4 text-sm font-medium text-sky-600">
-                        A criar uma nova aplicação. As aplicações e TPAs existentes não serão alterados.
-                    </p>
-                    <div class="dash-modal-field">
-                        <label class="dash-modal-label" for="zs_app_name">Nome</label>
-                        <input id="zs_app_name" v-model="applicationForm.name" class="dash-modal-input" required />
-                    </div>
-                    <div class="dash-modal-field">
-                        <label class="dash-modal-label" for="zs_external_id">ID da aplicação no Developer Portal</label>
-                        <input id="zs_external_id" v-model="applicationForm.external_id" class="dash-modal-input" placeholder="Ex.: 1450" />
-                        <p class="admin-event-input-hint">Permite associar automaticamente os lotes exportados.</p>
-                    </div>
-                    <div class="dash-modal-field">
-                        <label class="dash-modal-label" for="zs_base_url">URL base</label>
-                        <input id="zs_base_url" v-model="applicationForm.base_url" class="dash-modal-input" type="url" required />
-                    </div>
-                    <div class="dash-modal-field">
-                        <label class="dash-modal-label" for="zs_app_key">APP-KEY</label>
-                        <input id="zs_app_key" v-model="applicationForm.app_key" class="dash-modal-input" required />
-                    </div>
-                    <div class="dash-modal-field">
-                        <label class="dash-modal-label" for="zs_app_secret">APP-SECRET</label>
-                        <input
-                            id="zs_app_secret"
-                            v-model="applicationForm.app_secret"
-                            class="dash-modal-input"
-                            type="password"
-                            :required="applicationNeedsSecret"
-                            :placeholder="props.application?.has_secret ? 'Deixe vazio para manter o segredo atual' : ''"
-                        />
-                        <p class="admin-event-input-hint">O segredo é cifrado e nunca volta a ser exibido.</p>
-                    </div>
-                    <label class="dash-modal-field-full inline-flex items-center gap-3 text-sm font-medium text-current">
-                        <input v-model="applicationForm.is_active" type="checkbox" class="rounded border-current/30" />
-                        Aplicação ativa
-                    </label>
-                    <div class="dash-modal-actions dash-modal-field-full">
-                        <button class="dash-action-button dash-action-button-inline w-full justify-center sm:w-auto" :disabled="applicationForm.processing">
-                            {{ applicationForm.create_new ? 'Criar aplicação' : 'Guardar aplicação' }}
+                            Editar aplicação
+                        </button>
+                        <button type="button" class="dash-action-button dash-action-button-inline w-full justify-center sm:w-auto" @click="openCreateApplicationModal">
+                            Nova aplicação
                         </button>
                     </div>
-                </form>
+                </div>
             </section>
 
-            <section class="dash-card space-y-5">
-                <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+            <section class="dash-card space-y-4">
+                <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                     <div>
                         <h3 class="dash-card-title mb-0">Importar em massa</h3>
                         <p class="dash-recent-subtitle">
                             Na extensão ZoneSoft, use “Copiar lote para plataforma” e cole o resultado aqui.
                         </p>
                     </div>
-                    <span class="status-pill neutral">Sem APP-KEY ou APP-SECRET</span>
-                </div>
-
-                <div class="dash-modal-grid">
-                    <div class="dash-modal-field">
-                        <label class="dash-modal-label" for="zs_import_client">Cliente proprietário</label>
-                        <select
-                            id="zs_import_client"
-                            v-model.number="importClientId"
-                            class="dash-modal-input"
-                            required
-                            @change="clearImportPreview"
-                        >
-                            <option value="" disabled>Selecione o cliente</option>
-                            <option v-for="client in props.clients" :key="client.id" :value="client.id">
-                                {{ client.name }}
-                            </option>
-                        </select>
-                    </div>
-                    <div class="dash-modal-field dash-modal-field-full">
-                        <label class="dash-modal-label" for="zs_import_payload">Lote JSON</label>
-                        <textarea
-                            id="zs_import_payload"
-                            v-model="importPayload"
-                            class="dash-modal-input min-h-40 font-mono text-xs"
-                            placeholder="Cole aqui o lote copiado pela extensão..."
-                            @input="clearImportPreview"
-                        />
-                        <p class="admin-event-input-hint">
-                            A pré-visualização não grava dados. São aceitas até 500 integrações por lote.
-                        </p>
-                    </div>
-                    <div class="dash-modal-actions dash-modal-field-full">
-                        <button
-                            type="button"
-                            class="dash-link-button w-full justify-center sm:w-auto"
-                            :disabled="previewingImport || importingMachines || !hasConfiguredApplication"
-                            @click="previewMachineImport"
-                        >
-                            {{ previewingImport ? 'A analisar...' : 'Pré-visualizar lote' }}
-                        </button>
-                    </div>
-                </div>
-
-                <div v-if="importPreview" class="space-y-4 border-t border-current/10 pt-5">
-                    <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-                        <article class="rounded-xl border border-current/10 p-4">
-                            <p class="dash-recent-subtitle">Total</p>
-                            <p class="mt-1 text-2xl font-bold">{{ importPreview.summary.total }}</p>
-                        </article>
-                        <article class="rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-4">
-                            <p class="dash-recent-subtitle">Novas</p>
-                            <p class="mt-1 text-2xl font-bold text-emerald-500">{{ importPreview.summary.new }}</p>
-                        </article>
-                        <article class="rounded-xl border border-current/10 p-4">
-                            <p class="dash-recent-subtitle">Já existem</p>
-                            <p class="mt-1 text-2xl font-bold">{{ importPreview.summary.existing }}</p>
-                        </article>
-                        <article class="rounded-xl border border-amber-500/30 bg-amber-500/5 p-4">
-                            <p class="dash-recent-subtitle">Conflitos</p>
-                            <p class="mt-1 text-2xl font-bold text-amber-500">{{ importPreview.summary.conflicts }}</p>
-                        </article>
-                        <article class="rounded-xl border border-rose-500/30 bg-rose-500/5 p-4">
-                            <p class="dash-recent-subtitle">Inválidas</p>
-                            <p class="mt-1 text-2xl font-bold text-rose-500">{{ importPreview.summary.invalid }}</p>
-                        </article>
-                    </div>
-
-                    <div class="space-y-3 lg:hidden">
-                        <article
-                            v-for="row in importPreview.rows.slice(0, 25)"
-                            :key="`${row.line}-${row.store_id}-mobile`"
-                            class="rounded-xl border border-current/10 bg-white/[0.02] p-4"
-                        >
-                            <div class="flex items-start justify-between gap-3">
-                                <div>
-                                    <p class="text-sm font-semibold text-current">Linha {{ row.line }}</p>
-                                    <p class="mt-1 text-xs text-current/55">Store {{ row.store_id }} · {{ row.license }}</p>
-                                </div>
-                                <span class="status-pill" :class="importStatusClass(row.status)">{{ importStatusLabel(row.status) }}</span>
-                            </div>
-                            <p class="mt-3 break-all text-sm text-current/80">{{ row.zs_client_id }}</p>
-                            <p class="mt-3 text-sm text-current/65">{{ row.message }}</p>
-                        </article>
-                    </div>
-
-                    <div class="hidden overflow-x-auto rounded-xl border border-current/10 lg:block">
-                        <table class="admin-clients-table min-w-[850px]">
-                            <thead>
-                                <tr>
-                                    <th>Linha</th>
-                                    <th>Licença</th>
-                                    <th>Store ID</th>
-                                    <th>Client ID</th>
-                                    <th>Resultado</th>
-                                    <th>Detalhe</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <tr v-for="row in importPreview.rows.slice(0, 25)" :key="`${row.line}-${row.store_id}`">
-                                    <td class="admin-clients-text">{{ row.line }}</td>
-                                    <td class="admin-clients-text">{{ row.license }}</td>
-                                    <td class="admin-clients-text">{{ row.store_id }}</td>
-                                    <td class="admin-clients-text"><span class="block max-w-[12rem] truncate">{{ row.zs_client_id }}</span></td>
-                                    <td><span class="status-pill" :class="importStatusClass(row.status)">{{ importStatusLabel(row.status) }}</span></td>
-                                    <td class="admin-clients-text">{{ row.message }}</td>
-                                </tr>
-                            </tbody>
-                        </table>
-                    </div>
-                    <p v-if="importPreview.rows.length > 25" class="admin-event-input-hint">
-                        A mostrar as primeiras 25 de {{ importPreview.rows.length }} linhas.
-                    </p>
-                    <p v-if="!importPreview.can_import" class="dash-modal-error">
-                        Corrija os conflitos ou linhas inválidas e faça uma nova pré-visualização.
-                    </p>
-                    <div class="dash-modal-actions">
-                        <button
-                            type="button"
-                            class="dash-action-button dash-action-button-inline w-full justify-center sm:w-auto"
-                            :disabled="!importPreview.can_import || importingMachines"
-                            @click="importMachines"
-                        >
-                            {{ importingMachines ? 'A importar...' : `Importar ${importPreview.summary.new} integrações` }}
-                        </button>
-                    </div>
+                    <button type="button" class="dash-link-button w-full justify-center sm:w-auto" @click="openImportModal">
+                        Importar em massa
+                    </button>
                 </div>
             </section>
 
-            <section class="dash-card space-y-5">
-                <div>
-                    <h3 class="dash-card-title mb-0">
-                        {{ editingMachineId ? 'Editar integração global' : 'Nova integração global' }}
-                    </h3>
-                    <p class="dash-recent-subtitle">Cadastre a licença e cada Store ID uma única vez.</p>
+            <section class="dash-card space-y-4">
+                <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                        <h3 class="dash-card-title mb-0">Integrações globais</h3>
+                        <p class="dash-recent-subtitle">Cadastre a licença e cada Store ID uma única vez.</p>
+                    </div>
+                    <button
+                        type="button"
+                        class="dash-action-button dash-action-button-inline w-full justify-center sm:w-auto"
+                        :disabled="!hasConfiguredApplication"
+                        @click="openCreateMachineModal"
+                    >
+                        Adicionar TPA
+                    </button>
                 </div>
-
-                <form class="dash-modal-grid" @submit.prevent="submitMachine">
-                    <div class="dash-modal-field">
-                        <label class="dash-modal-label" for="zs_machine_application">Aplicação</label>
-                        <select id="zs_machine_application" v-model.number="machineForm.application_id" class="dash-modal-input" required>
-                            <option :value="null" disabled>Selecione a aplicação</option>
-                            <option v-for="application in props.applications" :key="application.id" :value="application.id">
-                                {{ application.name }}
-                            </option>
-                        </select>
-                    </div>
-                    <div class="dash-modal-field">
-                        <label class="dash-modal-label" for="zs_client_owner">Cliente</label>
-                        <select id="zs_client_owner" v-model.number="machineForm.client_id" class="dash-modal-input" required>
-                            <option value="" disabled>Selecione o cliente</option>
-                            <option v-for="client in props.clients" :key="client.id" :value="client.id">
-                                {{ client.name }}
-                            </option>
-                        </select>
-                        <p v-if="machineForm.errors.client_id" class="dash-modal-error">{{ machineForm.errors.client_id }}</p>
-                    </div>
-                    <div class="dash-modal-field">
-                        <label class="dash-modal-label" for="zs_license">Licença</label>
-                        <input id="zs_license" v-model="machineForm.license" class="dash-modal-input" required placeholder="Ex.: LRXUTHVXSU" />
-                        <p v-if="machineForm.errors.license" class="dash-modal-error">{{ machineForm.errors.license }}</p>
-                    </div>
-                    <div class="dash-modal-field">
-                        <label class="dash-modal-label" for="zs_client_id">Client ID</label>
-                        <input id="zs_client_id" v-model="machineForm.zs_client_id" class="dash-modal-input" required />
-                        <p v-if="machineForm.errors.zs_client_id" class="dash-modal-error">{{ machineForm.errors.zs_client_id }}</p>
-                    </div>
-                    <div class="dash-modal-field">
-                        <label class="dash-modal-label" for="zs_store_id">Store ID</label>
-                        <div class="flex flex-col gap-3 sm:flex-row">
-                            <input id="zs_store_id" v-model.number="machineForm.store_id" class="dash-modal-input" type="number" min="0" required />
-                            <button type="button" class="dash-link-button w-full justify-center shrink-0 sm:w-auto" :disabled="discoveringStores" @click="discoverStore">
-                                {{ discoveringStores ? 'A validar...' : 'Validar' }}
-                            </button>
-                        </div>
-                        <p v-if="machineForm.errors.store_id" class="dash-modal-error">{{ machineForm.errors.store_id }}</p>
-                        <p v-if="storeValidationMessage" class="admin-event-input-hint text-emerald-500">{{ storeValidationMessage }}</p>
-                    </div>
-                    <div class="dash-modal-field dash-modal-field-full">
-                        <label class="dash-modal-label" for="zs_store_label">Nome da loja/TPA</label>
-                        <input id="zs_store_label" v-model="machineForm.store_label" class="dash-modal-input" />
-                    </div>
-                    <label class="dash-modal-field-full inline-flex items-center gap-3 text-sm font-medium text-current">
-                        <input v-model="machineForm.is_active" type="checkbox" class="rounded border-current/30" />
-                        TPA ativo
-                    </label>
-                    <div class="dash-modal-actions dash-modal-field-full">
-                        <button v-if="editingMachineId" type="button" class="dash-modal-cancel w-full justify-center sm:w-auto" @click="resetMachineForm">Cancelar edição</button>
-                        <button class="dash-action-button dash-action-button-inline w-full justify-center sm:w-auto" :disabled="machineForm.processing || !hasConfiguredApplication">
-                            {{ editingMachineId ? 'Guardar alterações' : 'Adicionar ao catálogo' }}
-                        </button>
-                    </div>
-                </form>
             </section>
 
             <section class="dash-card space-y-5">
@@ -787,17 +632,48 @@ const deleteMachine = async (machine: MachineItem) => {
                                     {{ machine.events.length ? `${machine.events.length} associado${machine.events.length === 1 ? '' : 's'}` : 'Nenhum' }}
                                 </dd>
                             </div>
-                            <div>
+                            <div class="flex items-start justify-between gap-4">
                                 <dt class="text-current/55">Validação</dt>
-                                <dd class="mt-1 text-current">{{ formatDateTime(machine.last_validated_at) }}</dd>
-                                <p v-if="machine.last_error" class="mt-2 text-xs text-rose-500">{{ machine.last_error }}</p>
+                                <dd class="flex items-center gap-2 text-right text-current">
+                                    <span>{{ formatDateTime(machine.last_validated_at) }}</span>
+                                    <span v-if="machine.last_error" class="relative inline-flex" data-zs-error-popover>
+                                        <button
+                                            type="button"
+                                            class="admin-client-icon-btn warning h-7 w-7"
+                                            title="Ver erro de validação"
+                                            aria-label="Ver erro de validação"
+                                            @click.stop="toggleErrorPopover(machine.id)"
+                                        >
+                                            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                                <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z" />
+                                                <path d="M12 9v4M12 17h.01" />
+                                            </svg>
+                                        </button>
+                                        <div
+                                            v-if="openErrorMachineId === machine.id"
+                                            class="absolute right-0 top-full z-20 mt-2 w-64 rounded-xl border border-rose-500/30 bg-[#0b2440] p-3 text-left text-xs font-medium leading-5 text-rose-200 shadow-xl"
+                                        >
+                                            {{ machine.last_error }}
+                                        </div>
+                                    </span>
+                                </dd>
                             </div>
                         </dl>
 
-                        <div class="mt-4 flex flex-col gap-2 sm:flex-row">
-                            <button type="button" class="dash-link-button w-full justify-center sm:w-auto" @click="editMachine(machine)">Editar</button>
-                            <button type="button" class="dash-link-button w-full justify-center border-rose-500/30 text-rose-500 hover:border-rose-500/50 hover:bg-rose-500/10 sm:w-auto" @click="deleteMachine(machine)">
-                                Eliminar
+                        <div class="mt-4 flex justify-end gap-2">
+                            <button type="button" class="admin-client-icon-btn" title="Editar" aria-label="Editar integração" @click="editMachine(machine)">
+                                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M12 20h9" />
+                                    <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
+                                </svg>
+                            </button>
+                            <button type="button" class="admin-client-icon-btn danger" title="Eliminar" aria-label="Eliminar integração" @click="deleteMachine(machine)">
+                                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M3 6h18" />
+                                    <path d="M8 6V4h8v2" />
+                                    <path d="M19 6l-1 14H6L5 6" />
+                                    <path d="M10 11v6M14 11v6" />
+                                </svg>
                             </button>
                         </div>
                     </article>
@@ -839,13 +715,46 @@ const deleteMachine = async (machine: MachineItem) => {
                                     <span class="status-pill" :class="machine.is_active ? 'success' : 'neutral'">{{ machine.is_active ? 'Ativo' : 'Inativo' }}</span>
                                 </td>
                                 <td class="admin-clients-text">
-                                    <p>{{ formatDateTime(machine.last_validated_at) }}</p>
-                                    <p v-if="machine.last_error" class="mt-1 max-w-xs text-xs text-rose-500">{{ machine.last_error }}</p>
+                                    <div class="flex items-center gap-2">
+                                        <span>{{ formatDateTime(machine.last_validated_at) }}</span>
+                                        <span v-if="machine.last_error" class="relative inline-flex" data-zs-error-popover>
+                                            <button
+                                                type="button"
+                                                class="admin-client-icon-btn warning h-7 w-7"
+                                                title="Ver erro de validação"
+                                                aria-label="Ver erro de validação"
+                                                @click.stop="toggleErrorPopover(machine.id)"
+                                            >
+                                                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                                    <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z" />
+                                                    <path d="M12 9v4M12 17h.01" />
+                                                </svg>
+                                            </button>
+                                            <div
+                                                v-if="openErrorMachineId === machine.id"
+                                                class="absolute left-0 top-full z-20 mt-2 w-64 rounded-xl border border-rose-500/30 bg-[#0b2440] p-3 text-left text-xs font-medium leading-5 text-rose-200 shadow-xl"
+                                            >
+                                                {{ machine.last_error }}
+                                            </div>
+                                        </span>
+                                    </div>
                                 </td>
                                 <td>
                                     <div class="admin-clients-actions">
-                                        <button type="button" class="admin-client-icon-btn" title="Editar" @click="editMachine(machine)">Editar</button>
-                                        <button type="button" class="admin-client-icon-btn danger" title="Eliminar" @click="deleteMachine(machine)">Eliminar</button>
+                                        <button type="button" class="admin-client-icon-btn" title="Editar" aria-label="Editar integração" @click="editMachine(machine)">
+                                            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                                <path d="M12 20h9" />
+                                                <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
+                                            </svg>
+                                        </button>
+                                        <button type="button" class="admin-client-icon-btn danger" title="Eliminar" aria-label="Eliminar integração" @click="deleteMachine(machine)">
+                                            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                                <path d="M3 6h18" />
+                                                <path d="M8 6V4h8v2" />
+                                                <path d="M19 6l-1 14H6L5 6" />
+                                                <path d="M10 11v6M14 11v6" />
+                                            </svg>
+                                        </button>
                                     </div>
                                 </td>
                             </tr>
@@ -857,5 +766,262 @@ const deleteMachine = async (machine: MachineItem) => {
                 </div>
             </section>
         </div>
+
+        <Modal :show="showApplicationModal" max-width="2xl" @close="closeApplicationModal">
+            <form class="dash-modal" @submit.prevent="saveApplication">
+                <div class="dash-modal-header">
+                    <h3 class="dash-modal-title">{{ applicationForm.create_new ? 'Nova aplicação' : 'Editar aplicação' }}</h3>
+                    <button type="button" class="dash-modal-close" @click="closeApplicationModal">
+                        <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M18 6L6 18M6 6l12 12" />
+                        </svg>
+                    </button>
+                </div>
+
+                <div class="dash-modal-grid">
+                    <div v-if="props.applications.length && !applicationForm.create_new" class="dash-modal-field dash-modal-field-full">
+                        <label class="dash-modal-label" for="zs_application_select">Aplicação configurada</label>
+                        <select
+                            id="zs_application_select"
+                            v-model.number="applicationForm.application_id"
+                            class="dash-modal-input"
+                            @change="selectApplication"
+                        >
+                            <option v-for="application in props.applications" :key="application.id" :value="application.id">
+                                {{ application.name }}{{ application.external_id ? ` · ID ${application.external_id}` : '' }}
+                            </option>
+                        </select>
+                    </div>
+                    <p v-if="applicationForm.create_new" class="dash-modal-field-full rounded-xl border border-sky-500/25 bg-sky-500/5 p-4 text-sm font-medium text-sky-600">
+                        A criar uma nova aplicação. As aplicações e TPAs existentes não serão alterados.
+                    </p>
+                    <div class="dash-modal-field">
+                        <label class="dash-modal-label" for="zs_app_name">Nome</label>
+                        <input id="zs_app_name" v-model="applicationForm.name" class="dash-modal-input" required />
+                    </div>
+                    <div class="dash-modal-field">
+                        <label class="dash-modal-label" for="zs_external_id">ID da aplicação no Developer Portal</label>
+                        <input id="zs_external_id" v-model="applicationForm.external_id" class="dash-modal-input" placeholder="Ex.: 1450" />
+                        <p class="admin-event-input-hint">Permite associar automaticamente os lotes exportados.</p>
+                    </div>
+                    <div class="dash-modal-field">
+                        <label class="dash-modal-label" for="zs_base_url">URL base</label>
+                        <input id="zs_base_url" v-model="applicationForm.base_url" class="dash-modal-input" type="url" required />
+                    </div>
+                    <div class="dash-modal-field">
+                        <label class="dash-modal-label" for="zs_app_key">APP-KEY</label>
+                        <input id="zs_app_key" v-model="applicationForm.app_key" class="dash-modal-input" required />
+                    </div>
+                    <div class="dash-modal-field">
+                        <label class="dash-modal-label" for="zs_app_secret">APP-SECRET</label>
+                        <input
+                            id="zs_app_secret"
+                            v-model="applicationForm.app_secret"
+                            class="dash-modal-input"
+                            type="password"
+                            :required="applicationNeedsSecret"
+                            :placeholder="props.application?.has_secret ? 'Deixe vazio para manter o segredo atual' : ''"
+                        />
+                        <p class="admin-event-input-hint">O segredo é cifrado e nunca volta a ser exibido.</p>
+                    </div>
+                    <label class="dash-modal-field-full inline-flex items-center gap-3 text-sm font-medium text-current">
+                        <input v-model="applicationForm.is_active" type="checkbox" class="rounded border-current/30" />
+                        Aplicação ativa
+                    </label>
+                    <div class="dash-modal-actions dash-modal-field-full">
+                        <button class="dash-action-button dash-action-button-inline w-full justify-center sm:w-auto" :disabled="applicationForm.processing">
+                            {{ applicationForm.create_new ? 'Criar aplicação' : 'Guardar aplicação' }}
+                        </button>
+                    </div>
+                </div>
+            </form>
+        </Modal>
+
+        <Modal :show="showMachineModal" max-width="2xl" @close="closeMachineModal">
+            <form class="dash-modal" @submit.prevent="submitMachine">
+                <div class="dash-modal-header">
+                    <h3 class="dash-modal-title">{{ editingMachineId ? 'Editar integração global' : 'Nova integração global' }}</h3>
+                    <button type="button" class="dash-modal-close" @click="closeMachineModal">
+                        <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M18 6L6 18M6 6l12 12" />
+                        </svg>
+                    </button>
+                </div>
+
+                <div class="dash-modal-grid">
+                    <div class="dash-modal-field">
+                        <label class="dash-modal-label" for="zs_machine_application">Aplicação</label>
+                        <select id="zs_machine_application" v-model.number="machineForm.application_id" class="dash-modal-input" required>
+                            <option :value="null" disabled>Selecione a aplicação</option>
+                            <option v-for="application in props.applications" :key="application.id" :value="application.id">
+                                {{ application.name }}
+                            </option>
+                        </select>
+                    </div>
+                    <div class="dash-modal-field">
+                        <label class="dash-modal-label" for="zs_client_owner">Cliente</label>
+                        <select id="zs_client_owner" v-model.number="machineForm.client_id" class="dash-modal-input" required>
+                            <option value="" disabled>Selecione o cliente</option>
+                            <option v-for="client in props.clients" :key="client.id" :value="client.id">
+                                {{ client.name }}
+                            </option>
+                        </select>
+                        <p v-if="machineForm.errors.client_id" class="dash-modal-error">{{ machineForm.errors.client_id }}</p>
+                    </div>
+                    <div class="dash-modal-field">
+                        <label class="dash-modal-label" for="zs_license">Licença</label>
+                        <input id="zs_license" v-model="machineForm.license" class="dash-modal-input" required placeholder="Ex.: LRXUTHVXSU" />
+                        <p v-if="machineForm.errors.license" class="dash-modal-error">{{ machineForm.errors.license }}</p>
+                    </div>
+                    <div class="dash-modal-field">
+                        <label class="dash-modal-label" for="zs_client_id">Client ID</label>
+                        <input id="zs_client_id" v-model="machineForm.zs_client_id" class="dash-modal-input" required />
+                        <p v-if="machineForm.errors.zs_client_id" class="dash-modal-error">{{ machineForm.errors.zs_client_id }}</p>
+                    </div>
+                    <div class="dash-modal-field">
+                        <label class="dash-modal-label" for="zs_store_id">Store ID</label>
+                        <div class="flex flex-col gap-3 sm:flex-row">
+                            <input id="zs_store_id" v-model.number="machineForm.store_id" class="dash-modal-input" type="number" min="0" required />
+                            <button type="button" class="dash-link-button w-full justify-center shrink-0 sm:w-auto" :disabled="discoveringStores" @click="discoverStore">
+                                {{ discoveringStores ? 'A validar...' : 'Validar' }}
+                            </button>
+                        </div>
+                        <p v-if="machineForm.errors.store_id" class="dash-modal-error">{{ machineForm.errors.store_id }}</p>
+                        <p v-if="storeValidationMessage" class="admin-event-input-hint text-emerald-500">{{ storeValidationMessage }}</p>
+                    </div>
+                    <div class="dash-modal-field dash-modal-field-full">
+                        <label class="dash-modal-label" for="zs_store_label">Nome da loja/TPA</label>
+                        <input id="zs_store_label" v-model="machineForm.store_label" class="dash-modal-input" />
+                    </div>
+                    <label class="dash-modal-field-full inline-flex items-center gap-3 text-sm font-medium text-current">
+                        <input v-model="machineForm.is_active" type="checkbox" class="rounded border-current/30" />
+                        TPA ativo
+                    </label>
+                    <div class="dash-modal-actions dash-modal-field-full">
+                        <button v-if="editingMachineId" type="button" class="dash-modal-cancel w-full justify-center sm:w-auto" @click="closeMachineModal">Cancelar edição</button>
+                        <button class="dash-action-button dash-action-button-inline w-full justify-center sm:w-auto" :disabled="machineForm.processing || !hasConfiguredApplication">
+                            {{ editingMachineId ? 'Guardar alterações' : 'Adicionar ao catálogo' }}
+                        </button>
+                    </div>
+                </div>
+            </form>
+        </Modal>
+
+        <Modal :show="showImportModal" max-width="2xl" @close="closeImportModal">
+            <div class="dash-modal">
+                <div class="dash-modal-header">
+                    <h3 class="dash-modal-title">Importar em massa</h3>
+                    <button type="button" class="dash-modal-close" @click="closeImportModal">
+                        <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M18 6L6 18M6 6l12 12" />
+                        </svg>
+                    </button>
+                </div>
+
+                <p class="dash-recent-subtitle -mt-2">
+                    Na extensão ZoneSoft, use “Copiar lote para plataforma” e cole o resultado aqui.
+                    <span class="status-pill neutral ml-1">Sem APP-KEY ou APP-SECRET</span>
+                </p>
+
+                <form class="dash-modal-grid mt-4" @submit.prevent="previewMachineImport">
+                    <div class="dash-modal-field">
+                        <label class="dash-modal-label" for="zs_import_client">Cliente proprietário</label>
+                        <select
+                            id="zs_import_client"
+                            v-model.number="importClientId"
+                            class="dash-modal-input"
+                            required
+                            @change="clearImportPreview"
+                        >
+                            <option value="" disabled>Selecione o cliente</option>
+                            <option v-for="client in props.clients" :key="client.id" :value="client.id">
+                                {{ client.name }}
+                            </option>
+                        </select>
+                    </div>
+                    <div class="dash-modal-field dash-modal-field-full">
+                        <label class="dash-modal-label" for="zs_import_payload">Lote JSON</label>
+                        <textarea
+                            id="zs_import_payload"
+                            v-model="importPayload"
+                            class="dash-modal-input min-h-40 font-mono text-xs"
+                            placeholder="Cole aqui o lote copiado pela extensão..."
+                            @input="clearImportPreview"
+                        />
+                        <p class="admin-event-input-hint">
+                            A pré-visualização não grava dados. São aceitas até 500 integrações por lote.
+                        </p>
+                    </div>
+                    <div class="dash-modal-actions dash-modal-field-full">
+                        <button
+                            type="submit"
+                            class="dash-link-button w-full justify-center sm:w-auto"
+                            :disabled="previewingImport || importingMachines || !hasConfiguredApplication"
+                        >
+                            {{ previewingImport ? 'A analisar...' : 'Pré-visualizar lote' }}
+                        </button>
+                    </div>
+                </form>
+
+                <div v-if="importPreview" class="mt-5 space-y-4 border-t border-current/10 pt-5">
+                    <div class="grid gap-3 grid-cols-2 xl:grid-cols-3">
+                        <article class="rounded-xl border border-current/10 p-4">
+                            <p class="dash-recent-subtitle">Total</p>
+                            <p class="mt-1 text-2xl font-bold">{{ importPreview.summary.total }}</p>
+                        </article>
+                        <article class="rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-4">
+                            <p class="dash-recent-subtitle">Novas</p>
+                            <p class="mt-1 text-2xl font-bold text-emerald-500">{{ importPreview.summary.new }}</p>
+                        </article>
+                        <article class="rounded-xl border border-current/10 p-4">
+                            <p class="dash-recent-subtitle">Já existem</p>
+                            <p class="mt-1 text-2xl font-bold">{{ importPreview.summary.existing }}</p>
+                        </article>
+                        <article class="rounded-xl border border-amber-500/30 bg-amber-500/5 p-4">
+                            <p class="dash-recent-subtitle">Conflitos</p>
+                            <p class="mt-1 text-2xl font-bold text-amber-500">{{ importPreview.summary.conflicts }}</p>
+                        </article>
+                        <article class="rounded-xl border border-rose-500/30 bg-rose-500/5 p-4">
+                            <p class="dash-recent-subtitle">Inválidas</p>
+                            <p class="mt-1 text-2xl font-bold text-rose-500">{{ importPreview.summary.invalid }}</p>
+                        </article>
+                    </div>
+
+                    <div class="space-y-3">
+                        <article
+                            v-for="row in importPreview.rows.slice(0, 25)"
+                            :key="`${row.line}-${row.store_id}-mobile`"
+                            class="rounded-xl border border-current/10 bg-white/[0.02] p-4"
+                        >
+                            <div class="flex items-start justify-between gap-3">
+                                <div>
+                                    <p class="text-sm font-semibold text-current">Linha {{ row.line }}</p>
+                                    <p class="mt-1 text-xs text-current/55">Store {{ row.store_id }} · {{ row.license }}</p>
+                                </div>
+                                <span class="status-pill" :class="importStatusClass(row.status)">{{ importStatusLabel(row.status) }}</span>
+                            </div>
+                            <p class="mt-3 break-all text-sm text-current/80">{{ row.zs_client_id }}</p>
+                            <p class="mt-3 text-sm text-current/65">{{ row.message }}</p>
+                        </article>
+                    </div>
+                    <p v-if="importPreview.rows.length > 25" class="admin-event-input-hint">
+                        A mostrar as primeiras 25 de {{ importPreview.rows.length }} linhas.
+                    </p>
+                    <p v-if="!importPreview.can_import" class="dash-modal-error">
+                        Corrija os conflitos ou linhas inválidas e faça uma nova pré-visualização.
+                    </p>
+                    <div class="dash-modal-actions">
+                        <button
+                            type="button"
+                            class="dash-action-button dash-action-button-inline w-full justify-center sm:w-auto"
+                            :disabled="!importPreview.can_import || importingMachines"
+                            @click="importMachines"
+                        >
+                            {{ importingMachines ? 'A importar...' : `Importar ${importPreview.summary.new} integrações` }}
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </Modal>
     </AuthenticatedLayout>
 </template>

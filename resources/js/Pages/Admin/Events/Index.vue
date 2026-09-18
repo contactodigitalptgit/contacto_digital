@@ -3,12 +3,17 @@ import Modal from '@/Components/Modal.vue';
 import { confirmAction, showErrorToast, showSuccessToast } from '@/lib/swal';
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout.vue';
 import { Head, Link, router, useForm } from '@inertiajs/vue3';
-import { computed, onBeforeUnmount, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, onMounted, onUnmounted, ref, watch } from 'vue';
 
 interface ClientOption {
     id: number;
     name: string;
     business_name: string | null;
+}
+
+interface AdditionalClient {
+    id: number;
+    name: string;
 }
 
 interface EventMachineIssue {
@@ -45,6 +50,8 @@ interface EventItem {
     show_zt_card: boolean;
     client_name: string;
     client_id: number;
+    additional_client_ids: number[];
+    additional_clients: AdditionalClient[];
     available_machine_count: number;
     is_active: boolean;
     report_summary: EventReportSummary | null;
@@ -61,11 +68,30 @@ const showImportReportModal = ref(false);
 const editingEventId = ref<number | null>(null);
 const selectedReportEvent = ref<EventItem | null>(null);
 const isSyncingReport = ref(false);
+const openSyncIssuesEventId = ref<number | null>(null);
+
+const toggleSyncIssues = (eventId: number) => {
+    openSyncIssuesEventId.value = openSyncIssuesEventId.value === eventId ? null : eventId;
+};
+
+const closeSyncIssuesOnOutsideClick = (event: MouseEvent) => {
+    if (openSyncIssuesEventId.value === null) {
+        return;
+    }
+
+    if (!(event.target as HTMLElement).closest('[data-sync-issues-popover]')) {
+        openSyncIssuesEventId.value = null;
+    }
+};
+
+onMounted(() => document.addEventListener('click', closeSyncIssuesOnOutsideClick));
+onUnmounted(() => document.removeEventListener('click', closeSyncIssuesOnOutsideClick));
 const eventsPollerId = ref<number | null>(null);
 const isRefreshingEvents = ref(false);
 
 const createEventForm = useForm({
     client_id: '' as number | '',
+    additional_client_ids: [] as number[],
     title: '',
     description: '',
     event_date: '',
@@ -76,6 +102,7 @@ const createEventForm = useForm({
 
 const editEventForm = useForm({
     client_id: '' as number | '',
+    additional_client_ids: [] as number[],
     title: '',
     description: '',
     event_date: '',
@@ -83,6 +110,12 @@ const editEventForm = useForm({
     report_ends_at: '',
     show_zt_card: true,
 });
+
+const toggleAdditionalClient = (form: typeof createEventForm | typeof editEventForm, clientId: number) => {
+    form.additional_client_ids = form.additional_client_ids.includes(clientId)
+        ? form.additional_client_ids.filter((id) => id !== clientId)
+        : [...form.additional_client_ids, clientId];
+};
 
 const reportSyncIntegrationError = ref('');
 const hasProcessingSync = computed(() =>
@@ -171,6 +204,7 @@ const submitCreateEvent = () => {
 const openEditEventModal = (event: EventItem) => {
     editingEventId.value = event.id;
     editEventForm.client_id = event.client_id;
+    editEventForm.additional_client_ids = [...event.additional_client_ids];
     editEventForm.title = event.title;
     editEventForm.description = event.description ?? '';
     editEventForm.event_date = event.event_date_input;
@@ -351,7 +385,12 @@ const deleteEvent = async (event: EventItem) => {
                         <div class="admin-events-mobile-top">
                             <div class="min-w-0">
                                 <p class="admin-events-title">{{ event.title }}</p>
-                                <p class="admin-events-sub">{{ event.client_name }}</p>
+                                <p class="admin-events-sub">
+                                    {{ event.client_name }}
+                                    <span v-if="event.additional_clients.length">
+                                        + {{ event.additional_clients.map((client) => client.name).join(', ') }}
+                                    </span>
+                                </p>
                                 <div
                                     v-if="event.report_summary"
                                     class="admin-event-report-summary"
@@ -374,54 +413,67 @@ const deleteEvent = async (event: EventItem) => {
                                 >
                                     Ultima sincronizacao: {{ formatDate(event.report_summary.last_synced_at) }}
                                 </p>
-                                <p
-                                    v-if="event.report_summary?.status === 'failed' && event.report_summary.error"
-                                    class="dash-modal-error"
-                                >
-                                    {{ event.report_summary.error }}
-                                </p>
                                 <div
-                                    v-if="event.report_summary?.status === 'failed' && hasSyncIssues(event.report_summary)"
-                                    class="mt-2 space-y-2 text-sm text-amber-200"
+                                    v-if="event.report_summary?.status === 'failed' && (event.report_summary.error || hasSyncIssues(event.report_summary))"
+                                    class="mt-2 flex items-center gap-2"
                                 >
-                                    <div v-if="event.report_summary.failed_machines.length > 0">
-                                        <p class="font-semibold text-amber-100">
-                                            Maquinas com falha
-                                        </p>
-                                        <ul class="mt-1 space-y-1">
-                                            <li
-                                                v-for="issue in previewMachineIssues(event.report_summary.failed_machines, 2)"
-                                                :key="`mobile-failed-${event.id}-${issue.machine_id}`"
-                                            >
-                                                <strong>{{ formatMachineIssueTitle(issue) }}</strong>: {{ issue.message }}
-                                            </li>
-                                        </ul>
-                                        <p
-                                            v-if="remainingMachineIssues(event.report_summary.failed_machines, 2) > 0"
-                                            class="mt-1 text-xs text-amber-300"
+                                    <span class="relative inline-flex" data-sync-issues-popover>
+                                        <button
+                                            type="button"
+                                            class="admin-client-icon-btn warning h-7 w-7"
+                                            title="Ver detalhes da falha de sincronização"
+                                            aria-label="Ver detalhes da falha de sincronização"
+                                            @click.stop="toggleSyncIssues(event.id)"
                                         >
-                                            +{{ remainingMachineIssues(event.report_summary.failed_machines, 2) }} maquina(s) com falha.
-                                        </p>
-                                    </div>
-                                    <div v-if="event.report_summary.machine_warnings.length > 0">
-                                        <p class="font-semibold text-amber-100">
-                                            Documentos com erro
-                                        </p>
-                                        <ul class="mt-1 space-y-1">
-                                            <li
-                                                v-for="issue in previewMachineIssues(event.report_summary.machine_warnings, 2)"
-                                                :key="`mobile-warning-${event.id}-${issue.machine_id}`"
-                                            >
-                                                <strong>{{ formatMachineIssueTitle(issue) }}</strong>: {{ issue.message }}
-                                            </li>
-                                        </ul>
-                                        <p
-                                            v-if="remainingMachineIssues(event.report_summary.machine_warnings, 2) > 0"
-                                            class="mt-1 text-xs text-amber-300"
+                                            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                                <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z" />
+                                                <path d="M12 9v4M12 17h.01" />
+                                            </svg>
+                                        </button>
+                                        <div
+                                            v-if="openSyncIssuesEventId === event.id"
+                                            class="absolute left-0 top-full z-20 mt-2 max-h-72 w-80 overflow-y-auto rounded-xl border border-amber-500/30 bg-[#0b2440] p-3 text-left text-xs leading-5 text-amber-100 shadow-xl"
                                         >
-                                            +{{ remainingMachineIssues(event.report_summary.machine_warnings, 2) }} maquina(s) com documentos com erro.
-                                        </p>
-                                    </div>
+                                            <p v-if="event.report_summary.error" class="mb-2 font-medium text-rose-300">
+                                                {{ event.report_summary.error }}
+                                            </p>
+                                            <div v-if="event.report_summary.failed_machines.length > 0">
+                                                <p class="font-semibold text-amber-100">Maquinas com falha</p>
+                                                <ul class="mt-1 space-y-1">
+                                                    <li
+                                                        v-for="issue in previewMachineIssues(event.report_summary.failed_machines)"
+                                                        :key="`mobile-failed-${event.id}-${issue.machine_id}`"
+                                                    >
+                                                        <strong>{{ formatMachineIssueTitle(issue) }}</strong>: {{ issue.message }}
+                                                    </li>
+                                                </ul>
+                                                <p
+                                                    v-if="remainingMachineIssues(event.report_summary.failed_machines) > 0"
+                                                    class="mt-1 text-amber-300"
+                                                >
+                                                    +{{ remainingMachineIssues(event.report_summary.failed_machines) }} maquina(s) com falha.
+                                                </p>
+                                            </div>
+                                            <div v-if="event.report_summary.machine_warnings.length > 0" class="mt-2">
+                                                <p class="font-semibold text-amber-100">Documentos com erro</p>
+                                                <ul class="mt-1 space-y-1">
+                                                    <li
+                                                        v-for="issue in previewMachineIssues(event.report_summary.machine_warnings)"
+                                                        :key="`mobile-warning-${event.id}-${issue.machine_id}`"
+                                                    >
+                                                        <strong>{{ formatMachineIssueTitle(issue) }}</strong>: {{ issue.message }}
+                                                    </li>
+                                                </ul>
+                                                <p
+                                                    v-if="remainingMachineIssues(event.report_summary.machine_warnings) > 0"
+                                                    class="mt-1 text-amber-300"
+                                                >
+                                                    +{{ remainingMachineIssues(event.report_summary.machine_warnings) }} maquina(s) com documentos com erro.
+                                                </p>
+                                            </div>
+                                        </div>
+                                    </span>
+                                    <span class="text-xs font-medium text-amber-300">Falha na sincronização</span>
                                 </div>
                                 <p
                                     v-if="!event.report_summary"
@@ -631,54 +683,67 @@ const deleteEvent = async (event: EventItem) => {
                                     >
                                         Ultima sincronizacao: {{ formatDate(event.report_summary.last_synced_at) }}
                                     </p>
-                                    <p
-                                        v-if="event.report_summary?.status === 'failed' && event.report_summary.error"
-                                        class="dash-modal-error"
-                                    >
-                                        {{ event.report_summary.error }}
-                                    </p>
                                     <div
-                                        v-if="event.report_summary?.status === 'failed' && hasSyncIssues(event.report_summary)"
-                                        class="mt-2 space-y-2 text-sm text-amber-200"
+                                        v-if="event.report_summary?.status === 'failed' && (event.report_summary.error || hasSyncIssues(event.report_summary))"
+                                        class="mt-2 flex items-center gap-2"
                                     >
-                                        <div v-if="event.report_summary.failed_machines.length > 0">
-                                            <p class="font-semibold text-amber-100">
-                                                Maquinas com falha
-                                            </p>
-                                            <ul class="mt-1 space-y-1">
-                                                <li
-                                                    v-for="issue in previewMachineIssues(event.report_summary.failed_machines)"
-                                                    :key="`desktop-failed-${event.id}-${issue.machine_id}`"
-                                                >
-                                                    <strong>{{ formatMachineIssueTitle(issue) }}</strong>: {{ issue.message }}
-                                                </li>
-                                            </ul>
-                                            <p
-                                                v-if="remainingMachineIssues(event.report_summary.failed_machines) > 0"
-                                                class="mt-1 text-xs text-amber-300"
+                                        <span class="relative inline-flex" data-sync-issues-popover>
+                                            <button
+                                                type="button"
+                                                class="admin-client-icon-btn warning h-7 w-7"
+                                                title="Ver detalhes da falha de sincronização"
+                                                aria-label="Ver detalhes da falha de sincronização"
+                                                @click.stop="toggleSyncIssues(event.id)"
                                             >
-                                                +{{ remainingMachineIssues(event.report_summary.failed_machines) }} maquina(s) com falha.
-                                            </p>
-                                        </div>
-                                        <div v-if="event.report_summary.machine_warnings.length > 0">
-                                            <p class="font-semibold text-amber-100">
-                                                Documentos com erro
-                                            </p>
-                                            <ul class="mt-1 space-y-1">
-                                                <li
-                                                    v-for="issue in previewMachineIssues(event.report_summary.machine_warnings)"
-                                                    :key="`desktop-warning-${event.id}-${issue.machine_id}`"
-                                                >
-                                                    <strong>{{ formatMachineIssueTitle(issue) }}</strong>: {{ issue.message }}
-                                                </li>
-                                            </ul>
-                                            <p
-                                                v-if="remainingMachineIssues(event.report_summary.machine_warnings) > 0"
-                                                class="mt-1 text-xs text-amber-300"
+                                                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                                    <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z" />
+                                                    <path d="M12 9v4M12 17h.01" />
+                                                </svg>
+                                            </button>
+                                            <div
+                                                v-if="openSyncIssuesEventId === event.id"
+                                                class="absolute left-0 top-full z-20 mt-2 max-h-72 w-80 overflow-y-auto rounded-xl border border-amber-500/30 bg-[#0b2440] p-3 text-left text-xs leading-5 text-amber-100 shadow-xl"
                                             >
-                                                +{{ remainingMachineIssues(event.report_summary.machine_warnings) }} maquina(s) com documentos com erro.
-                                            </p>
-                                        </div>
+                                                <p v-if="event.report_summary.error" class="mb-2 font-medium text-rose-300">
+                                                    {{ event.report_summary.error }}
+                                                </p>
+                                                <div v-if="event.report_summary.failed_machines.length > 0">
+                                                    <p class="font-semibold text-amber-100">Maquinas com falha</p>
+                                                    <ul class="mt-1 space-y-1">
+                                                        <li
+                                                            v-for="issue in previewMachineIssues(event.report_summary.failed_machines)"
+                                                            :key="`desktop-failed-${event.id}-${issue.machine_id}`"
+                                                        >
+                                                            <strong>{{ formatMachineIssueTitle(issue) }}</strong>: {{ issue.message }}
+                                                        </li>
+                                                    </ul>
+                                                    <p
+                                                        v-if="remainingMachineIssues(event.report_summary.failed_machines) > 0"
+                                                        class="mt-1 text-amber-300"
+                                                    >
+                                                        +{{ remainingMachineIssues(event.report_summary.failed_machines) }} maquina(s) com falha.
+                                                    </p>
+                                                </div>
+                                                <div v-if="event.report_summary.machine_warnings.length > 0" class="mt-2">
+                                                    <p class="font-semibold text-amber-100">Documentos com erro</p>
+                                                    <ul class="mt-1 space-y-1">
+                                                        <li
+                                                            v-for="issue in previewMachineIssues(event.report_summary.machine_warnings)"
+                                                            :key="`desktop-warning-${event.id}-${issue.machine_id}`"
+                                                        >
+                                                            <strong>{{ formatMachineIssueTitle(issue) }}</strong>: {{ issue.message }}
+                                                        </li>
+                                                    </ul>
+                                                    <p
+                                                        v-if="remainingMachineIssues(event.report_summary.machine_warnings) > 0"
+                                                        class="mt-1 text-amber-300"
+                                                    >
+                                                        +{{ remainingMachineIssues(event.report_summary.machine_warnings) }} maquina(s) com documentos com erro.
+                                                    </p>
+                                                </div>
+                                            </div>
+                                        </span>
+                                        <span class="text-xs font-medium text-amber-300">Falha na sincronização</span>
                                     </div>
                                     <p
                                         v-if="!event.report_summary"
@@ -688,7 +753,10 @@ const deleteEvent = async (event: EventItem) => {
                                     </p>
                                 </td>
                                 <td class="admin-events-text">
-                                    {{ event.client_name }}
+                                    <p>{{ event.client_name }}</p>
+                                    <p v-if="event.additional_clients.length" class="admin-events-sub">
+                                        + {{ event.additional_clients.map((client) => client.name).join(', ') }}
+                                    </p>
                                 </td>
                                 <td class="admin-events-text">
                                     {{ formatDate(event.event_date) }}
@@ -901,6 +969,26 @@ const deleteEvent = async (event: EventItem) => {
                         </p>
                     </div>
 
+                    <div v-if="props.clients.length > 1" class="dash-modal-field dash-modal-field-full">
+                        <label class="dash-modal-label">Clientes adicionais (opcional)</label>
+                        <div class="max-h-40 space-y-2 overflow-y-auto rounded-xl border border-current/10 p-3">
+                            <label
+                                v-for="client in props.clients.filter((option) => option.id !== createEventForm.client_id)"
+                                :key="client.id"
+                                class="flex items-center gap-2 text-sm text-current"
+                            >
+                                <input
+                                    type="checkbox"
+                                    class="rounded border-current/30"
+                                    :checked="createEventForm.additional_client_ids.includes(client.id)"
+                                    @change="toggleAdditionalClient(createEventForm, client.id)"
+                                />
+                                {{ client.name }}{{ client.business_name ? ` - ${client.business_name}` : '' }}
+                            </label>
+                        </div>
+                        <p class="admin-event-input-hint">Ambos os clientes têm acesso total e igual ao dashboard deste evento.</p>
+                    </div>
+
                     <div class="dash-modal-field">
                         <label class="dash-modal-label" for="event_title_create">
                             Título
@@ -1097,6 +1185,26 @@ const deleteEvent = async (event: EventItem) => {
                         >
                             {{ editEventForm.errors.client_id }}
                         </p>
+                    </div>
+
+                    <div v-if="props.clients.length > 1" class="dash-modal-field dash-modal-field-full">
+                        <label class="dash-modal-label">Clientes adicionais (opcional)</label>
+                        <div class="max-h-40 space-y-2 overflow-y-auto rounded-xl border border-current/10 p-3">
+                            <label
+                                v-for="client in props.clients.filter((option) => option.id !== editEventForm.client_id)"
+                                :key="client.id"
+                                class="flex items-center gap-2 text-sm text-current"
+                            >
+                                <input
+                                    type="checkbox"
+                                    class="rounded border-current/30"
+                                    :checked="editEventForm.additional_client_ids.includes(client.id)"
+                                    @change="toggleAdditionalClient(editEventForm, client.id)"
+                                />
+                                {{ client.name }}{{ client.business_name ? ` - ${client.business_name}` : '' }}
+                            </label>
+                        </div>
+                        <p class="admin-event-input-hint">Ambos os clientes têm acesso total e igual ao dashboard deste evento.</p>
                     </div>
 
                     <div class="dash-modal-field">

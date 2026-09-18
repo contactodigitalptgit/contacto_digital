@@ -363,6 +363,13 @@ class ZoneSoftApiClient
     private function buildErrorMessage(mixed $json, string $fallbackBody): string
     {
         if (is_array($json)) {
+            $response = $json['Response'] ?? null;
+            $statusMessage = is_array($response) ? ($response['StatusMessage'] ?? null) : null;
+
+            if (is_string($statusMessage) && trim($statusMessage) !== '') {
+                return $this->normalizeProviderMessage($statusMessage);
+            }
+
             foreach (['message', 'error', 'detail'] as $key) {
                 $value = $json[$key] ?? null;
 
@@ -374,7 +381,7 @@ class ZoneSoftApiClient
 
         $fallbackBody = trim($fallbackBody);
 
-        if ($fallbackBody !== '') {
+        if ($fallbackBody !== '' && ! str_starts_with($fallbackBody, '{') && ! str_starts_with($fallbackBody, '[') && ! str_starts_with($fallbackBody, '<')) {
             return $this->normalizeProviderMessage($fallbackBody);
         }
 

@@ -479,4 +479,187 @@ class AdminManagementTest extends TestCase
             'id' => $application->id,
         ]);
     }
+
+    public function test_admin_can_link_an_additional_client_to_an_event(): void
+    {
+        $admin = User::factory()->create(['role' => 'admin']);
+
+        $primaryClient = Client::create([
+            'user_id' => User::factory()->create(['role' => 'client'])->id,
+            'name' => 'Cliente Principal',
+            'address' => 'Rua Principal',
+            'phone' => '+351 960000000',
+            'is_active' => true,
+        ]);
+
+        $additionalClient = Client::create([
+            'user_id' => User::factory()->create(['role' => 'client'])->id,
+            'name' => 'Cliente Adicional',
+            'address' => 'Rua Adicional',
+            'phone' => '+351 960000001',
+            'is_active' => true,
+        ]);
+
+        $response = $this
+            ->actingAs($admin)
+            ->post(route('admin.events.store'), [
+                'client_id' => $primaryClient->id,
+                'additional_client_ids' => [$additionalClient->id],
+                'title' => 'Evento Partilhado',
+                'event_date' => now()->addDay()->toDateTimeString(),
+                'report_ends_at' => now()->addDays(2)->toDateTimeString(),
+            ]);
+
+        $response->assertRedirect(route('admin.events.index'));
+
+        $event = Event::where('title', 'Evento Partilhado')->firstOrFail();
+
+        $this->assertDatabaseHas('event_additional_clients', [
+            'event_id' => $event->id,
+            'client_id' => $additionalClient->id,
+        ]);
+    }
+
+    public function test_additional_client_can_access_the_shared_event_dashboard(): void
+    {
+        $admin = User::factory()->create(['role' => 'admin']);
+
+        $primaryClientUser = User::factory()->create(['role' => 'client']);
+        $primaryClient = Client::create([
+            'user_id' => $primaryClientUser->id,
+            'name' => 'Cliente Principal Dashboard',
+            'address' => 'Rua Principal',
+            'phone' => '+351 960000002',
+            'is_active' => true,
+        ]);
+
+        $additionalClientUser = User::factory()->create(['role' => 'client']);
+        $additionalClient = Client::create([
+            'user_id' => $additionalClientUser->id,
+            'name' => 'Cliente Adicional Dashboard',
+            'address' => 'Rua Adicional',
+            'phone' => '+351 960000003',
+            'is_active' => true,
+        ]);
+
+        $event = Event::create([
+            'client_id' => $primaryClient->id,
+            'title' => 'Evento Partilhado Dashboard',
+            'event_date' => now()->addDay(),
+            'report_ends_at' => now()->addDays(2),
+            'is_active' => true,
+        ]);
+        $event->additionalClients()->sync([$additionalClient->id]);
+
+        $this
+            ->actingAs($additionalClientUser)
+            ->get(route('events.dashboard', $event))
+            ->assertOk();
+    }
+
+    public function test_admin_cannot_remove_a_client_that_still_has_zonesoft_integrations_for_the_event(): void
+    {
+        $admin = User::factory()->create(['role' => 'admin']);
+
+        $primaryClient = Client::create([
+            'user_id' => User::factory()->create(['role' => 'client'])->id,
+            'name' => 'Cliente Principal ZS',
+            'address' => 'Rua Principal',
+            'phone' => '+351 960000004',
+            'is_active' => true,
+        ]);
+
+        $additionalClient = Client::create([
+            'user_id' => User::factory()->create(['role' => 'client'])->id,
+            'name' => 'Cliente Adicional ZS',
+            'address' => 'Rua Adicional',
+            'phone' => '+351 960000005',
+            'is_active' => true,
+        ]);
+
+        $event = Event::create([
+            'client_id' => $primaryClient->id,
+            'title' => 'Evento ZS Partilhado',
+            'event_date' => now()->addDay(),
+            'report_ends_at' => now()->addDays(2),
+            'is_active' => true,
+        ]);
+        $event->additionalClients()->sync([$additionalClient->id]);
+
+        $application = ZoneSoftApplication::create([
+            'name' => 'Aplicação ZS Partilhado',
+            'app_key' => 'shared-key',
+            'app_secret' => 'shared-secret',
+            'is_active' => true,
+        ]);
+        $machine = ClientZoneSoftMachine::create([
+            'client_id' => $additionalClient->id,
+            'zonesoft_application_id' => $application->id,
+            'zs_client_id' => 'shared-client-id',
+            'license' => 'SHARED-LICENSE',
+            'store_id' => 5,
+            'is_active' => true,
+        ]);
+        $event->zonesoftMachines()->attach($machine->id);
+
+        $response = $this
+            ->actingAs($admin)
+            ->put(route('admin.events.update', $event), [
+                'client_id' => $primaryClient->id,
+                'additional_client_ids' => [],
+                'title' => $event->title,
+                'event_date' => $event->event_date->toDateTimeString(),
+                'report_ends_at' => $event->report_ends_at->toDateTimeString(),
+            ]);
+
+        $response->assertSessionHasErrors('client_id');
+
+        $this->assertDatabaseHas('event_additional_clients', [
+            'event_id' => $event->id,
+            'client_id' => $additionalClient->id,
+        ]);
+    }
+
+    public function test_deleting_a_client_cleans_up_additional_client_links(): void
+    {
+        $admin = User::factory()->create(['role' => 'admin']);
+
+        $primaryClient = Client::create([
+            'user_id' => User::factory()->create(['role' => 'client'])->id,
+            'name' => 'Cliente Principal Cleanup',
+            'address' => 'Rua Principal',
+            'phone' => '+351 960000006',
+            'is_active' => true,
+        ]);
+
+        $additionalClient = Client::create([
+            'user_id' => User::factory()->create(['role' => 'client'])->id,
+            'name' => 'Cliente Adicional Cleanup',
+            'address' => 'Rua Adicional',
+            'phone' => '+351 960000007',
+            'is_active' => true,
+        ]);
+
+        $event = Event::create([
+            'client_id' => $primaryClient->id,
+            'title' => 'Evento Cleanup',
+            'event_date' => now()->addDay(),
+            'report_ends_at' => now()->addDays(2),
+            'is_active' => true,
+        ]);
+        $event->additionalClients()->sync([$additionalClient->id]);
+
+        $this
+            ->actingAs($admin)
+            ->delete(route('admin.clients.destroy', $additionalClient))
+            ->assertRedirect(route('admin.clients.index'));
+
+        $this->assertDatabaseMissing('event_additional_clients', [
+            'event_id' => $event->id,
+            'client_id' => $additionalClient->id,
+        ]);
+        $this->assertDatabaseHas('events', [
+            'id' => $event->id,
+        ]);
+    }
 }

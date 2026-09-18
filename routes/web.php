@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Admin\AdminUserController;
 use App\Http\Controllers\Admin\ClientController;
 use App\Http\Controllers\Admin\EventController;
 use App\Http\Controllers\Admin\EventDashboardConfigurationController;
@@ -140,6 +141,7 @@ Route::middleware(['auth', 'active.client', 'admin'])
             ->name('integrations.zonesoft.machines.destroy');
         Route::resource('clients', ClientController::class);
         Route::resource('events', EventController::class);
+        Route::resource('users', AdminUserController::class)->except(['show', 'create', 'edit']);
     });
 
 require __DIR__.'/auth.php';

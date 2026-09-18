@@ -2143,7 +2143,7 @@ function getDifferenceClass(value: number | null) {
                                     <span class="contacto-summary-icon is-lime" aria-hidden="true">
                                         <svg viewBox="0 0 24 24" fill="none"><ellipse cx="12" cy="6" rx="6" ry="2.5" /><path d="M6 6v4c0 1.4 2.7 2.5 6 2.5s6-1.1 6-2.5V6M6 10v4c0 1.4 2.7 2.5 6 2.5s6-1.1 6-2.5v-4M6 14v4c0 1.4 2.7 2.5 6 2.5s6-1.1 6-2.5v-4" /></svg>
                                     </span>
-                                    <span class="contacto-summary-label">{{ blockLabel('overview', showZtCard ? 'Total sem Top up' : 'Total faturado') }}</span>
+                                    <span class="contacto-summary-label">{{ blockLabel('overview', 'Total') }}</span>
                                     <strong>{{ formatMoney(props.paymentSummary.total_without_zt) }}</strong>
                                 </button>
 

@@ -115,7 +115,7 @@ class ClientController extends Controller
 
     private function latestActiveEventForClient(Client $client): ?Event
     {
-        return $client->events()
+        return $client->visibleEvents()
             ->where('is_active', true)
             ->orderByDesc('event_date')
             ->orderByDesc('id')
@@ -186,6 +186,8 @@ class ClientController extends Controller
                 ->whereIn('event_id', $eventIds)
                 ->orWhereIn('client_zonesoft_machine_id', $machineIds)
                 ->delete();
+            DB::table('event_additional_clients')->where('client_id', $client->id)->delete();
+            DB::table('event_additional_clients')->whereIn('event_id', $eventIds)->delete();
             DB::table('event_report_payment_documents')->whereIn('event_id', $eventIds)->delete();
             DB::table('event_report_rows')->whereIn('event_id', $eventIds)->delete();
             DB::table('event_report_imports')->whereIn('event_id', $eventIds)->delete();

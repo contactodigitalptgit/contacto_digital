@@ -49,6 +49,17 @@ class Event extends Model
         return $this->belongsTo(Client::class);
     }
 
+    public function additionalClients(): BelongsToMany
+    {
+        return $this->belongsToMany(Client::class, 'event_additional_clients')->withTimestamps();
+    }
+
+    public function hasClient(int $clientId): bool
+    {
+        return $this->client_id === $clientId
+            || $this->additionalClients()->where('clients.id', $clientId)->exists();
+    }
+
     public function reportImports(): HasMany
     {
         return $this->hasMany(EventReportImport::class);

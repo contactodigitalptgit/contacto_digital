@@ -49,6 +49,7 @@ class EventController extends Controller
                             'event_report_imports.status',
                         ]),
                         'client:id,name',
+                        'additionalClients:id,name',
                     ])
                     ->withCount([
                         'zonesoftMachines as active_zonesoft_machines_count' => fn ($query) => $query->where('is_active', true),
@@ -79,6 +80,11 @@ class EventController extends Controller
                             'show_zt_card' => $event->show_zt_card,
                             'client_name' => $event->client->name,
                             'client_id' => $event->client_id,
+                            'additional_client_ids' => $event->additionalClients->pluck('id'),
+                            'additional_clients' => $event->additionalClients->map(fn (Client $client): array => [
+                                'id' => $client->id,
+                                'name' => $client->name,
+                            ]),
                             'is_active' => $event->is_active,
                             'available_machine_count' => (int) ($event->active_zonesoft_machines_count ?? 0),
                             'report_summary' => $hasAnyImport ? [
@@ -156,6 +162,8 @@ class EventController extends Controller
     {
         $validated = $request->validate([
             'client_id' => ['required', 'exists:clients,id'],
+            'additional_client_ids' => ['sometimes', 'array'],
+            'additional_client_ids.*' => ['integer', 'exists:clients,id', 'different:client_id'],
             'title' => ['required', 'string', 'max:255'],
             'description' => ['nullable', 'string'],
             'event_date' => ['required', 'date'],
@@ -165,18 +173,27 @@ class EventController extends Controller
         ]);
 
         $validated['show_zt_card'] = $request->boolean('show_zt_card', true);
+        $additionalClientIds = $validated['additional_client_ids'] ?? [];
+        unset($validated['additional_client_ids']);
 
-        Event::create($validated);
+        $event = Event::create($validated);
+
+        if ($additionalClientIds !== []) {
+            $event->additionalClients()->sync($additionalClientIds);
+        }
 
         return to_route('admin.events.index');
     }
 
     public function edit(Event $event): Response
     {
+        $event->load('additionalClients:id');
+
         return Inertia::render('Admin/Events/Edit', [
             'event' => [
                 'id' => $event->id,
                 'client_id' => $event->client_id,
+                'additional_client_ids' => $event->additionalClients->pluck('id'),
                 'title' => $event->title,
                 'description' => $event->description,
                 'event_date' => $event->event_date->format('Y-m-d\TH:i'),
@@ -194,6 +211,8 @@ class EventController extends Controller
     {
         $validated = $request->validate([
             'client_id' => ['required', 'exists:clients,id'],
+            'additional_client_ids' => ['sometimes', 'array'],
+            'additional_client_ids.*' => ['integer', 'exists:clients,id', 'different:client_id'],
             'title' => ['required', 'string', 'max:255'],
             'description' => ['nullable', 'string'],
             'event_date' => ['required', 'date'],
@@ -203,17 +222,28 @@ class EventController extends Controller
         ]);
 
         $validated['show_zt_card'] = $request->boolean('show_zt_card', true);
+        $newAdditionalClientIds = $validated['additional_client_ids'] ?? [];
+        unset($validated['additional_client_ids']);
+
+        $oldClientIds = collect([$event->client_id])
+            ->merge($event->additionalClients()->pluck('clients.id'))
+            ->unique();
+        $newClientIds = collect([(int) $validated['client_id']])
+            ->merge($newAdditionalClientIds)
+            ->unique();
+        $removedClientIds = $oldClientIds->diff($newClientIds);
 
         if (
-            (int) $validated['client_id'] !== $event->client_id
-            && $event->zonesoftMachines()->exists()
+            $removedClientIds->isNotEmpty()
+            && $event->zonesoftMachines()->whereIn('client_zonesoft_machines.client_id', $removedClientIds)->exists()
         ) {
             throw ValidationException::withMessages([
-                'client_id' => 'Não é possível alterar o cliente enquanto o evento tiver integrações configuradas.',
+                'client_id' => 'Não é possível remover um cliente enquanto o evento tiver integrações configuradas para ele.',
             ]);
         }
 
         $event->update($validated);
+        $event->additionalClients()->sync($newAdditionalClientIds);
 
         return to_route('admin.events.index');
     }

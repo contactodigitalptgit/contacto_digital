@@ -3902,6 +3902,7 @@ body {
 
     .app-main {
         @apply flex min-h-screen flex-1 flex-col;
+        min-width: 0;
     }
 
     .app-mobile-header {
@@ -5472,8 +5473,8 @@ body {
     }
 
     .dash-modal-error {
-        @apply text-xs;
-        color: #ef4444;
+        @apply mt-1 text-sm font-medium;
+        color: #ff8080;
     }
 
     .admin-event-input-hint {

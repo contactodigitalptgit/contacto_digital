@@ -11,7 +11,7 @@ interface NavItem {
     label: string;
     href: string;
     pattern: string;
-    icon: 'dashboard' | 'clients' | 'events' | 'tpa';
+    icon: 'dashboard' | 'clients' | 'events' | 'tpa' | 'admins';
 }
 
 const page = usePage<PageProps>();
@@ -50,6 +50,13 @@ const primaryNavigation = computed<NavItem[]>(() => {
                 href: route('admin.integrations.zonesoft.index'),
                 pattern: 'admin.integrations.*',
                 icon: 'tpa',
+            },
+            {
+                key: 'users',
+                label: 'Administradores',
+                href: route('admin.users.index'),
+                pattern: 'admin.users.*',
+                icon: 'admins',
             },
         );
     }

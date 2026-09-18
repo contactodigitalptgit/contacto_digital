@@ -59,17 +59,16 @@ class DashboardController extends Controller
             ]);
         }
 
-        $client = $user->client()
-            ->with([
-                'events' => fn ($query) => $query
-                    ->where('is_active', true)
-                    ->orderByDesc('event_date')
-                    ->orderByDesc('id'),
-            ])
-            ->firstOrFail();
+        $client = $user->client()->firstOrFail();
 
-        if ($client->events->isNotEmpty()) {
-            return to_route('events.dashboard', $client->events->first());
+        $visibleEvents = $client->visibleEvents()
+            ->where('is_active', true)
+            ->orderByDesc('event_date')
+            ->orderByDesc('id')
+            ->get();
+
+        if ($visibleEvents->isNotEmpty()) {
+            return to_route('events.dashboard', $visibleEvents->first());
         }
 
         return Inertia::render('Dashboard', [
@@ -81,7 +80,7 @@ class DashboardController extends Controller
                 'address' => $client->address,
                 'phone' => $client->phone,
             ],
-            'events' => $client->events->map(fn (Event $event): array => [
+            'events' => $visibleEvents->map(fn (Event $event): array => [
                 'id' => $event->id,
                 'title' => $event->title,
                 'description' => $event->description,

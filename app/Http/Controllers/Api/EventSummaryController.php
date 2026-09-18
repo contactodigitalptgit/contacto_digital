@@ -42,7 +42,11 @@ class EventSummaryController extends Controller
             ->where('is_active', true);
 
         if (! $user->isAdmin()) {
-            $eventsQuery->where('client_id', $user->client()->firstOrFail()->id);
+            $clientId = $user->client()->firstOrFail()->id;
+            $eventsQuery->where(
+                fn ($query) => $query->where('client_id', $clientId)
+                    ->orWhereHas('additionalClients', fn ($q) => $q->where('clients.id', $clientId)),
+            );
         }
 
         $events = $eventsQuery
@@ -257,7 +261,7 @@ class EventSummaryController extends Controller
 
         $client = $request->user()->client()->firstOrFail();
 
-        abort_unless($event->client_id === $client->id, 404);
+        abort_unless($event->hasClient($client->id), 404);
 
         return $event;
     }

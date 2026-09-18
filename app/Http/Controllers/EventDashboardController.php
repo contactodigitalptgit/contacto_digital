@@ -94,7 +94,7 @@ class EventDashboardController extends Controller
         $client = $request->user()->client()->firstOrFail();
 
         abort_unless(
-            $event->client_id === $client->id && $event->is_active,
+            $event->hasClient($client->id) && $event->is_active,
             404,
         );
 
