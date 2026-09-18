@@ -94,6 +94,16 @@ class Event extends Model
         return $this->hasMany(EventReportRow::class);
     }
 
+    public function zones(): HasMany
+    {
+        return $this->hasMany(EventZone::class);
+    }
+
+    public function zoneAssignments(): HasMany
+    {
+        return $this->hasMany(EventZoneAssignment::class);
+    }
+
     public function zonesoftMachines(): BelongsToMany
     {
         return $this->belongsToMany(

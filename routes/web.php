@@ -5,6 +5,7 @@ use App\Http\Controllers\Admin\ClientController;
 use App\Http\Controllers\Admin\EventController;
 use App\Http\Controllers\Admin\EventDashboardConfigurationController;
 use App\Http\Controllers\Admin\EventZoneSoftIntegrationController;
+use App\Http\Controllers\Admin\EventZoneController;
 use App\Http\Controllers\Admin\ZoneSoftIntegrationController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\EventDashboardController;
@@ -105,6 +106,18 @@ Route::middleware(['auth', 'active.client', 'admin'])
             ->name('events.tpas.session-status');
         Route::post('events/{event}/gerir-tpa/{machine}/sync-sales', [EventZoneSoftIntegrationController::class, 'syncSales'])
             ->name('events.tpas.sync-sales');
+        Route::get('events/{event}/gerir-zonas', [EventZoneController::class, 'index'])
+            ->name('events.zones.manage');
+        Route::post('events/{event}/gerir-zonas/inicializar', [EventZoneController::class, 'initialize'])
+            ->name('events.zones.initialize');
+        Route::post('events/{event}/gerir-zonas', [EventZoneController::class, 'store'])
+            ->name('events.zones.store');
+        Route::patch('events/{event}/gerir-zonas/{zone}', [EventZoneController::class, 'update'])
+            ->name('events.zones.update');
+        Route::delete('events/{event}/gerir-zonas/{zone}', [EventZoneController::class, 'destroy'])
+            ->name('events.zones.destroy');
+        Route::post('events/{event}/gerir-zonas/{zone}/tpas/{machine}', [EventZoneController::class, 'moveMachine'])
+            ->name('events.zones.machines.move');
         Route::post('events/{event}/reports', [EventController::class, 'storeReport'])
             ->name('events.reports.store');
         Route::get('events/{event}/integrations', [EventZoneSoftIntegrationController::class, 'show'])

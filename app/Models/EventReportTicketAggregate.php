@@ -17,6 +17,7 @@ class EventReportTicketAggregate extends Model
     protected $fillable = [
         'event_id',
         'machine_id',
+        'event_zone_id',
         'sale_date',
         'sale_calendar_date',
         'sale_hour',
@@ -47,5 +48,10 @@ class EventReportTicketAggregate extends Model
     public function machine(): BelongsTo
     {
         return $this->belongsTo(ClientZoneSoftMachine::class, 'machine_id');
+    }
+
+    public function zone(): BelongsTo
+    {
+        return $this->belongsTo(EventZone::class, 'event_zone_id');
     }
 }

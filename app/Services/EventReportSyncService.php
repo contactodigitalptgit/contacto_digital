@@ -48,6 +48,7 @@ class EventReportSyncService
 
     public function __construct(
         private readonly ZoneSoftApiClient $apiClient,
+        private readonly EventZoneAttributionService $zoneAttribution,
     ) {}
 
     public function sync(Event $event, ?User $uploadedBy = null): EventReportImport
@@ -225,6 +226,7 @@ class EventReportSyncService
                 // runs inside this short transaction so a crash or a superseding
                 // sync before this point leaves the previously published data
                 // completely untouched.
+                $this->zoneAttribution->forget($event->id);
                 $this->upsertRows($event, $lockedSyncLog, $machineSync['pending_rows'], $timestamp);
                 $this->upsertPaymentDocuments($event, $lockedSyncLog, $machineSync['pending_payment_documents'], $timestamp);
                 $this->reconcileFetchedDocuments(
@@ -2154,6 +2156,12 @@ class EventReportSyncService
                             'event_id' => $event->id,
                             'event_report_import_id' => $syncLog->id,
                             'machine_id' => $row['machine_id'] ?? null,
+                            'event_zone_id' => $this->zoneAttribution->zoneIdFor(
+                                $event->id,
+                                $row['machine_id'] ?? null,
+                                $row['sale_datetime'] ?? null,
+                                $row['sale_date'] ?? null,
+                            ),
                             'source_sheet' => $row['source_sheet'] ?? null,
                             'source_row_number' => $row['source_row_number'] ?? 0,
                             'store_code' => $row['store_code'] ?? null,
@@ -2180,7 +2188,7 @@ class EventReportSyncService
                 uniqueBy: ['event_id', 'machine_id', 'doc_type', 'document_series', 'document_number', 'line_key'],
                 update: [
                     'event_report_import_id', 'source_sheet', 'source_row_number',
-                    'store_code', 'store_name', 'sale_date', 'sale_datetime',
+                    'event_zone_id', 'store_code', 'store_name', 'sale_date', 'sale_datetime',
                     'value', 'total', 'discount', 'quantity',
                     'product_code', 'description', 'raw_row', 'updated_at',
                 ],
@@ -2218,7 +2226,7 @@ class EventReportSyncService
                 ),
                 uniqueBy: ['event_id', 'dedupe_key'],
                 update: [
-                    'event_report_import_id', 'machine_id', 'machine_client_id',
+                    'event_report_import_id', 'machine_id', 'event_zone_id', 'machine_client_id',
                     'store_code', 'store_name', 'sale_date', 'sale_datetime',
                     'doc_type', 'document_series', 'document_number',
                     'payment_reference', 'paid', 'document_total', 'payment_key',
@@ -2245,6 +2253,12 @@ class EventReportSyncService
             'event_id' => $event->id,
             'event_report_import_id' => $syncLog->id,
             'machine_id' => $document['machine_id'] ?? null,
+            'event_zone_id' => $this->zoneAttribution->zoneIdFor(
+                $event->id,
+                $document['machine_id'] ?? null,
+                $document['sale_datetime'] ?? null,
+                $document['sale_date'] ?? null,
+            ),
             'machine_client_id' => $document['machine_client_id'] ?? null,
             'store_code' => $document['store_code'] ?? null,
             'store_name' => $document['store_name'] ?? null,
@@ -2517,7 +2531,7 @@ class EventReportSyncService
             ->selectRaw("{$dayExpression} as agg_sale_date")
             ->selectRaw("{$calendarDayExpression} as agg_sale_calendar_date")
             ->selectRaw("{$hourExpression} as agg_sale_hour")
-            ->addSelect(['store_code', 'store_name', 'doc_type', 'product_code', 'description'])
+            ->addSelect(['event_zone_id', 'store_code', 'store_name', 'doc_type', 'product_code', 'description'])
             ->selectRaw('COUNT(*) as rows_count')
             ->selectRaw('COALESCE(SUM(quantity), 0) as quantity_total')
             ->selectRaw('COALESCE(SUM(value), 0) as value_total')
@@ -2528,7 +2542,7 @@ class EventReportSyncService
             ->groupByRaw($dayExpression)
             ->groupByRaw($calendarDayExpression)
             ->groupByRaw($hourExpression)
-            ->groupBy('store_code', 'store_name', 'doc_type', 'product_code', 'description')
+            ->groupBy('event_zone_id', 'store_code', 'store_name', 'doc_type', 'product_code', 'description')
             ->get();
 
         $ticketGroups = DB::table('event_report_rows')
@@ -2537,11 +2551,11 @@ class EventReportSyncService
             ->selectRaw("{$dayExpression} as agg_sale_date")
             ->selectRaw("{$calendarDayExpression} as agg_sale_calendar_date")
             ->selectRaw("{$hourExpression} as agg_sale_hour")
-            ->addSelect(['store_code', 'store_name', 'doc_type', 'document_series', 'document_number'])
+            ->addSelect(['event_zone_id', 'store_code', 'store_name', 'doc_type', 'document_series', 'document_number'])
             ->groupByRaw($dayExpression)
             ->groupByRaw($calendarDayExpression)
             ->groupByRaw($hourExpression)
-            ->groupBy('store_code', 'store_name', 'doc_type', 'document_series', 'document_number')
+            ->groupBy('event_zone_id', 'store_code', 'store_name', 'doc_type', 'document_series', 'document_number')
             ->get();
 
         EventReportRowAggregate::query()->where('event_id', $eventId)->where('machine_id', $machineId)->delete();
@@ -2551,6 +2565,7 @@ class EventReportSyncService
             EventReportRowAggregate::query()->insert($chunk->map(fn (object $row): array => [
                 'event_id' => $eventId,
                 'machine_id' => $machineId,
+                'event_zone_id' => $row->event_zone_id,
                 'sale_date' => $row->agg_sale_date,
                 'sale_calendar_date' => $row->agg_sale_calendar_date,
                 'sale_hour' => $row->agg_sale_hour,
@@ -2575,6 +2590,7 @@ class EventReportSyncService
             EventReportTicketAggregate::query()->insert($chunk->map(fn (object $row): array => [
                 'event_id' => $eventId,
                 'machine_id' => $machineId,
+                'event_zone_id' => $row->event_zone_id,
                 'sale_date' => $row->agg_sale_date,
                 'sale_calendar_date' => $row->agg_sale_calendar_date,
                 'sale_hour' => $row->agg_sale_hour,

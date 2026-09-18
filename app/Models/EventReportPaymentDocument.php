@@ -18,6 +18,7 @@ class EventReportPaymentDocument extends Model
         'event_id',
         'event_report_import_id',
         'machine_id',
+        'event_zone_id',
         'machine_client_id',
         'store_code',
         'store_name',
@@ -68,5 +69,10 @@ class EventReportPaymentDocument extends Model
     public function machine(): BelongsTo
     {
         return $this->belongsTo(ClientZoneSoftMachine::class, 'machine_id');
+    }
+
+    public function zone(): BelongsTo
+    {
+        return $this->belongsTo(EventZone::class, 'event_zone_id');
     }
 }

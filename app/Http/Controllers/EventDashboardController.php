@@ -11,6 +11,7 @@ use App\Models\EventReportTicketAggregate;
 use App\Services\DashboardConfigurationService;
 use App\Services\EventReportAutoSyncService;
 use App\Services\EventReportSyncService;
+use App\Services\EventZoneAttributionService;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
@@ -27,6 +28,7 @@ class EventDashboardController extends Controller
     public function __construct(
         private readonly EventReportAutoSyncService $autoSync,
         private readonly DashboardConfigurationService $dashboardConfiguration,
+        private readonly EventZoneAttributionService $zoneAttribution,
     ) {}
 
     public function show(Request $request, Event $event): Response
@@ -165,14 +167,14 @@ class EventDashboardController extends Controller
                 ->where('event_id', $event->id)
                 ->fromActiveImports(),
         );
-        $makeFilteredRowsQuery = fn (): Builder => $this->applyFilters($makeBaseRowsQuery(), $filters);
+        $makeFilteredRowsQuery = fn (): Builder => $this->applyFilters($makeBaseRowsQuery(), $event->id, $filters);
         $makeProductRowsQuery = fn (): Builder => $this->applyProductDocumentScope(
             EventReportRow::query()
                 ->where('event_id', $event->id)
                 ->fromActiveImports(),
             $event->show_zt_card,
         );
-        $makeFilteredProductRowsQuery = fn (): Builder => $this->applyFilters($makeProductRowsQuery(), $filters);
+        $makeFilteredProductRowsQuery = fn (): Builder => $this->applyFilters($makeProductRowsQuery(), $event->id, $filters);
 
         /** @var array<int, array<string, mixed>>|null $documentTypes */
         $documentTypes = null;
@@ -258,6 +260,7 @@ class EventDashboardController extends Controller
                 'enabled' => true,
                 'edit_url' => route('admin.events.dashboard-configuration.edit', $event),
                 'manage_tpas_url' => route('admin.events.tpas.manage', $event),
+                'manage_zones_url' => route('admin.events.zones.manage', $event),
             ] : null,
             'integration' => [
                 'source' => 'ZoneSoft API',
@@ -417,6 +420,14 @@ class EventDashboardController extends Controller
             ->selectRaw('MAX(id) AS latest_id, MAX(updated_at) AS latest_updated_at')
             ->toBase()
             ->first();
+        $zoneVersion = $event->zones()
+            ->selectRaw('MAX(updated_at) AS latest_updated_at')
+            ->toBase()
+            ->first();
+        $assignmentVersion = $event->zoneAssignments()
+            ->selectRaw('MAX(updated_at) AS latest_updated_at')
+            ->toBase()
+            ->first();
 
         return hash('sha256', serialize([
             'event' => $event->id,
@@ -429,6 +440,8 @@ class EventDashboardController extends Controller
             'processing_imports' => (int) $event->processing_report_imports_count,
             'client_latest_active_import' => $clientImports?->latest_id,
             'client_latest_active_import_updated_at' => $clientImports?->latest_updated_at,
+            'zone_updated_at' => $zoneVersion?->latest_updated_at,
+            'zone_assignment_updated_at' => $assignmentVersion?->latest_updated_at,
         ]));
     }
 
@@ -598,10 +611,10 @@ class EventDashboardController extends Controller
         ];
     }
 
-    private function applyFilters(Builder $query, array $filters): Builder
+    private function applyFilters(Builder $query, int $eventId, array $filters): Builder
     {
         if ($filters['bar_groups'] !== []) {
-            $this->applyBarGroupsFilter($query, $filters['bar_groups']);
+            $this->applyBarGroupsFilter($query, $eventId, $filters['bar_groups']);
         }
 
         if ($filters['store'] !== '') {
@@ -690,10 +703,10 @@ class EventDashboardController extends Controller
      *
      * @param  array<string, mixed>  $filters
      */
-    private function applyAggregateFilters(Builder $query, array $filters): Builder
+    private function applyAggregateFilters(Builder $query, int $eventId, array $filters): Builder
     {
         if ($filters['bar_groups'] !== []) {
-            $this->applyBarGroupsFilter($query, $filters['bar_groups']);
+            $this->applyBarGroupsFilter($query, $eventId, $filters['bar_groups']);
         }
 
         if ($filters['store'] !== '') {
@@ -844,7 +857,7 @@ class EventDashboardController extends Controller
             $eventTotalSales = (float) ((clone $baseRowsQuery)->sum('total') ?? 0);
             $barGroupsCount = count($this->buildBarGroups($eventId, $filters, true, clone $filteredRowsQuery));
         } else {
-            $aggFiltered = $this->applyAggregateFilters($this->aggregateRowsBaseQuery($eventId), $filters);
+            $aggFiltered = $this->applyAggregateFilters($this->aggregateRowsBaseQuery($eventId), $eventId, $filters);
             $totals = (clone $aggFiltered)
                 ->selectRaw('COALESCE(SUM(rows_count), 0) as rows_count')
                 ->selectRaw('COALESCE(SUM(total_sum), 0) as total_sales')
@@ -898,57 +911,66 @@ class EventDashboardController extends Controller
             $ticketExpression = $this->ticketSqlExpression($rowQuery);
 
             $stores = $rowQuery
-                ->select('store_name', 'store_code')
+                ->select('event_zone_id', 'store_name', 'store_code')
                 ->selectRaw('COUNT(*) as rows_count')
                 ->selectRaw("COUNT(DISTINCT {$ticketExpression}) as tickets_count")
                 ->selectRaw('COALESCE(SUM(quantity), 0) as quantity_total')
                 ->selectRaw('COALESCE(SUM(total), 0) as sales_total')
-                ->groupBy('store_name', 'store_code')
+                ->groupBy('event_zone_id', 'store_name', 'store_code')
                 ->get()
                 ->map(fn (EventReportRow $row): object => (object) [
                     'store_name' => $row->store_name,
+                    'zone_id' => $row->event_zone_id,
                     'rows_count' => (int) $row->rows_count,
                     'tickets_count' => (int) $row->tickets_count,
                     'quantity_total' => (float) $row->quantity_total,
                     'sales_total' => (float) $row->sales_total,
                 ]);
 
-            return $this->summarizeStoreGroups($stores);
+            return $this->summarizeStoreGroups($eventId, $stores);
         }
 
-        $storeSales = $this->applyAggregateFilters($this->aggregateRowsBaseQuery($eventId), $filters)
-            ->select('store_name', 'store_code')
+        $storeSales = $this->applyAggregateFilters($this->aggregateRowsBaseQuery($eventId), $eventId, $filters)
+            ->select('event_zone_id', 'store_name', 'store_code')
             ->selectRaw('COALESCE(SUM(rows_count), 0) as rows_count')
             ->selectRaw('COALESCE(SUM(quantity_total), 0) as quantity_total')
             ->selectRaw('COALESCE(SUM(total_sum), 0) as sales_total')
-            ->groupBy('store_name', 'store_code')
+            ->groupBy('event_zone_id', 'store_name', 'store_code')
             ->get();
         $ticketCounts = $this->aggregateTicketCountsByStore($eventId, $filters);
 
         $stores = $storeSales->map(fn (EventReportRowAggregate $row): object => (object) [
             'store_name' => $row->store_name,
+            'zone_id' => $row->event_zone_id,
             'rows_count' => (int) $row->rows_count,
-            'tickets_count' => $ticketCounts->get($this->storeKey($row->store_name, $row->store_code), 0),
+            'tickets_count' => $ticketCounts->get(
+                $this->storeKey($row->event_zone_id, $row->store_name, $row->store_code),
+                0,
+            ),
             'quantity_total' => (float) $row->quantity_total,
             'sales_total' => (float) $row->sales_total,
         ]);
 
-        return $this->summarizeStoreGroups($stores);
+        return $this->summarizeStoreGroups($eventId, $stores);
     }
 
     /**
      * Shared by both buildBarGroups() branches — groups a flat list of
      * per-(store_name, store_code) totals into bar-group labels via
-     * resolveBarGroupLabel(). Each $row needs store_name, tickets_count,
+     * the configured event-zone assignment. Each $row needs store_name, zone_id, tickets_count,
      * quantity_total, sales_total, rows_count properties.
      *
      * @param  Collection<int, object>  $stores
      * @return array<int, array<string, mixed>>
      */
-    private function summarizeStoreGroups(Collection $stores): array
+    private function summarizeStoreGroups(int $eventId, Collection $stores): array
     {
         return $stores
-            ->groupBy(fn (object $row): string => $this->resolveBarGroupLabel($row->store_name))
+            ->groupBy(fn (object $row): string => $this->zoneAttribution->labelFor(
+                $eventId,
+                $row->zone_id,
+                $row->store_name,
+            ))
             ->map(function (Collection $groupStores, string $label): array {
                 $members = $groupStores
                     ->pluck('store_name')
@@ -984,19 +1006,19 @@ class EventDashboardController extends Controller
      */
     private function aggregateTicketCountsByStore(int $eventId, array $filters): Collection
     {
-        return $this->applyAggregateFilters($this->aggregateTicketsBaseQuery($eventId), $filters)
-            ->select('store_name', 'store_code')
+        return $this->applyAggregateFilters($this->aggregateTicketsBaseQuery($eventId), $eventId, $filters)
+            ->select('event_zone_id', 'store_name', 'store_code')
             ->selectRaw('COUNT(*) as tickets_count')
-            ->groupBy('store_name', 'store_code')
+            ->groupBy('event_zone_id', 'store_name', 'store_code')
             ->get()
             ->mapWithKeys(fn (object $row): array => [
-                $this->storeKey($row->store_name, $row->store_code) => (int) $row->tickets_count,
+                $this->storeKey($row->event_zone_id, $row->store_name, $row->store_code) => (int) $row->tickets_count,
             ]);
     }
 
-    private function storeKey(?string $storeName, ?string $storeCode): string
+    private function storeKey(int|string|null $zoneId, ?string $storeName, ?string $storeCode): string
     {
-        return ($storeName ?? '').'|'.($storeCode ?? '');
+        return ($zoneId ?? 'legacy').'|'.($storeName ?? '').'|'.($storeCode ?? '');
     }
 
     /**
@@ -1028,7 +1050,7 @@ class EventDashboardController extends Controller
                 ->all();
         }
 
-        return $this->applyAggregateFilters($this->aggregateRowsBaseQuery($eventId), $filters)
+        return $this->applyAggregateFilters($this->aggregateRowsBaseQuery($eventId), $eventId, $filters)
             ->select('store_name', 'store_code')
             ->selectRaw('COALESCE(SUM(rows_count), 0) as rows_count')
             ->selectRaw('COALESCE(SUM(quantity_total), 0) as quantity_total')
@@ -1084,7 +1106,7 @@ class EventDashboardController extends Controller
                 ->all();
         }
 
-        return $this->applyAggregateFilters($this->aggregateProductRowsBaseQuery($eventId, $includeZt), $filters)
+        return $this->applyAggregateFilters($this->aggregateProductRowsBaseQuery($eventId, $includeZt), $eventId, $filters)
             ->selectRaw("{$productCode} as product_code")
             ->selectRaw("{$productDescription} as description")
             ->selectRaw('COALESCE(SUM(rows_count), 0) as rows_count')
@@ -1118,7 +1140,7 @@ class EventDashboardController extends Controller
     private function buildProductBreakdowns(int $eventId, array $filters, bool $usesRowLevelFilters, bool $includeZt, ?Builder $rowQuery): array
     {
         if (! $usesRowLevelFilters) {
-            $dates = $this->applyAggregateFilters($this->aggregateProductRowsBaseQuery($eventId, $includeZt), $filters)
+            $dates = $this->applyAggregateFilters($this->aggregateProductRowsBaseQuery($eventId, $includeZt), $eventId, $filters)
                 ->whereNotNull('sale_date')
                 ->select('sale_date')
                 ->distinct()
@@ -1271,7 +1293,7 @@ class EventDashboardController extends Controller
                 ->all();
         }
 
-        $rows = $this->applyAggregateFilters($this->aggregateRowsBaseQuery($eventId), $filters)
+        $rows = $this->applyAggregateFilters($this->aggregateRowsBaseQuery($eventId), $eventId, $filters)
             ->whereNotNull('sale_hour')
             ->whereNotNull('sale_calendar_date')
             ->select('sale_calendar_date', 'sale_hour')
@@ -1281,7 +1303,7 @@ class EventDashboardController extends Controller
             ->orderBy('sale_hour')
             ->get();
 
-        $ticketsByHour = $this->applyAggregateFilters($this->aggregateTicketsBaseQuery($eventId), $filters)
+        $ticketsByHour = $this->applyAggregateFilters($this->aggregateTicketsBaseQuery($eventId), $eventId, $filters)
             ->whereNotNull('sale_hour')
             ->whereNotNull('sale_calendar_date')
             ->select('sale_calendar_date', 'sale_hour')
@@ -1438,26 +1460,30 @@ class EventDashboardController extends Controller
         if ($usesRowLevelFilters) {
             /** @var Collection<int, EventReportRow> $rows */
             $rows = $rowQuery
-                ->select('store_name', 'store_code')
+                ->select('event_zone_id', 'store_name', 'store_code')
                 ->selectRaw('COUNT(*) as rows_count')
                 ->selectRaw('COALESCE(SUM(quantity), 0) as quantity_total')
                 ->selectRaw('COALESCE(SUM(total), 0) as sales_total')
-                ->groupBy('store_name', 'store_code')
+                ->groupBy('event_zone_id', 'store_name', 'store_code')
                 ->orderByDesc('sales_total')
                 ->get();
         } else {
-            $rows = $this->applyAggregateFilters($this->aggregateRowsBaseQuery($eventId), $filters)
-                ->select('store_name', 'store_code')
+            $rows = $this->applyAggregateFilters($this->aggregateRowsBaseQuery($eventId), $eventId, $filters)
+                ->select('event_zone_id', 'store_name', 'store_code')
                 ->selectRaw('COALESCE(SUM(rows_count), 0) as rows_count')
                 ->selectRaw('COALESCE(SUM(quantity_total), 0) as quantity_total')
                 ->selectRaw('COALESCE(SUM(total_sum), 0) as sales_total')
-                ->groupBy('store_name', 'store_code')
+                ->groupBy('event_zone_id', 'store_name', 'store_code')
                 ->orderByDesc('sales_total')
                 ->get();
         }
 
         return $rows
-            ->groupBy(fn (object $row): string => $this->resolveBarGroupLabel($row->store_name))
+            ->groupBy(fn (object $row): string => $this->zoneAttribution->labelFor(
+                $eventId,
+                $row->event_zone_id,
+                $row->store_name,
+            ))
             ->map(function (Collection $zoneRows, string $label): array {
                 $items = $zoneRows
                     ->map(fn (object $row): array => [
@@ -1518,7 +1544,7 @@ class EventDashboardController extends Controller
                 ->all();
         }
 
-        $rows = $this->applyAggregateFilters($this->aggregateRowsBaseQuery($eventId), $filters)
+        $rows = $this->applyAggregateFilters($this->aggregateRowsBaseQuery($eventId), $eventId, $filters)
             ->selectRaw("{$documentTypeExpression} as document_type_label")
             ->selectRaw('COALESCE(SUM(rows_count), 0) as rows_count')
             ->selectRaw('COALESCE(SUM(quantity_total), 0) as quantity_total')
@@ -1527,7 +1553,7 @@ class EventDashboardController extends Controller
             ->get()
             ->keyBy('document_type_label');
 
-        $ticketsByType = $this->applyAggregateFilters($this->aggregateTicketsBaseQuery($eventId), $filters)
+        $ticketsByType = $this->applyAggregateFilters($this->aggregateTicketsBaseQuery($eventId), $eventId, $filters)
             ->selectRaw("{$documentTypeExpression} as document_type_label")
             ->selectRaw('COUNT(*) as tickets_count')
             ->groupByRaw($documentTypeExpression)
@@ -2014,12 +2040,14 @@ class EventDashboardController extends Controller
                 $query = $this->applyPaymentDocumentFilters(
                     EventReportPaymentDocument::query()
                         ->where('event_id', $latestImport->event_id),
+                    $latestImport->event_id,
                     $filters,
                 );
 
                 foreach ($query->orderBy('id')->toBase()->cursor() as $document) {
                     yield [
                         'machine_id' => $document->machine_id,
+                        'event_zone_id' => $document->event_zone_id,
                         'machine_client_id' => $document->machine_client_id,
                         'store_code' => $document->store_code,
                         'store_name' => $document->store_name,
@@ -2058,10 +2086,10 @@ class EventDashboardController extends Controller
     /**
      * @param  array{bar_groups: array<int, string>, store: string, product: string, date_from: string, date_to: string, hour_from: string, hour_to: string, total_min: string, total_max: string}  $filters
      */
-    private function applyPaymentDocumentFilters(Builder $query, array $filters): Builder
+    private function applyPaymentDocumentFilters(Builder $query, int $eventId, array $filters): Builder
     {
         if ($filters['bar_groups'] !== []) {
-            $this->applyBarGroupsFilter($query, $filters['bar_groups']);
+            $this->applyBarGroupsFilter($query, $eventId, $filters['bar_groups']);
         }
 
         if ($filters['store'] !== '') {
@@ -2102,7 +2130,7 @@ class EventDashboardController extends Controller
                     ? $document['store_name']
                     : null;
 
-                return in_array($this->resolveBarGroupLabel($storeName), $filters['bar_groups'], true);
+                return in_array($this->zoneAttribution->fallbackLabel($storeName), $filters['bar_groups'], true);
             })->values();
         }
 
@@ -2432,8 +2460,15 @@ class EventDashboardController extends Controller
     /**
      * @param  array<int, string>  $barGroups
      */
-    private function applyBarGroupsFilter(Builder $query, array $barGroups): void
+    private function applyBarGroupsFilter(Builder $query, int $eventId, array $barGroups): void
     {
+        if ($this->zoneAttribution->hasConfiguredZones($eventId)) {
+            $zoneIds = $this->zoneAttribution->zoneIdsForLabels($eventId, $barGroups);
+            $query->whereIn('event_zone_id', $zoneIds === [] ? [-1] : $zoneIds);
+
+            return;
+        }
+
         $query->where(function (Builder $builder) use ($barGroups): void {
             foreach ($barGroups as $barGroup) {
                 $builder->orWhere(function (Builder $barGroupQuery) use ($barGroup): void {
@@ -2441,42 +2476,5 @@ class EventDashboardController extends Controller
                 });
             }
         });
-    }
-
-    private function resolveBarGroupLabel(?string $storeName): string
-    {
-        if ($storeName === null || trim($storeName) === '') {
-            return 'Sem loja';
-        }
-
-        if (preg_match('/\b(top\s*up|bc\s*top)\b/i', $storeName) === 1) {
-            return 'Top Up';
-        }
-
-        if (preg_match('/\bbar\s*vip\b/i', $storeName) === 1) {
-            return 'Bar Vip';
-        }
-
-        if (preg_match('/\bbar\s*(\d+)\b/i', $storeName, $matches) === 1) {
-            return 'Bar '.$matches[1];
-        }
-
-        if (preg_match('/^(vip)\b/i', $storeName) === 1) {
-            return 'Bar Vip';
-        }
-
-        if (preg_match('/^(bengaleiro)\b/i', $storeName) === 1) {
-            return 'Bengaleiro';
-        }
-
-        if (preg_match('/^(bilheteira)\b/i', $storeName) === 1) {
-            return 'Bilheteira';
-        }
-
-        if (preg_match('/^(.+?)\s*-\s*TPA\b/i', $storeName, $matches) === 1) {
-            return trim($matches[1]);
-        }
-
-        return trim($storeName);
     }
 }

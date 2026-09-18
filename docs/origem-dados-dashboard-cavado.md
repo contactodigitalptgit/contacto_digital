@@ -92,10 +92,12 @@ em 15 grupos:
 
 ### Observacao importante
 
-O cartao chamado **Zonas** nao usa atualmente um campo especifico de zona da
-ZoneSoft. Ele cria grupos operacionais a partir do nome da loja. Por isso, na
-maior parte dos casos do Cavado, cada TPA aparece como uma zona separada.
+Quando um evento ainda nao tem gestao de zonas inicializada, o cartao **Zonas**
+mantem a compatibilidade anterior e cria grupos operacionais a partir do nome
+da loja.
 
-Se o objetivo comercial for mostrar zonas reais, sera necessario definir a
-relacao entre cada TPA e a sua zona, ou identificar um campo equivalente
-fornecido pela ZoneSoft.
+Depois de um administrador gerar a configuracao em **Gerir zonas**, cada TPA
+passa a ter uma linha temporal de atribuicoes por evento. A faturacao e
+atribuida a zona que estava em vigor na data e hora de cada venda. Assim, uma
+mudanca de TPA entre zonas nao altera vendas anteriores e deixa de depender do
+nome atual da loja na ZoneSoft.

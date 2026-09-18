@@ -8,6 +8,7 @@ use App\Models\ClientZoneSoftMachine;
 use App\Models\Event;
 use App\Models\ZoneSoftApplication;
 use App\Services\EventReportSyncService;
+use App\Services\EventZoneManagementService;
 use App\Services\ZoneSoft\ZoneSoftApiClient;
 use App\Services\ZoneSoft\ZoneSoftApiException;
 use App\Services\ZoneSoft\ZoneSoftDiscoveryService;
@@ -39,8 +40,11 @@ class EventZoneSoftIntegrationController extends Controller
         return $this->renderTpaManager($event);
     }
 
-    public function syncMachines(Request $request, Event $event): RedirectResponse
-    {
+    public function syncMachines(
+        Request $request,
+        Event $event,
+        EventZoneManagementService $zoneManagement,
+    ): RedirectResponse {
         $validated = $request->validate([
             'machine_ids' => ['present', 'array', 'max:500'],
             'machine_ids.*' => ['integer', 'distinct', 'exists:client_zonesoft_machines,id'],
@@ -81,6 +85,7 @@ class EventZoneSoftIntegrationController extends Controller
         }
 
         $event->zonesoftMachines()->sync($validMachineIds->all());
+        $zoneManagement->initializeMissingMachines($event->fresh(), $request->user());
 
         return to_route('admin.events.tpas.manage', $event);
     }
@@ -264,8 +269,11 @@ class EventZoneSoftIntegrationController extends Controller
         );
     }
 
-    public function storeMachine(Request $request, Event $event): RedirectResponse
-    {
+    public function storeMachine(
+        Request $request,
+        Event $event,
+        EventZoneManagementService $zoneManagement,
+    ): RedirectResponse {
         $application = $this->getReadableApplication();
         $validated = $request->validate([
             'zs_client_id' => ['required', 'string', 'max:64'],
@@ -289,6 +297,7 @@ class EventZoneSoftIntegrationController extends Controller
         ]);
         $machine->save();
         $event->zonesoftMachines()->syncWithoutDetaching([$machine->id]);
+        $zoneManagement->initializeMissingMachines($event->fresh(), $request->user());
 
         return to_route('admin.events.integrations.show', $event);
     }

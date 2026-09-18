@@ -22,8 +22,9 @@ class MobileEventAnalyticsService
 {
     private const NON_SALES_DOCUMENT_TYPES = ['CM', 'ZT'];
 
-    /** @var array<string, array<int, string>> */
-    private array $zoneStoreNames = [];
+    public function __construct(
+        private readonly EventZoneAttributionService $zoneAttribution,
+    ) {}
 
     /**
      * @param  array<string, mixed>  $filters
@@ -96,20 +97,25 @@ class MobileEventAnalyticsService
         $stores = (clone $rows)
             ->whereNotNull('store_name')
             ->where('store_name', '!=', '')
-            ->selectRaw('store_name, store_code, COALESCE(SUM(rows_count), 0) as rows_count')
-            ->groupBy('store_name', 'store_code')
+            ->selectRaw('event_zone_id, store_name, store_code, COALESCE(SUM(rows_count), 0) as rows_count')
+            ->groupBy('event_zone_id', 'store_name', 'store_code')
             ->orderBy('store_name')
             ->get()
             ->map(fn (object $row): array => [
                 'value' => (string) $row->store_name,
                 'label' => (string) $row->store_name,
                 'code' => $row->store_code,
+                'zone_id' => $row->event_zone_id,
                 'rows_count' => (int) $row->rows_count,
             ])
             ->values();
 
         $zones = $stores
-            ->groupBy(fn (array $store): string => $this->zoneLabel($store['label']))
+            ->groupBy(fn (array $store): string => $this->zoneAttribution->labelFor(
+                $event->id,
+                $store['zone_id'],
+                $store['label'],
+            ))
             ->map(fn (Collection $members, string $label): array => [
                 'value' => $label,
                 'label' => $label,
@@ -230,26 +236,30 @@ class MobileEventAnalyticsService
         $products = $this->applyFilters($this->productRows($event), $event->id, $filters, true);
 
         $ticketsByStore = (clone $tickets)
-            ->selectRaw('store_name, store_code, COUNT(*) as tickets_count')
-            ->groupBy('store_name', 'store_code')
+            ->selectRaw('event_zone_id, store_name, store_code, COUNT(*) as tickets_count')
+            ->groupBy('event_zone_id', 'store_name', 'store_code')
             ->get()
             ->mapWithKeys(fn (object $row): array => [
-                $this->storeKey($row->store_name, $row->store_code) => (int) $row->tickets_count,
+                $this->storeKey($row->event_zone_id, $row->store_name, $row->store_code) => (int) $row->tickets_count,
             ]);
 
         $stores = (clone $rows)
-            ->selectRaw('store_name, store_code')
+            ->selectRaw('event_zone_id, store_name, store_code')
             ->selectRaw('COALESCE(SUM(rows_count), 0) as rows_count')
             ->selectRaw('COALESCE(SUM(quantity_total), 0) as quantity_total')
             ->selectRaw('COALESCE(SUM(total_sum), 0) as total_sales')
-            ->groupBy('store_name', 'store_code')
+            ->groupBy('event_zone_id', 'store_name', 'store_code')
             ->get()
             ->map(fn (object $row): array => [
                 'store_name' => (string) ($row->store_name ?: 'Sem device'),
                 'store_code' => $row->store_code,
+                'zone_id' => $row->event_zone_id,
                 'rows_count' => (int) $row->rows_count,
                 'quantity_total' => round((float) $row->quantity_total, 4),
-                'tickets_count' => (int) $ticketsByStore->get($this->storeKey($row->store_name, $row->store_code), 0),
+                'tickets_count' => (int) $ticketsByStore->get(
+                    $this->storeKey($row->event_zone_id, $row->store_name, $row->store_code),
+                    0,
+                ),
                 'total_sales' => round((float) $row->total_sales, 4),
             ]);
 
@@ -258,18 +268,22 @@ class MobileEventAnalyticsService
         $productsByZone = (clone $products)
             ->whereNotNull('description')
             ->where('description', '!=', '')
-            ->selectRaw('store_name')
+            ->selectRaw('event_zone_id, store_name')
             ->selectRaw("CASE WHEN doc_type = 'ZT' THEN 'TOP-UP' ELSE product_code END as product_code")
             ->selectRaw("CASE WHEN doc_type = 'ZT' THEN 'Top up' ELSE description END as description")
             ->selectRaw('COALESCE(SUM(sold_quantity_total), 0) as sold_quantity')
             ->selectRaw('COALESCE(SUM(offered_quantity_total), 0) as offered_quantity')
             ->selectRaw('COALESCE(SUM(quantity_total), 0) as served_quantity')
             ->selectRaw('COALESCE(SUM(total_sum), 0) as total_sales')
-            ->groupBy('store_name')
+            ->groupBy('event_zone_id', 'store_name')
             ->groupByRaw("CASE WHEN doc_type = 'ZT' THEN 'TOP-UP' ELSE product_code END")
             ->groupByRaw("CASE WHEN doc_type = 'ZT' THEN 'Top up' ELSE description END")
             ->get()
-            ->groupBy(fn (object $row): string => $this->zoneLabel($row->store_name))
+            ->groupBy(fn (object $row): string => $this->zoneAttribution->labelFor(
+                $event->id,
+                $row->event_zone_id,
+                $row->store_name,
+            ))
             ->map(fn (Collection $items): array => $items
                 ->map(fn (object $row): array => [
                     'product_code' => (string) ($row->product_code ?? ''),
@@ -285,7 +299,11 @@ class MobileEventAnalyticsService
                 ->all());
 
         $zones = $stores
-            ->groupBy(fn (array $store): string => $this->zoneLabel($store['store_name']))
+            ->groupBy(fn (array $store): string => $this->zoneAttribution->labelFor(
+                $event->id,
+                $store['zone_id'],
+                $store['store_name'],
+            ))
             ->map(function (Collection $devices, string $label) use ($productsByZone): array {
                 $sales = (float) $devices->sum('total_sales');
                 $tickets = (int) $devices->sum('tickets_count');
@@ -309,12 +327,17 @@ class MobileEventAnalyticsService
             ...$zone,
             'share' => $totalSales > 0 ? round(((float) $zone['total_sales'] / $totalSales) * 100, 2) : 0.0,
         ]);
+        $uniqueDevicesCount = $stores
+            ->unique(fn (array $store): string => filled($store['store_code'])
+                ? 'code:'.trim((string) $store['store_code'])
+                : 'name:'.Str::lower(trim((string) $store['store_name'])))
+            ->count();
 
         return [
             'summary' => [
                 'total_sales' => round($totalSales, 4),
                 'tickets_count' => (int) $zones->sum('tickets_count'),
-                'devices_count' => $stores->count(),
+                'devices_count' => $uniqueDevicesCount,
                 'zones_count' => $zones->count(),
                 'leading_zone' => $zones->first(),
             ],
@@ -364,13 +387,14 @@ class MobileEventAnalyticsService
         $rows = $this->applyFilters($this->salesRows($event->id), $event->id, $filters);
 
         $salesByStore = (clone $rows)
-            ->selectRaw('store_name, store_code, COALESCE(SUM(total_sum), 0) as total_sales')
-            ->groupBy('store_name', 'store_code')
+            ->selectRaw('event_zone_id, store_name, store_code, COALESCE(SUM(total_sum), 0) as total_sales')
+            ->groupBy('event_zone_id', 'store_name', 'store_code')
             ->get()
             ->mapWithKeys(fn (object $row): array => [
-                $this->storeKey($row->store_name, $row->store_code) => [
+                $this->storeKey($row->event_zone_id, $row->store_name, $row->store_code) => [
                     'store_name' => (string) ($row->store_name ?: 'Sem device'),
                     'store_code' => $row->store_code,
+                    'zone_id' => $row->event_zone_id,
                     'sales_total' => (float) $row->total_sales,
                 ],
             ]);
@@ -399,7 +423,7 @@ class MobileEventAnalyticsService
         foreach ($documents as $document) {
             $amount = (float) ($document->total ?? 0);
             $category = $this->paymentCategory((string) ($document->payment_code ?? ''));
-            $key = $this->storeKey($document->store_name, $document->store_code);
+            $key = $this->storeKey($document->event_zone_id, $document->store_name, $document->store_code);
             $documentKey = $this->paymentDocumentKey($document);
 
             if ($this->isTopUp($document)) {
@@ -613,7 +637,7 @@ class MobileEventAnalyticsService
     {
         $zones = collect($filters['bar_groups'] ?? [])->filter()->values()->all();
         if ($zones !== []) {
-            $query->whereIn('store_name', $this->storeNamesForZones($eventId, $zones));
+            $this->applyZoneFilter($query, $eventId, $zones);
         }
 
         if (filled($filters['store'] ?? null)) {
@@ -660,7 +684,7 @@ class MobileEventAnalyticsService
         $query = EventReportPaymentDocument::query()->where('event_id', $eventId);
         $zones = collect($filters['bar_groups'] ?? [])->filter()->values()->all();
         if ($zones !== []) {
-            $query->whereIn('store_name', $this->storeNamesForZones($eventId, $zones));
+            $this->applyZoneFilter($query, $eventId, $zones);
         }
         if (filled($filters['store'] ?? null)) {
             $query->where('store_name', $filters['store']);
@@ -721,48 +745,27 @@ class MobileEventAnalyticsService
             ->where(fn (Builder $query) => $query->whereNull('doc_type')->orWhereNotIn('doc_type', self::NON_SALES_DOCUMENT_TYPES));
     }
 
-    /** @param array<int, string> $zones @return array<int, string> */
-    private function storeNamesForZones(int $eventId, array $zones): array
+    /** @param array<int, string> $zones */
+    private function applyZoneFilter(Builder $query, int $eventId, array $zones): void
     {
-        $cacheKey = $eventId.'|'.implode('|', $zones);
+        if ($this->zoneAttribution->hasConfiguredZones($eventId)) {
+            $zoneIds = $this->zoneAttribution->zoneIdsForLabels($eventId, $zones);
 
-        return $this->zoneStoreNames[$cacheKey] ??= EventReportRowAggregate::query()
+            $query->whereIn('event_zone_id', $zoneIds === [] ? [-1] : $zoneIds);
+
+            return;
+        }
+
+        $storeNames = EventReportRowAggregate::query()
             ->where('event_id', $eventId)
             ->whereNotNull('store_name')
             ->distinct()
             ->pluck('store_name')
-            ->filter(fn (?string $name): bool => in_array($this->zoneLabel($name), $zones, true))
+            ->filter(fn (?string $name): bool => in_array($this->zoneAttribution->fallbackLabel($name), $zones, true))
             ->values()
             ->all();
-    }
 
-    private function zoneLabel(?string $storeName): string
-    {
-        $name = trim((string) $storeName);
-        if ($name === '') {
-            return 'Sem zona';
-        }
-        if (preg_match('/^(top\s*up|bc\s*top)\b/i', $name)) {
-            return 'Top Up';
-        }
-        if (preg_match('/\b(bar\s*vip|vip)\b/i', $name)) {
-            return 'Bar Vip';
-        }
-        if (preg_match('/\bbar\s*(\d+)\b/i', $name, $matches)) {
-            return 'Bar '.(int) $matches[1];
-        }
-        if (preg_match('/\bbengaleiro\b/i', $name)) {
-            return 'Bengaleiro';
-        }
-        if (preg_match('/\bbilheteira\b/i', $name)) {
-            return 'Bilheteira';
-        }
-
-        if (preg_match('/^(.+?)\s*-\s*TPA\b/i', $name, $matches)) {
-            return trim($matches[1]);
-        }
-
-        return $name;
+        $query->whereIn('store_name', $storeNames);
     }
 
     private function paymentCategory(string $code): string
@@ -794,11 +797,11 @@ class MobileEventAnalyticsService
         ]);
     }
 
-    private function storeKey(?string $storeName, ?string $storeCode): string
+    private function storeKey(int|string|null $zoneId, ?string $storeName, ?string $storeCode): string
     {
-        return filled($storeCode)
+        return ($zoneId ?? 'legacy').'|'.(filled($storeCode)
             ? 'code:'.trim((string) $storeCode)
-            : 'name:'.Str::lower(trim((string) $storeName));
+            : 'name:'.Str::lower(trim((string) $storeName)));
     }
 
     private function variation(float|int $current, float|int $previous): ?float
