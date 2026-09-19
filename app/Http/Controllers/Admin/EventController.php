@@ -7,6 +7,7 @@ use App\Jobs\SyncEventReportJob;
 use App\Models\Client;
 use App\Models\Event;
 use App\Services\EventReportSyncService;
+use Carbon\CarbonImmutable;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Process;
@@ -223,6 +224,16 @@ class EventController extends Controller
         $validated['show_zt_card'] = $request->boolean('show_zt_card', true);
         $newAdditionalClientIds = $validated['additional_client_ids'] ?? [];
         unset($validated['additional_client_ids']);
+
+        $newStart = CarbonImmutable::parse($validated['report_starts_at'] ?? $validated['event_date']);
+        $newEnd = CarbonImmutable::parse($validated['report_ends_at']);
+        if ($event->zoneDays()->where('starts_at', '<', $newStart)->exists()
+            || $event->zoneDays()->where('ends_at', '>', $newEnd)->exists()
+            || ($event->legacy_zone_ends_at && $event->legacy_zone_ends_at->greaterThan($newEnd))) {
+            throw ValidationException::withMessages([
+                'report_ends_at' => 'O período do evento deve incluir todos os dias e fechos de zonas já configurados.',
+            ]);
+        }
 
         $oldClientIds = collect([$event->client_id])
             ->merge($event->additionalClients()->pluck('clients.id'))

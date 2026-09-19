@@ -4,12 +4,15 @@ namespace App\Services;
 
 use App\Models\ClientZoneSoftMachine;
 use App\Models\Event;
+use App\Models\EventReportPaymentDocument;
+use App\Models\EventReportRow;
 use App\Models\EventZone;
 use App\Models\EventZoneAssignment;
 use App\Models\User;
 use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
 
 class EventZoneManagementService
 {
@@ -84,12 +87,19 @@ class EventZoneManagementService
         );
 
         $effectiveAt = CarbonImmutable::instance($effectiveAt);
+        if ($zone->event_zone_day_id) {
+            $day = $zone->day;
+            if (! $day || $effectiveAt->lessThan($day->starts_at) || $effectiveAt->greaterThanOrEqualTo($day->ends_at)) {
+                throw ValidationException::withMessages(['effective_at' => 'A atribuição deve estar dentro do dia operacional da zona.']);
+            }
+        }
 
         DB::transaction(function () use ($event, $zone, $machine, $effectiveAt, $actor): void {
             Event::query()->whereKey($event->id)->lockForUpdate()->firstOrFail();
             $assignments = EventZoneAssignment::query()
                 ->where('event_id', $event->id)
                 ->where('machine_id', $machine->id)
+                ->whereHas('zone', fn ($query) => $query->where('event_zone_day_id', $zone->event_zone_day_id))
                 ->lockForUpdate()
                 ->orderBy('starts_at')
                 ->get();
@@ -102,6 +112,9 @@ class EventZoneManagementService
             if ($atBoundary && $atBoundary->event_zone_id !== $zone->id) {
                 $atBoundary->update([
                     'event_zone_id' => $zone->id,
+                    'ends_at' => $zone->day && (! $atBoundary->ends_at || $atBoundary->ends_at->greaterThan($zone->day->ends_at))
+                        ? $zone->day->ends_at
+                        : $atBoundary->ends_at,
                     'assigned_by_user_id' => $actor?->id,
                     'source' => 'manual',
                 ]);
@@ -128,7 +141,10 @@ class EventZoneManagementService
                         'event_zone_id' => $zone->id,
                         'machine_id' => $machine->id,
                         'starts_at' => $effectiveAt,
-                        'ends_at' => $next?->starts_at,
+                        'ends_at' => $zone->day
+                            ? ($next && $next->starts_at->lessThan($zone->day->ends_at)
+                                ? $next->starts_at : $zone->day->ends_at)
+                            : $next?->starts_at,
                         'assigned_by_user_id' => $actor?->id,
                         'source' => 'manual',
                     ]);
@@ -136,9 +152,70 @@ class EventZoneManagementService
                 }
             }
 
-            if ($changed) {
+            // A draft day must not alter already-published sales. Its assignments
+            // become effective for attribution only after the plan is confirmed.
+            if ($changed && (! $zone->day || $zone->day->confirmed_at)) {
                 $this->refreshAttribution($event->id, [$machine->id]);
             }
+        });
+    }
+
+    public function closeLegacyAssignments(Event $event, CarbonInterface $endsAt): void
+    {
+        $endsAt = CarbonImmutable::instance($endsAt);
+
+        DB::transaction(function () use ($event, $endsAt): void {
+            $lockedEvent = Event::query()->whereKey($event->id)->lockForUpdate()->firstOrFail();
+            if ($lockedEvent->legacy_zone_ends_at && ! $lockedEvent->legacy_zone_ends_at->equalTo($endsAt)) {
+                throw ValidationException::withMessages([
+                    'ends_at' => 'As atribuições antigas já foram fechadas. Uma correção requer reconciliação histórica.',
+                ]);
+            }
+            $legacyZoneIds = EventZone::query()->where('event_id', $event->id)
+                ->whereNull('event_zone_day_id')->pluck('id');
+            if ($legacyZoneIds->isEmpty()) {
+                throw ValidationException::withMessages(['ends_at' => 'Este evento não tem zonas antigas para fechar.']);
+            }
+            $firstDay = $event->zoneDays()->orderBy('starts_at')->first();
+            if ($firstDay && $event->zoneDays()
+                ->where('starts_at', '<', $endsAt)
+                ->where('ends_at', '>', $endsAt)
+                ->exists()) {
+                throw ValidationException::withMessages([
+                    'ends_at' => 'O fecho das zonas antigas não pode ocorrer dentro de um dia operacional.',
+                ]);
+            }
+            foreach ([EventReportRow::class, EventReportPaymentDocument::class] as $model) {
+                if ($model::query()->where('event_id', $event->id)
+                    ->whereIn('event_zone_id', $legacyZoneIds)
+                    ->where(function ($query) use ($endsAt): void {
+                        $query->where('sale_datetime', '>=', $endsAt)
+                            ->orWhere(fn ($missingTime) => $missingTime
+                                ->whereNull('sale_datetime')
+                                ->whereDate('sale_date', '>=', $endsAt->toDateString()));
+                    })->exists()) {
+                    throw ValidationException::withMessages([
+                        'ends_at' => 'Há vendas posteriores à hora de fecho atribuídas às zonas antigas. Reconcilie esses dados primeiro.',
+                    ]);
+                }
+            }
+            $assignments = EventZoneAssignment::query()->where('event_id', $event->id)
+                ->whereIn('event_zone_id', $legacyZoneIds)
+                ->where(fn ($query) => $query->whereNull('ends_at')->orWhere('ends_at', '>', $endsAt))
+                ->lockForUpdate()->get();
+
+            if ($assignments->contains(fn (EventZoneAssignment $assignment): bool => $assignment->starts_at->greaterThan($endsAt))) {
+                throw ValidationException::withMessages(['ends_at' => 'Há atribuições antigas que começam depois da hora de fecho.']);
+            }
+
+            foreach ($assignments as $assignment) {
+                $assignment->update(['ends_at' => $endsAt]);
+            }
+            EventZone::query()->whereIn('id', $legacyZoneIds)
+                ->whereNull('archived_at')
+                ->update(['archived_at' => now()]);
+            $lockedEvent->update(['legacy_zone_ends_at' => $endsAt]);
+            $this->attribution->forget($event->id);
         });
     }
 

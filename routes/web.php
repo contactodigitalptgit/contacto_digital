@@ -4,8 +4,8 @@ use App\Http\Controllers\Admin\AdminUserController;
 use App\Http\Controllers\Admin\ClientController;
 use App\Http\Controllers\Admin\EventController;
 use App\Http\Controllers\Admin\EventDashboardConfigurationController;
-use App\Http\Controllers\Admin\EventZoneSoftIntegrationController;
 use App\Http\Controllers\Admin\EventZoneController;
+use App\Http\Controllers\Admin\EventZoneSoftIntegrationController;
 use App\Http\Controllers\Admin\ZoneSoftIntegrationController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\EventDashboardController;
@@ -108,6 +108,16 @@ Route::middleware(['auth', 'active.client', 'admin'])
             ->name('events.tpas.sync-sales');
         Route::get('events/{event}/gerir-zonas', [EventZoneController::class, 'index'])
             ->name('events.zones.manage');
+        Route::post('events/{event}/gerir-zonas/dias', [EventZoneController::class, 'storeDay'])
+            ->name('events.zones.days.store');
+        Route::patch('events/{event}/gerir-zonas/dias/{day}', [EventZoneController::class, 'updateDay'])
+            ->name('events.zones.days.update');
+        Route::delete('events/{event}/gerir-zonas/dias/{day}', [EventZoneController::class, 'destroyDay'])
+            ->name('events.zones.days.destroy');
+        Route::post('events/{event}/gerir-zonas/dias/{day}/confirmar', [EventZoneController::class, 'confirmDay'])
+            ->name('events.zones.days.confirm');
+        Route::post('events/{event}/gerir-zonas/fechar-antigas', [EventZoneController::class, 'closeLegacy'])
+            ->name('events.zones.legacy.close');
         Route::post('events/{event}/gerir-zonas', [EventZoneController::class, 'store'])
             ->name('events.zones.store');
         Route::post('events/{event}/gerir-zonas/{zone}/tpas', [EventZoneController::class, 'assignMachines'])

@@ -32,6 +32,14 @@ interface HistoryItem {
     sales_total: number;
 }
 
+interface DayItem {
+    id: number;
+    operational_date: string;
+    starts_at: string;
+    ends_at: string;
+    confirmed_at: string | null;
+}
+
 const props = defineProps<{
     event: {
         id: number;
@@ -40,15 +48,23 @@ const props = defineProps<{
         report_starts_at: string | null;
         report_ends_at: string | null;
         requires_explicit_zones: boolean;
+        legacy_zone_ends_at: string | null;
     };
     client: { id: number; name: string };
     default_effective_at: string;
+    days: DayItem[];
+    selected_day_id: number | null;
+    has_legacy_zones: boolean;
     zones: ZoneItem[];
     unassigned_machines: MachineItem[];
     history: HistoryItem[];
 }>();
 
-const createForm = useForm({ name: '' });
+const createForm = useForm({ name: '', day_id: props.selected_day_id });
+const dayForm = useForm({ operational_date: '', starts_at: '', ends_at: '' });
+const editDayForm = useForm({ operational_date: '', starts_at: '', ends_at: '' });
+const closeLegacyForm = useForm({ ends_at: props.event.legacy_zone_ends_at ?? '' });
+const editingDay = ref<DayItem | null>(null);
 const editForm = useForm({ name: '' });
 const moveForm = useForm({ effective_at: props.default_effective_at });
 const bulkForm = useForm({ machine_ids: [] as number[], effective_at: props.default_effective_at });
@@ -63,6 +79,78 @@ const totalMachines = computed(() => props.zones.reduce(
     (total, zone) => total + zone.machines.length,
     props.unassigned_machines.length,
 ));
+const selectedDay = computed(() => props.days.find((day) => day.id === props.selected_day_id) ?? null);
+const canCreateZone = computed(() => props.selected_day_id !== null || props.days.length === 0);
+
+const selectDay = (value: string) => {
+    router.get(route('admin.events.zones.manage', props.event.id), { day: value }, { preserveState: false });
+};
+
+const createDay = () => {
+    dayForm.post(route('admin.events.zones.days.store', props.event.id), {
+        onSuccess: () => {
+            dayForm.reset();
+            void showSuccessToast('Dia operacional criado.');
+        },
+    });
+};
+
+const openEditDay = (day: DayItem) => {
+    editingDay.value = day;
+    editDayForm.operational_date = day.operational_date;
+    editDayForm.starts_at = day.starts_at;
+    editDayForm.ends_at = day.ends_at;
+};
+
+const updateDay = () => {
+    if (!editingDay.value) return;
+    editDayForm.patch(route('admin.events.zones.days.update', [props.event.id, editingDay.value.id]), {
+        onSuccess: () => {
+            editingDay.value = null;
+            void showSuccessToast('Dia atualizado.');
+        },
+        onError: (errors) => void showErrorToast((errors.day as string | undefined) ?? 'Não foi possível atualizar o dia.'),
+    });
+};
+
+const deleteDay = async (day: DayItem) => {
+    const confirmed = await confirmAction({
+        title: 'Eliminar dia vazio?',
+        text: 'Só um dia não confirmado e sem zonas pode ser eliminado.',
+        confirmButtonText: 'Eliminar dia',
+    });
+    if (!confirmed) return;
+    router.delete(route('admin.events.zones.days.destroy', [props.event.id, day.id]), {
+        onError: (errors) => void showErrorToast((errors.day as string | undefined) ?? 'Não foi possível eliminar o dia.'),
+    });
+};
+
+const confirmDay = async (day: DayItem) => {
+    const confirmed = await confirmAction({
+        title: `Confirmar ${day.operational_date}?`,
+        text: 'Confirme apenas depois de distribuir todos os TPAs ativos pelas zonas deste dia.',
+        confirmButtonText: 'Confirmar plano',
+    });
+    if (!confirmed) return;
+    router.post(route('admin.events.zones.days.confirm', [props.event.id, day.id]), {}, {
+        onSuccess: () => void showSuccessToast('Plano do dia confirmado.'),
+        onError: (errors) => void showErrorToast((errors.day as string | undefined) ?? 'Não foi possível confirmar o dia.'),
+    });
+};
+
+const closeLegacy = async () => {
+    if (!closeLegacyForm.ends_at) return;
+    const confirmed = await confirmAction({
+        title: 'Fechar atribuições antigas?',
+        text: `As atribuições das zonas antigas vão terminar em ${closeLegacyForm.ends_at} e as zonas serão arquivadas. As vendas anteriores mantêm-se.`,
+        confirmButtonText: 'Confirmar fecho',
+    });
+    if (!confirmed) return;
+    closeLegacyForm.post(route('admin.events.zones.legacy.close', props.event.id), {
+        onSuccess: () => void showSuccessToast('Atribuições antigas encerradas.'),
+        onError: (errors) => void showErrorToast((errors.ends_at as string | undefined) ?? 'Não foi possível encerrar as atribuições.'),
+    });
+};
 
 const formatMoney = (value: number) => new Intl.NumberFormat('pt-PT', {
     style: 'currency',
@@ -76,6 +164,7 @@ const formatDateTime = (value: string | null) => value
 const machineName = (machine: MachineItem) => machine.store_label?.trim() || `Store ${machine.store_id}`;
 
 const createZone = () => {
+    createForm.day_id = props.selected_day_id;
     createForm.post(route('admin.events.zones.store', props.event.id), {
         preserveScroll: true,
         onSuccess: () => {
@@ -235,8 +324,46 @@ const assignSelected = () => {
                 </div>
             </section>
 
+            <section class="space-y-4 rounded-3xl border border-current/10 bg-white/[0.03] p-5">
+                <div>
+                    <h3 class="text-lg font-semibold">Dias operacionais</h3>
+                    <p class="mt-1 text-sm text-current/60">Cada dia tem horários e zonas próprios. Um período pode terminar depois da meia-noite. O histórico anterior não é copiado automaticamente.</p>
+                </div>
+                <div v-if="props.days.length || props.has_legacy_zones" class="flex flex-wrap items-end gap-3">
+                    <label class="min-w-64 text-sm font-semibold">Ver período
+                        <select class="dash-modal-input mt-2 w-full" :value="props.selected_day_id ?? 'legacy'" @change="selectDay(($event.target as HTMLSelectElement).value)">
+                            <option v-if="props.has_legacy_zones" value="legacy">Zonas anteriores (histórico)</option>
+                            <option v-for="day in props.days" :key="day.id" :value="day.id">{{ day.operational_date }} · {{ day.confirmed_at ? 'confirmado' : 'rascunho' }}</option>
+                        </select>
+                    </label>
+                    <div v-if="selectedDay" class="text-sm text-current/70">
+                        <p>{{ formatDateTime(selectedDay.starts_at) }} → {{ formatDateTime(selectedDay.ends_at) }}</p>
+                        <p class="font-semibold" :class="selectedDay.confirmed_at ? 'text-emerald-400' : 'text-amber-300'">{{ selectedDay.confirmed_at ? 'Plano confirmado' : 'Pendente de confirmação' }}</p>
+                    </div>
+                    <div v-if="selectedDay" class="flex gap-2">
+                        <button v-if="!selectedDay.confirmed_at" type="button" class="dash-link-button" @click="openEditDay(selectedDay)">Editar horários</button>
+                        <button v-if="!selectedDay.confirmed_at" type="button" class="dash-link-button" @click="deleteDay(selectedDay)">Eliminar vazio</button>
+                        <button v-if="!selectedDay.confirmed_at" type="button" class="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white" @click="confirmDay(selectedDay)">Confirmar plano</button>
+                    </div>
+                </div>
+                <form class="grid gap-3 rounded-2xl border border-current/10 p-4 sm:grid-cols-4" @submit.prevent="createDay">
+                    <div><label for="day_date" class="text-xs font-semibold uppercase text-current/60">Data operacional</label><input id="day_date" v-model="dayForm.operational_date" type="date" class="dash-modal-input mt-2 w-full" required /><p v-if="dayForm.errors.operational_date" class="mt-1 text-sm text-rose-400">{{ dayForm.errors.operational_date }}</p></div>
+                    <div><label for="day_start" class="text-xs font-semibold uppercase text-current/60">Início</label><input id="day_start" v-model="dayForm.starts_at" type="datetime-local" class="dash-modal-input mt-2 w-full" required /><p v-if="dayForm.errors.starts_at" class="mt-1 text-sm text-rose-400">{{ dayForm.errors.starts_at }}</p></div>
+                    <div><label for="day_end" class="text-xs font-semibold uppercase text-current/60">Fim</label><input id="day_end" v-model="dayForm.ends_at" type="datetime-local" class="dash-modal-input mt-2 w-full" required /><p v-if="dayForm.errors.ends_at" class="mt-1 text-sm text-rose-400">{{ dayForm.errors.ends_at }}</p></div>
+                    <button class="self-end rounded-xl bg-sky-600 px-4 py-3 text-sm font-semibold text-white disabled:opacity-50" :disabled="dayForm.processing">Criar dia</button>
+                </form>
+                <p v-if="props.has_legacy_zones && props.selected_day_id === null && props.event.legacy_zone_ends_at" class="rounded-2xl border border-emerald-400/30 bg-emerald-500/5 p-4 text-sm text-emerald-300">
+                    Atribuições anteriores encerradas em {{ formatDateTime(props.event.legacy_zone_ends_at) }}. O histórico foi preservado.
+                </p>
+                <form v-if="props.has_legacy_zones && props.selected_day_id === null && !props.event.legacy_zone_ends_at" class="flex flex-wrap items-end gap-3 rounded-2xl border border-amber-400/30 bg-amber-500/5 p-4" @submit.prevent="closeLegacy">
+                    <div class="flex-1"><p class="font-semibold text-amber-300">Encerrar atribuições anteriores</p><p class="mt-1 text-sm text-current/65">Indique a hora real em que terminou o período anterior. Não use a hora atual se o evento já terminou.</p></div>
+                    <label class="text-xs font-semibold uppercase text-current/60">Hora de fecho<input v-model="closeLegacyForm.ends_at" type="datetime-local" class="dash-modal-input mt-2 block" required /></label>
+                    <button class="rounded-xl bg-amber-600 px-4 py-3 text-sm font-semibold text-white" :disabled="closeLegacyForm.processing">Fechar anteriores</button>
+                </form>
+            </section>
+
             <section class="space-y-4">
-                <form class="flex flex-col gap-3 rounded-2xl border border-current/10 bg-white/[0.02] p-4 sm:flex-row" @submit.prevent="createZone">
+                <form v-if="canCreateZone" class="flex flex-col gap-3 rounded-2xl border border-current/10 bg-white/[0.02] p-4 sm:flex-row" @submit.prevent="createZone">
                     <div class="flex-1">
                         <label for="zone_name" class="text-xs font-semibold uppercase tracking-[0.14em] text-current/60">Nova zona</label>
                         <input id="zone_name" v-model="createForm.name" class="dash-modal-input mt-2 w-full" maxlength="120" placeholder="Ex.: Bar 3" />
@@ -248,7 +375,7 @@ const assignSelected = () => {
                 </form>
 
                 <p v-if="!props.zones.length" class="rounded-2xl border border-dashed border-sky-400/40 bg-sky-500/5 p-6 text-sm text-current/70">
-                    Ainda não há zonas. Crie a primeira zona acima; os TPAs permanecem pendentes até serem atribuídos por si.
+                    Ainda não há zonas neste período. {{ canCreateZone ? 'Crie a primeira zona acima; os TPAs permanecem pendentes até serem atribuídos por si.' : 'Selecione ou crie um dia operacional para configurar as zonas.' }}
                     <span v-if="!props.event.requires_explicit_zones" class="mt-2 block font-medium text-amber-300">Ao criar a primeira zona neste evento antigo, as próximas sincronizações vão aguardar a atribuição de todos os TPAs ativos.</span>
                 </p>
 
@@ -338,6 +465,17 @@ const assignSelected = () => {
                 </div>
             </section>
         </div>
+
+        <Modal :show="editingDay !== null" max-width="md" @close="editingDay = null">
+            <form class="space-y-4 p-6" @submit.prevent="updateDay">
+                <div><h3 class="text-lg font-semibold">Editar dia operacional</h3><p class="mt-1 text-sm text-current/60">Só é possível alterar os horários antes da confirmação e das atribuições.</p></div>
+                <div><label class="text-sm">Data operacional</label><input v-model="editDayForm.operational_date" type="date" class="dash-modal-input mt-2 w-full" required /></div>
+                <div><label class="text-sm">Início</label><input v-model="editDayForm.starts_at" type="datetime-local" class="dash-modal-input mt-2 w-full" required /></div>
+                <div><label class="text-sm">Fim</label><input v-model="editDayForm.ends_at" type="datetime-local" class="dash-modal-input mt-2 w-full" required /></div>
+                <p v-if="editDayForm.errors.starts_at" class="text-sm text-rose-400">{{ editDayForm.errors.starts_at }}</p>
+                <div class="flex justify-end gap-2"><button type="button" class="dash-link-button" @click="editingDay = null">Cancelar</button><button class="rounded-xl bg-sky-600 px-4 py-2 text-sm font-semibold text-white" :disabled="editDayForm.processing">Guardar</button></div>
+            </form>
+        </Modal>
 
         <Modal :show="editingZone !== null" max-width="md" @close="closeEditZone">
             <form class="space-y-4 p-6" @submit.prevent="updateZone">

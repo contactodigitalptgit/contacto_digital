@@ -27,6 +27,7 @@ class Event extends Model
         'show_zt_card',
         'dashboard_configuration',
         'requires_explicit_zones',
+        'legacy_zone_ends_at',
         'is_active',
     ];
 
@@ -42,6 +43,7 @@ class Event extends Model
             'show_zt_card' => 'boolean',
             'dashboard_configuration' => 'array',
             'requires_explicit_zones' => 'boolean',
+            'legacy_zone_ends_at' => 'datetime',
             'is_active' => 'boolean',
         ];
     }
@@ -99,6 +101,11 @@ class Event extends Model
     public function zones(): HasMany
     {
         return $this->hasMany(EventZone::class);
+    }
+
+    public function zoneDays(): HasMany
+    {
+        return $this->hasMany(EventZoneDay::class);
     }
 
     public function zoneAssignments(): HasMany

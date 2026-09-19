@@ -10,9 +10,11 @@ use App\Models\EventReportPaymentDocument;
 use App\Models\EventReportRow;
 use App\Models\EventZone;
 use App\Models\EventZoneAssignment;
+use App\Models\EventZoneDay;
 use App\Models\User;
 use App\Models\ZoneSoftApplication;
 use App\Services\EventReportSyncService;
+use App\Services\EventZoneAttributionService;
 use App\Services\EventZoneManagementService;
 use App\Services\EventZoneReadinessService;
 use Carbon\CarbonImmutable;
@@ -24,6 +26,258 @@ use Tests\TestCase;
 class EventZoneManagementTest extends TestCase
 {
     use RefreshDatabase;
+
+    public function test_daily_plans_preserve_yesterday_and_require_a_confirmed_plan_for_today(): void
+    {
+        [$admin, $client, $event, $clientUser] = $this->eventContext();
+        $event->update(['report_ends_at' => '2026-09-20 06:00:00']);
+        $machine = $this->machine($client, $event, 191, 'Bilheteira');
+        $legacy = EventZone::create(['event_id' => $event->id, 'name' => 'Bilheteira', 'sort_order' => 1]);
+        $manager = app(EventZoneManagementService::class);
+        $manager->moveMachine($event, $legacy, $machine, CarbonImmutable::parse('2026-09-18 18:00:00'), $admin);
+        $import = $this->import($event, $admin);
+        $yesterday = EventReportRow::create([
+            ...$this->saleRow($event, $import, $machine, '2026-09-19 01:00:00', '100.0000', 'yesterday'),
+            'event_zone_id' => $legacy->id,
+        ]);
+        $manager->closeLegacyAssignments($event, CarbonImmutable::parse('2026-09-19 06:00:00'));
+
+        $this->assertSame('2026-09-19 06:00:00', EventZoneAssignment::query()
+            ->where('event_zone_id', $legacy->id)->firstOrFail()->ends_at->format('Y-m-d H:i:s'));
+        $this->assertSame($legacy->id, $yesterday->fresh()->event_zone_id);
+        $this->assertSame('2026-09-19 06:00:00', $event->fresh()->legacy_zone_ends_at->format('Y-m-d H:i:s'));
+        $this->assertNotNull($legacy->fresh()->archived_at);
+
+        $this->actingAs($admin)->post(route('admin.events.zones.days.store', $event), [
+            'operational_date' => '2026-09-19',
+            'starts_at' => '2026-09-19 18:00:00',
+            'ends_at' => '2026-09-20 06:00:00',
+        ])->assertRedirect();
+        $day = EventZoneDay::query()->where('event_id', $event->id)->firstOrFail();
+        $this->actingAs($admin)->post(route('admin.events.zones.store', $event), [
+            'name' => 'Bilheteira',
+            'day_id' => $day->id,
+        ])->assertSessionHasNoErrors();
+        $today = $day->zones()->firstOrFail();
+        $this->assertNotSame($legacy->id, $today->id);
+        $manager->moveMachine($event, $today, $machine, CarbonImmutable::parse('2026-09-19 18:00:00'), $admin);
+
+        $attribution = app(EventZoneAttributionService::class);
+        $this->assertNull($attribution->zoneIdFor($event->id, $machine->id, '2026-09-19 19:00:00'));
+        $this->actingAs($admin)->post(route('admin.events.zones.days.confirm', [$event, $day]))->assertRedirect();
+        $this->assertNotNull($day->fresh()->confirmed_at);
+        $attribution->forget($event->id);
+        $this->assertSame($legacy->id, $attribution->zoneIdFor($event->id, $machine->id, '2026-09-19 01:00:00'));
+        $this->assertNull($attribution->zoneIdFor($event->id, $machine->id, '2026-09-19 12:00:00'));
+        $this->assertSame($today->id, $attribution->zoneIdFor($event->id, $machine->id, '2026-09-19 19:00:00'));
+        $this->assertNull($attribution->zoneIdFor($event->id, $machine->id, '2026-09-20 06:00:00'));
+        $this->assertSame('Bilheteira · anterior', $attribution->labelFor($event->id, $legacy->id, null));
+        $this->assertSame('Bilheteira · 19/09/2026', $attribution->labelFor($event->id, $today->id, null));
+        $this->assertSame([$today->id], $attribution->zoneIdsForLabels($event->id, ['Bilheteira · 19/09/2026']));
+        EventReportRow::create([
+            ...$this->saleRow($event, $import, $machine, '2026-09-19 19:00:00', '50.0000', 'today'),
+            'event_zone_id' => $today->id,
+        ]);
+        app(EventReportSyncService::class)->refreshRowAggregates($event->id, [$machine->id]);
+        $this->actingAs($clientUser)->getJson("/api/events/{$event->id}/zones")
+            ->assertOk()
+            ->assertJsonPath('summary.zones_count', 2)
+            ->assertJsonFragment(['label' => 'Bilheteira · 19/09/2026']);
+
+        $this->actingAs($admin)->get(route('admin.events.zones.manage', ['event' => $event, 'day' => $day->id]))
+            ->assertInertia(fn (AssertableInertia $page) => $page
+                ->where('selected_day_id', $day->id)
+                ->has('zones', 1)
+                ->where('zones.0.name', 'Bilheteira'));
+    }
+
+    public function test_day_cannot_be_confirmed_with_a_missing_tpa_or_overlapping_period(): void
+    {
+        [$admin, $client, $event] = $this->eventContext();
+        $event->update(['report_ends_at' => '2026-09-20 06:00:00']);
+        $this->machine($client, $event, 191, 'Bilheteira');
+        $this->actingAs($admin)->post(route('admin.events.zones.days.store', $event), [
+            'operational_date' => '2026-09-19',
+            'starts_at' => '2026-09-19 18:00:00',
+            'ends_at' => '2026-09-20 06:00:00',
+        ])->assertRedirect();
+        $day = $event->zoneDays()->firstOrFail();
+        $this->actingAs($admin)->post(route('admin.events.zones.store', $event), [
+            'name' => 'Bar', 'day_id' => $day->id,
+        ])->assertRedirect();
+        $this->actingAs($admin)->post(route('admin.events.zones.days.confirm', [$event, $day]))
+            ->assertSessionHasErrors('day');
+        $this->assertNull($day->fresh()->confirmed_at);
+
+        $this->actingAs($admin)->post(route('admin.events.zones.days.store', $event), [
+            'operational_date' => '2026-09-20',
+            'starts_at' => '2026-09-20 05:00:00',
+            'ends_at' => '2026-09-20 06:00:00',
+        ])->assertSessionHasErrors('starts_at');
+        $this->assertDatabaseCount('event_zone_days', 1);
+    }
+
+    public function test_assigning_a_tpa_to_a_draft_day_does_not_rewrite_published_sales(): void
+    {
+        [$admin, $client, $event] = $this->eventContext();
+        $event->update(['report_ends_at' => '2026-09-20 06:00:00']);
+        $machine = $this->machine($client, $event, 191, 'Bilheteira');
+        $legacy = EventZone::create(['event_id' => $event->id, 'name' => 'Bilheteira', 'sort_order' => 1]);
+        $manager = app(EventZoneManagementService::class);
+        $manager->moveMachine($event, $legacy, $machine, CarbonImmutable::parse('2026-09-18 18:00:00'), $admin);
+        $sale = EventReportRow::create([
+            ...$this->saleRow($event, $this->import($event, $admin), $machine, '2026-09-19 19:00:00', '10.0000', 'draft'),
+            'event_zone_id' => $legacy->id,
+        ]);
+        $day = $event->zoneDays()->create([
+            'operational_date' => '2026-09-19',
+            'starts_at' => '2026-09-19 18:00:00',
+            'ends_at' => '2026-09-20 06:00:00',
+        ]);
+        $zone = $day->zones()->create(['event_id' => $event->id, 'name' => 'Nova bilheteira', 'sort_order' => 1]);
+
+        $manager->moveMachine($event, $zone, $machine, CarbonImmutable::parse('2026-09-19 18:00:00'), $admin);
+
+        $this->assertSame($legacy->id, $sale->fresh()->event_zone_id);
+        $this->assertNull($day->fresh()->confirmed_at);
+    }
+
+    public function test_historical_first_day_is_reconciled_without_changing_second_day_sales_or_totals(): void
+    {
+        CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-09-19 18:00:00', 'Europe/Lisbon'));
+        try {
+            [$admin, $client, $event] = $this->eventContext();
+            $event->update(['report_ends_at' => '2026-09-20 06:00:00']);
+            $machine = $this->machine($client, $event, 191, 'Bar antigo - Ana');
+            $legacy = EventZone::create(['event_id' => $event->id, 'name' => 'Zona errada', 'sort_order' => 1]);
+            $manager = app(EventZoneManagementService::class);
+            $manager->moveMachine($event, $legacy, $machine, CarbonImmutable::parse('2026-09-18 18:00:00'), $admin);
+            $import = $this->import($event, $admin);
+            $firstSale = EventReportRow::create([
+                ...$this->saleRow($event, $import, $machine, '2026-09-19 01:00:00', '100.0000', 'first'),
+                'event_zone_id' => $legacy->id,
+            ]);
+            $secondSale = EventReportRow::create([
+                ...$this->saleRow($event, $import, $machine, '2026-09-19 16:00:00', '50.0000', 'second'),
+                'sale_date' => '2026-09-19',
+                'event_zone_id' => $legacy->id,
+            ]);
+            $payment = EventReportPaymentDocument::create([
+                'event_id' => $event->id,
+                'event_report_import_id' => $import->id,
+                'machine_id' => $machine->id,
+                'machine_client_id' => $machine->zs_client_id,
+                'store_code' => (string) $machine->store_id,
+                'store_name' => 'Bar antigo - Ana',
+                'sale_date' => '2026-09-19',
+                'sale_datetime' => '2026-09-19 01:00:00',
+                'doc_type' => 'FS',
+                'document_series' => 'A2026',
+                'document_number' => 'first',
+                'payment_key' => 'header',
+                'payment_code' => '3',
+                'total' => '100.0000',
+                'dedupe_key' => 'first-payment',
+                'event_zone_id' => $legacy->id,
+            ]);
+            $firstDay = $event->zoneDays()->create([
+                'operational_date' => '2026-09-18',
+                'starts_at' => '2026-09-18 18:00:00',
+                'ends_at' => '2026-09-19 06:00:00',
+            ]);
+            $firstZone = $firstDay->zones()->create(['event_id' => $event->id, 'name' => 'Bar antigo', 'sort_order' => 1]);
+            $manager->moveMachine($event, $firstZone, $machine, CarbonImmutable::parse('2026-09-18 18:00:00'), $admin);
+            $this->assertSame($legacy->id, $firstSale->fresh()->event_zone_id);
+            $this->assertSame($legacy->id, $secondSale->fresh()->event_zone_id);
+            $this->assertTrue(app(EventZoneReadinessService::class)->isReady($event->fresh()));
+            $this->assertSame($legacy->id, app(EventZoneAttributionService::class)->zoneIdFor(
+                $event->id, $machine->id, '2026-09-19 01:00:00',
+            ));
+
+            $this->actingAs($admin)->post(route('admin.events.zones.days.confirm', [$event, $firstDay]))
+                ->assertSessionHasNoErrors();
+            $this->assertSame($firstZone->id, $firstSale->fresh()->event_zone_id);
+            $this->assertSame($firstZone->id, $payment->fresh()->event_zone_id);
+            $this->assertSame($legacy->id, $secondSale->fresh()->event_zone_id);
+            $this->assertTrue(app(EventZoneReadinessService::class)->isReady($event->fresh()));
+
+            $secondDay = $event->zoneDays()->create([
+                'operational_date' => '2026-09-19',
+                'starts_at' => '2026-09-19 15:30:00',
+                'ends_at' => '2026-09-20 06:00:00',
+            ]);
+            $secondZone = $secondDay->zones()->create(['event_id' => $event->id, 'name' => 'Bar novo', 'sort_order' => 1]);
+            $manager->moveMachine($event, $secondZone, $machine, CarbonImmutable::parse('2026-09-19 15:30:00'), $admin);
+            $this->assertSame($legacy->id, $secondSale->fresh()->event_zone_id);
+            $this->actingAs($admin)->post(route('admin.events.zones.days.confirm', [$event, $secondDay]))
+                ->assertSessionHasNoErrors();
+            $this->assertSame($secondZone->id, $secondSale->fresh()->event_zone_id);
+            $this->assertSame(150.0, (float) EventReportRow::query()->where('event_id', $event->id)->sum('total'));
+
+            $manager->closeLegacyAssignments($event, CarbonImmutable::parse('2026-09-19 06:00:00'));
+            $this->assertNotNull($legacy->fresh()->archived_at);
+            $attribution = app(EventZoneAttributionService::class);
+            $attribution->forget($event->id);
+            $this->assertNull($attribution->zoneIdFor($event->id, $machine->id, '2026-09-19 10:00:00'));
+            $this->assertSame($firstZone->id, $firstSale->fresh()->event_zone_id);
+            $this->assertSame($firstZone->id, $payment->fresh()->event_zone_id);
+            $this->assertSame($secondZone->id, $secondSale->fresh()->event_zone_id);
+        } finally {
+            CarbonImmutable::setTestNow();
+        }
+    }
+
+    public function test_sync_is_blocked_when_a_new_operational_day_is_not_confirmed(): void
+    {
+        [$admin, $client, $event] = $this->eventContext();
+        $event->update(['report_ends_at' => '2026-09-20 06:00:00']);
+        $machine = $this->machine($client, $event, 191, 'Bilheteira');
+        $day = $event->zoneDays()->create([
+            'operational_date' => '2026-09-19',
+            'starts_at' => '2026-09-19 18:00:00',
+            'ends_at' => '2026-09-20 06:00:00',
+        ]);
+        $zone = $day->zones()->create(['event_id' => $event->id, 'name' => 'Bar de hoje', 'sort_order' => 1]);
+        app(EventZoneManagementService::class)->moveMachine(
+            $event, $zone, $machine, CarbonImmutable::parse('2026-09-19 18:00:00'), $admin,
+        );
+
+        CarbonImmutable::setTestNow(CarbonImmutable::parse('2026-09-19 20:00:00', 'Europe/Lisbon'));
+        try {
+            $readiness = app(EventZoneReadinessService::class);
+            $this->assertFalse($readiness->isReady($event->fresh()));
+            $this->actingAs($admin)->post(route('admin.events.zones.days.confirm', [$event, $day]))
+                ->assertSessionHasNoErrors();
+            $this->assertTrue($readiness->isReady($event->fresh()));
+            $this->machine($client, $event, 192, 'Outro TPA');
+            $this->assertFalse($readiness->isReady($event->fresh()));
+        } finally {
+            CarbonImmutable::setTestNow();
+        }
+    }
+
+    public function test_legacy_close_refuses_to_change_a_period_with_later_sales(): void
+    {
+        [$admin, $client, $event] = $this->eventContext();
+        $event->update(['report_ends_at' => '2026-09-20 06:00:00']);
+        $machine = $this->machine($client, $event, 191, 'Bilheteira');
+        $legacy = EventZone::create(['event_id' => $event->id, 'name' => 'Bilheteira', 'sort_order' => 1]);
+        $manager = app(EventZoneManagementService::class);
+        $manager->moveMachine($event, $legacy, $machine, CarbonImmutable::parse('2026-09-18 18:00:00'), $admin);
+        EventReportRow::create([
+            ...$this->saleRow($event, $this->import($event, $admin), $machine, '2026-09-19 07:00:00', '10.0000', 'late'),
+            'event_zone_id' => $legacy->id,
+        ]);
+
+        try {
+            $manager->closeLegacyAssignments($event, CarbonImmutable::parse('2026-09-19 06:00:00'));
+            $this->fail('O fecho não pode deslocar vendas posteriores para fora do histórico.');
+        } catch (ValidationException $exception) {
+            $this->assertStringContainsString('vendas posteriores', $exception->validator->errors()->first('ends_at'));
+        }
+        $this->assertNull($event->fresh()->legacy_zone_ends_at);
+        $this->assertNull(EventZoneAssignment::query()->where('event_zone_id', $legacy->id)->firstOrFail()->ends_at);
+    }
 
     public function test_new_events_require_explicit_zones_from_creation(): void
     {

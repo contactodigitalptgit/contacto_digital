@@ -17,6 +17,7 @@ class EventZone extends Model
 
     protected $fillable = [
         'event_id',
+        'event_zone_day_id',
         'name',
         'sort_order',
         'archived_at',
@@ -33,6 +34,11 @@ class EventZone extends Model
     public function event(): BelongsTo
     {
         return $this->belongsTo(Event::class);
+    }
+
+    public function day(): BelongsTo
+    {
+        return $this->belongsTo(EventZoneDay::class, 'event_zone_day_id');
     }
 
     public function assignments(): HasMany

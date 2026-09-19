@@ -2,10 +2,12 @@
 
 namespace App\Services;
 
+use App\Models\Event;
 use App\Models\EventReportPaymentDocument;
 use App\Models\EventReportRow;
 use App\Models\EventZone;
 use App\Models\EventZoneAssignment;
+use App\Models\EventZoneDay;
 use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
 use Illuminate\Database\Eloquent\Builder;
@@ -14,8 +16,14 @@ use Throwable;
 
 class EventZoneAttributionService
 {
-    /** @var array<string, list<array{zone_id:int,starts_at:int,ends_at:?int}>> */
+    /** @var array<string, list<array{zone_id:int,day_id:?int,starts_at:int,ends_at:?int}>> */
     private array $assignmentCache = [];
+
+    /** @var array<int, list<array{id:int,starts_at:int,ends_at:int,confirmed:bool}>> */
+    private array $dayCache = [];
+
+    /** @var array<int, ?int> */
+    private array $legacyEndCache = [];
 
     /** @var array<int, array<int, string>> */
     private array $labelCache = [];
@@ -66,11 +74,23 @@ class EventZoneAttributionService
     /** @return array<int, string> */
     public function labelsById(int $eventId): array
     {
-        return $this->labelCache[$eventId] ??= EventZone::query()
+        if (isset($this->labelCache[$eventId])) {
+            return $this->labelCache[$eventId];
+        }
+
+        $zones = EventZone::query()
             ->where('event_id', $eventId)
-            ->pluck('name', 'id')
-            ->mapWithKeys(fn (string $name, int|string $id): array => [(int) $id => $name])
-            ->all();
+            ->with('day:id,operational_date')
+            ->get(['id', 'name', 'event_zone_day_id']);
+        $nameCounts = $zones->countBy(fn (EventZone $zone): string => Str::lower(trim($zone->name)));
+
+        return $this->labelCache[$eventId] = $zones
+            ->mapWithKeys(function (EventZone $zone) use ($nameCounts): array {
+                $duplicated = ($nameCounts[Str::lower(trim($zone->name))] ?? 0) > 1;
+                $period = $zone->day?->operational_date?->format('d/m/Y') ?? 'anterior';
+
+                return [$zone->id => $duplicated ? $zone->name.' · '.$period : $zone->name];
+            })->all();
     }
 
     /** @param array<int, string> $labels @return array<int, int> */
@@ -81,10 +101,16 @@ class EventZoneAttributionService
             ->filter()
             ->unique();
 
-        return collect($this->labelsById($eventId))
+        $displayIds = collect($this->labelsById($eventId))
             ->filter(fn (string $name): bool => $wanted->contains(Str::lower(trim($name))))
             ->keys()
-            ->map(fn (int|string $id): int => (int) $id)
+            ->map(fn (int|string $id): int => (int) $id);
+        $rawIds = EventZone::query()->where('event_id', $eventId)->get(['id', 'name'])
+            ->filter(fn (EventZone $zone): bool => $wanted->contains(Str::lower(trim($zone->name))))
+            ->pluck('id');
+
+        return $displayIds->merge($rawIds)
+            ->unique()
             ->values()
             ->all();
     }
@@ -102,7 +128,7 @@ class EventZoneAttributionService
         return $this->hasConfiguredZones($eventId) ? 'Sem zona' : $this->fallbackLabel($storeName);
     }
 
-    public function zoneIdFor(int $eventId, int|string|null $machineId, mixed $saleDateTime, mixed $saleDate = null): ?int
+    public function zoneIdFor(int $eventId, int|string|null $machineId, mixed $saleDateTime, mixed $saleDate = null, bool $includeDraft = false): ?int
     {
         if ($machineId === null || ! $this->hasConfiguredZones($eventId)) {
             return null;
@@ -117,8 +143,24 @@ class EventZoneAttributionService
         $timestamp = $this->timestamp($saleDateTime)
             ?? $this->timestamp($saleDate, true)
             ?? $assignments[0]['starts_at'];
+        $days = $this->daysFor($eventId);
+        $day = collect($days)->first(fn (array $candidate): bool => $timestamp >= $candidate['starts_at']
+            && $timestamp < $candidate['ends_at']);
+        if ($day && ! $day['confirmed'] && ! $includeDraft) {
+            $day = null;
+        }
+        $legacyEnd = $this->legacyEndFor($eventId);
+        if (! $day && $legacyEnd !== null && $timestamp >= $legacyEnd) {
+            return null;
+        }
 
         foreach ($assignments as $assignment) {
+            if ($day && $assignment['day_id'] !== $day['id']) {
+                continue;
+            }
+            if (! $day && $assignment['day_id'] !== null) {
+                continue;
+            }
             if ($timestamp < $assignment['starts_at']) {
                 continue;
             }
@@ -131,21 +173,23 @@ class EventZoneAttributionService
         return null;
     }
 
-    public function reattributeMachine(int $eventId, int $machineId): void
+    public function reattributeMachine(int $eventId, int $machineId, ?CarbonInterface $startsAt = null, ?CarbonInterface $endsAt = null): void
     {
         $this->forget($eventId, $machineId);
-        $this->reattributeQuery(EventReportRow::query(), EventReportRow::class, $eventId, $machineId);
+        $this->reattributeQuery(EventReportRow::query(), EventReportRow::class, $eventId, $machineId, $startsAt, $endsAt);
         $this->reattributeQuery(
             EventReportPaymentDocument::query(),
             EventReportPaymentDocument::class,
             $eventId,
             $machineId,
+            $startsAt,
+            $endsAt,
         );
     }
 
     public function forget(int $eventId, ?int $machineId = null): void
     {
-        unset($this->labelCache[$eventId], $this->configuredCache[$eventId]);
+        unset($this->labelCache[$eventId], $this->configuredCache[$eventId], $this->dayCache[$eventId], $this->legacyEndCache[$eventId]);
 
         if ($machineId !== null) {
             unset($this->assignmentCache[$eventId.'|'.$machineId]);
@@ -160,7 +204,7 @@ class EventZoneAttributionService
         }
     }
 
-    /** @return list<array{zone_id:int,starts_at:int,ends_at:?int}> */
+    /** @return list<array{zone_id:int,day_id:?int,starts_at:int,ends_at:?int}> */
     private function assignmentsFor(int $eventId, int $machineId): array
     {
         $key = $eventId.'|'.$machineId;
@@ -169,21 +213,48 @@ class EventZoneAttributionService
             ->where('event_id', $eventId)
             ->where('machine_id', $machineId)
             ->orderBy('starts_at')
+            ->with('zone:id,event_zone_day_id')
             ->get(['event_zone_id', 'starts_at', 'ends_at'])
             ->map(fn (EventZoneAssignment $assignment): array => [
                 'zone_id' => $assignment->event_zone_id,
+                'day_id' => $assignment->zone?->event_zone_day_id,
                 'starts_at' => $assignment->starts_at->getTimestamp(),
                 'ends_at' => $assignment->ends_at?->getTimestamp(),
             ])
             ->all();
     }
 
+    /** @return list<array{id:int,starts_at:int,ends_at:int,confirmed:bool}> */
+    private function daysFor(int $eventId): array
+    {
+        return $this->dayCache[$eventId] ??= EventZoneDay::query()->where('event_id', $eventId)
+            ->orderBy('starts_at')->get()
+            ->map(fn (EventZoneDay $day): array => [
+                'id' => $day->id,
+                'starts_at' => $day->starts_at->getTimestamp(),
+                'ends_at' => $day->ends_at->getTimestamp(),
+                'confirmed' => $day->confirmed_at !== null,
+            ])->all();
+    }
+
+    private function legacyEndFor(int $eventId): ?int
+    {
+        if (! array_key_exists($eventId, $this->legacyEndCache)) {
+            $value = Event::query()->find($eventId)?->legacy_zone_ends_at;
+            $this->legacyEndCache[$eventId] = $value?->getTimestamp();
+        }
+
+        return $this->legacyEndCache[$eventId];
+    }
+
     /** @param class-string<\Illuminate\Database\Eloquent\Model> $modelClass */
-    private function reattributeQuery(Builder $query, string $modelClass, int $eventId, int $machineId): void
+    private function reattributeQuery(Builder $query, string $modelClass, int $eventId, int $machineId, ?CarbonInterface $startsAt = null, ?CarbonInterface $endsAt = null): void
     {
         $query
             ->where('event_id', $eventId)
             ->where('machine_id', $machineId)
+            ->when($startsAt, fn (Builder $query) => $query->where('sale_datetime', '>=', $startsAt))
+            ->when($endsAt, fn (Builder $query) => $query->where('sale_datetime', '<', $endsAt))
             ->select(['id', 'event_zone_id', 'sale_datetime', 'sale_date'])
             ->orderBy('id')
             ->chunkById(500, function ($records) use ($modelClass, $eventId, $machineId): void {
