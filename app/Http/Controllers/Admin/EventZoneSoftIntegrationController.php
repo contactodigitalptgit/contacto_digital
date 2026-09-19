@@ -413,6 +413,15 @@ class EventZoneSoftIntegrationController extends Controller
                     $matchedStore = $stores->get($machine->store_id);
 
                     if (is_array($matchedStore)) {
+                        if (! ($matchedStore['has_store_name'] ?? false)) {
+                            $message = sprintf('A ZoneSoft não devolveu o Nome da Loja para o Store ID %d.', $machine->store_id);
+                            $machine->update(['last_validated_at' => $validatedAt, 'last_error' => $message]);
+                            $failedCount++;
+                            $errors[] = $message;
+
+                            continue;
+                        }
+
                         $previousLabel = $machine->store_label;
                         $machine->update([
                             'store_label' => $matchedStore['label'],

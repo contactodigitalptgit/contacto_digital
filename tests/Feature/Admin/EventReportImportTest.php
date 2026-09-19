@@ -257,17 +257,17 @@ class EventReportImportTest extends TestCase
                     'StatusMessage' => 'OK',
                     'Content' => [
                         'store' => [
-                            ['codigo' => 0, 'designacao' => 'Loja 0', 'pais' => 'PT'],
-                            ['codigo' => 30, 'designacao' => 'Loja 30', 'pais' => 'PT'],
+                            ['codigo' => 0, 'descricao' => 'Loja 0', 'pais' => 'PT'],
+                            ['codigo' => 30, 'descricao' => 'Loja 30', 'pais' => 'PT'],
                             [
                                 'codigo' => 193,
-                                'designacao' => 'Estacionamento - Park 1',
-                                'descricao' => 'Pausas Animadas - Lda',
+                                'designacao' => 'Pausas Animadas - Lda',
+                                'descricao' => 'Estacionamento - Park 1',
                                 'pais' => 'PT',
                             ],
                             [
                                 'codigo' => 194,
-                                'descricao' => 'Pausas Animadas - Lda',
+                                'designacao' => 'Pausas Animadas - Lda',
                                 'pais' => 'PT',
                             ],
                         ],
@@ -413,6 +413,18 @@ class EventReportImportTest extends TestCase
             'is_active' => true,
         ]);
 
+        $missingNameMachine = ClientZoneSoftMachine::create([
+            'client_id' => $client->id,
+            'event_id' => $event->id,
+            'zonesoft_application_id' => $application->id,
+            'zs_client_id' => 'B3FC7C254EBDD7505C9CFA30468213B0',
+            'license' => 'Z11JSMZIYP',
+            'store_id' => 50,
+            'store_label' => 'Nome anterior',
+            'permissions' => 'API + All document interfaces',
+            'is_active' => true,
+        ]);
+
         Http::fake([
             'https://api.zonesoft.org/v3/stores/getInstances' => Http::response([
                 'Response' => [
@@ -420,8 +432,9 @@ class EventReportImportTest extends TestCase
                     'StatusMessage' => 'OK',
                     'Content' => [
                         'store' => [
-                            ['codigo' => 0, 'designacao' => 'Loja 0', 'pais' => 'PT'],
+                            ['codigo' => 0, 'descricao' => 'Loja 0', 'pais' => 'PT'],
                             ['codigo' => 30, 'descricao' => 'Loja 30', 'pais' => 'PT'],
+                            ['codigo' => 50, 'designacao' => 'Pausas Animadas - Lda', 'pais' => 'PT'],
                         ],
                     ],
                 ],
@@ -435,8 +448,8 @@ class EventReportImportTest extends TestCase
         $response->assertOk();
         $response->assertJson([
             'validated' => 2,
-            'failed' => 1,
-            'message' => '2 loja(s) validadas e 1 com erro.',
+            'failed' => 2,
+            'message' => '2 loja(s) validadas e 2 com erro.',
         ]);
 
         $this->assertDatabaseHas('client_zonesoft_machines', [
@@ -456,6 +469,8 @@ class EventReportImportTest extends TestCase
         $this->assertSame('Loja Antiga', $missingMachine->store_label);
         $this->assertNotNull($missingMachine->last_validated_at);
         $this->assertStringContainsString('Store ID 99', $missingMachine->last_error ?? '');
+        $this->assertSame('Nome anterior', $missingNameMachine->fresh()->store_label);
+        $this->assertStringContainsString('Nome da Loja', $missingNameMachine->fresh()->last_error ?? '');
         Http::assertSentCount(1);
     }
 
@@ -486,7 +501,7 @@ class EventReportImportTest extends TestCase
                         'StatusMessage' => 'OK',
                         'Content' => [
                             'store' => [
-                                ['codigo' => 115, 'designacao' => 'Bar 2 Leonor', 'pais' => 'PT'],
+                                ['codigo' => 115, 'descricao' => 'Bar 2 Leonor', 'pais' => 'PT'],
                             ],
                         ],
                     ],

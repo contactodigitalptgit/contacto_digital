@@ -14,7 +14,7 @@ class ZoneSoftDiscoveryService
     ) {}
 
     /**
-     * @return list<array{id: int, label: string, display_label: string, details: string|null, country: string|null}>
+     * @return list<array{id: int, label: string, has_store_name: bool, display_label: string, details: string|null, country: string|null}>
      */
     public function discoverStores(
         ZoneSoftApplication $application,
@@ -33,7 +33,7 @@ class ZoneSoftDiscoveryService
     }
 
     /**
-     * @return list<array{id: int, label: string, display_label: string, details: string|null, country: string|null}>
+     * @return list<array{id: int, label: string, has_store_name: bool, display_label: string, details: string|null, country: string|null}>
      */
     private function fetchStores(ZoneSoftApplication $application, string $zsClientId): array
     {
@@ -60,6 +60,7 @@ class ZoneSoftDiscoveryService
                 return [
                     'id' => $id,
                     'label' => $label,
+                    'has_store_name' => trim((string) ($store['descricao'] ?? '')) !== '',
                     'display_label' => $this->buildDisplayLabel($id, $label, $country, $details),
                     'details' => $details,
                     'country' => $country !== '' ? $country : null,
@@ -85,12 +86,11 @@ class ZoneSoftDiscoveryService
 
     private function resolveStoreLabel(array $store, int $id): string
     {
-        $designation = isset($store['designacao']) ? trim((string) $store['designacao']) : '';
+        $description = isset($store['descricao']) ? trim((string) $store['descricao']) : '';
 
-        // The stores/getInstances API exposes `designacao` as "Nome da Loja"
-        // and `descricao` as "Empresa". The company name must never be used
-        // as the store/TPA label, even as a fallback.
-        return $designation !== '' ? $designation : 'Loja '.$id;
+        // Live ZSBMS discovery for Store 192 returned `descricao` = "Bilheteira"
+        // and `designacao` = "Pausas Animadas - Lda" (Empresa).
+        return $description !== '' ? $description : 'Loja '.$id;
     }
 
     private function resolveStoreDetails(array $store, string $label): ?string
