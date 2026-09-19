@@ -539,6 +539,43 @@ class EventZoneManagementTest extends TestCase
         ]);
     }
 
+    public function test_new_tpa_label_does_not_rewrite_sales_from_a_confirmed_day(): void
+    {
+        [$admin, $client, $event] = $this->eventContext();
+        $event->update(['report_ends_at' => '2026-09-20 06:00:00']);
+        $machine = $this->machine($client, $event, 193, 'Bar antigo');
+        $legacy = EventZone::create(['event_id' => $event->id, 'name' => 'Zona antiga', 'sort_order' => 1]);
+        $manager = app(EventZoneManagementService::class);
+        $manager->moveMachine($event, $legacy, $machine, CarbonImmutable::parse('2026-09-18 18:00:00'), $admin);
+        $day = $event->zoneDays()->create([
+            'operational_date' => '2026-09-18',
+            'starts_at' => '2026-09-18 18:00:00',
+            'ends_at' => '2026-09-19 06:00:00',
+            'confirmed_at' => now(),
+        ]);
+        $zone = $day->zones()->create(['event_id' => $event->id, 'name' => 'Bar de ontem', 'sort_order' => 1]);
+        $manager->moveMachine($event, $zone, $machine, CarbonImmutable::parse('2026-09-18 18:00:00'), $admin);
+        $import = $this->import($event, $admin);
+        $yesterday = EventReportRow::create([
+            ...$this->saleRow($event, $import, $machine, '2026-09-19 01:00:00', '100.0000', 'yesterday'),
+            'store_name' => 'Bar antigo - POS 1',
+            'event_zone_id' => $zone->id,
+        ]);
+        $today = EventReportRow::create([
+            ...$this->saleRow($event, $import, $machine, '2026-09-19 16:00:00', '50.0000', 'today'),
+            'store_name' => 'Bar antigo - POS 1',
+            'event_zone_id' => $legacy->id,
+        ]);
+
+        $machine->update(['store_label' => 'Bar novo']);
+        $manager->synchronizeMachineLabel($machine->fresh(), 'Bar antigo');
+
+        $this->assertSame('Bar antigo - POS 1', $yesterday->fresh()->store_name);
+        $this->assertSame('Bar novo - POS 1', $today->fresh()->store_name);
+        $this->assertSame($zone->id, $yesterday->fresh()->event_zone_id);
+        $this->assertSame($legacy->id, $today->fresh()->event_zone_id);
+    }
+
     public function test_clients_cannot_access_zone_management(): void
     {
         [, , $event, $clientUser] = $this->eventContext();

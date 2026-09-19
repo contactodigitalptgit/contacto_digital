@@ -2222,7 +2222,9 @@ class EventReportSyncService
                 uniqueBy: ['event_id', 'machine_id', 'doc_type', 'document_series', 'document_number', 'line_key'],
                 update: [
                     'event_report_import_id', 'source_sheet', 'source_row_number',
-                    'event_zone_id', 'store_code', 'store_name', 'sale_date', 'sale_datetime',
+                    // Preserve the name captured when this document was first seen.
+                    // A later TPA rename must not relabel a previous event day.
+                    'event_zone_id', 'store_code', 'sale_date', 'sale_datetime',
                     'value', 'total', 'discount', 'quantity',
                     'product_code', 'description', 'raw_row', 'updated_at',
                 ],
@@ -2261,7 +2263,7 @@ class EventReportSyncService
                 uniqueBy: ['event_id', 'dedupe_key'],
                 update: [
                     'event_report_import_id', 'machine_id', 'event_zone_id', 'machine_client_id',
-                    'store_code', 'store_name', 'sale_date', 'sale_datetime',
+                    'store_code', 'sale_date', 'sale_datetime',
                     'doc_type', 'document_series', 'document_number',
                     'payment_reference', 'paid', 'document_total', 'payment_key',
                     'payment_code', 'payment_document_type', 'payment_document_series',

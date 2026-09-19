@@ -66,7 +66,14 @@ class EventZoneManagementService
 
         $machine->events()->get()->each(function (Event $event) use ($machine, $previousLabel, $currentLabel): void {
             DB::transaction(function () use ($event, $machine, $previousLabel, $currentLabel): void {
-                $this->renameMachineStoreData($event->id, $machine, $previousLabel, $currentLabel);
+                $lastConfirmedDayEnd = $event->zoneDays()->whereNotNull('confirmed_at')->max('ends_at');
+                $this->renameMachineStoreData(
+                    $event->id,
+                    $machine,
+                    $previousLabel,
+                    $currentLabel,
+                    $lastConfirmedDayEnd ? CarbonImmutable::parse($lastConfirmedDayEnd) : null,
+                );
                 $this->refreshAttribution($event->id, [$machine->id]);
             });
         });
@@ -238,6 +245,7 @@ class EventZoneManagementService
         ClientZoneSoftMachine $machine,
         string $previousLabel,
         string $currentLabel,
+        ?CarbonImmutable $onlyFrom = null,
     ): void {
         $previousCandidates = array_values(array_unique(array_filter([
             $previousLabel,
@@ -249,6 +257,7 @@ class EventZoneManagementService
             $storedNames = DB::table($table)
                 ->where('event_id', $eventId)
                 ->where('machine_id', $machine->id)
+                ->when($onlyFrom, fn ($query) => $query->where('sale_datetime', '>=', $onlyFrom))
                 ->whereNotNull('store_name')
                 ->distinct()
                 ->pluck('store_name');
@@ -268,6 +277,7 @@ class EventZoneManagementService
                 DB::table($table)
                     ->where('event_id', $eventId)
                     ->where('machine_id', $machine->id)
+                    ->when($onlyFrom, fn ($query) => $query->where('sale_datetime', '>=', $onlyFrom))
                     ->where('store_name', $storedName)
                     ->update(['store_name' => $replacement]);
             }
