@@ -78,6 +78,7 @@ const detailOpen = ref(false);
 const sessionStatus = ref<MachineSessionStatus | null>(null);
 const loadingSessionStatus = ref(false);
 const syncingSales = ref(false);
+const validatingMachines = ref(false);
 const form = useForm({ machine_ids: selectedMachineIds.value });
 
 const licenseMachines = computed(() => props.machines.filter(
@@ -266,6 +267,36 @@ const saveSelection = () => {
         onError: () => void showErrorToast('Não foi possível atualizar os TPAs do evento.'),
     });
 };
+
+const validateEventMachineLabels = async () => {
+    if (validatingMachines.value) {
+        return;
+    }
+
+    validatingMachines.value = true;
+
+    try {
+        const response = await axios.post(
+            route('admin.events.integrations.machines.validate-all', props.event.id),
+        );
+        const message = String(response.data?.message ?? 'Validação concluída.');
+
+        if (Number(response.data?.failed ?? 0) > 0) {
+            void showErrorToast(message);
+        } else {
+            void showSuccessToast(message);
+        }
+
+        router.reload({ only: ['machines'] });
+    } catch (error: unknown) {
+        const message = axios.isAxiosError(error)
+            ? (error.response?.data?.message as string | undefined) ?? 'Não foi possível atualizar os nomes dos TPAs.'
+            : 'Não foi possível atualizar os nomes dos TPAs.';
+        void showErrorToast(message);
+    } finally {
+        validatingMachines.value = false;
+    }
+};
 </script>
 
 <template>
@@ -327,15 +358,25 @@ const saveSelection = () => {
                         </p>
                     </div>
 
-                    <button
-                        type="button"
-                        class="rounded-xl border border-sky-400/20 bg-sky-500/10 px-5 py-3 text-sm font-semibold text-sky-100 transition hover:bg-sky-500/20 disabled:cursor-not-allowed"
-                        :disabled="form.processing"
-                        :class="{ 'opacity-60': form.processing }"
-                        @click="saveSelection"
-                    >
-                        {{ form.processing ? 'A guardar...' : 'Guardar TPAs do evento' }}
-                    </button>
+                    <div class="flex flex-wrap gap-3 lg:justify-end">
+                        <button
+                            type="button"
+                            class="dash-link-button"
+                            :disabled="validatingMachines || form.processing || !props.machines.some((machine) => machine.is_selected)"
+                            @click="validateEventMachineLabels"
+                        >
+                            {{ validatingMachines ? 'A atualizar nomes...' : 'Atualizar nomes dos TPAs do evento' }}
+                        </button>
+                        <button
+                            type="button"
+                            class="rounded-xl border border-sky-400/20 bg-sky-500/10 px-5 py-3 text-sm font-semibold text-sky-100 transition hover:bg-sky-500/20 disabled:cursor-not-allowed"
+                            :disabled="form.processing || validatingMachines"
+                            :class="{ 'opacity-60': form.processing || validatingMachines }"
+                            @click="saveSelection"
+                        >
+                            {{ form.processing ? 'A guardar...' : 'Guardar TPAs do evento' }}
+                        </button>
+                    </div>
                 </div>
             </section>
 
