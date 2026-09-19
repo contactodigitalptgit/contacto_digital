@@ -319,9 +319,6 @@ const validateEventMachineLabels = async () => {
                     <Link :href="route('admin.events.dashboard', props.event.id)" class="dash-link-button">
                         Voltar ao dashboard
                     </Link>
-                    <Link :href="route('admin.events.zones.manage', props.event.id)" class="dash-link-button">
-                        Gerir zonas
-                    </Link>
                 </div>
             </div>
         </template>

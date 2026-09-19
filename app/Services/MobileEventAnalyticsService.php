@@ -110,6 +110,26 @@ class MobileEventAnalyticsService
             ])
             ->values();
 
+        if (! $this->zoneAttribution->hasConfiguredZones($event->id)) {
+            $stores = $stores
+                ->groupBy(fn (array $store): string => $this->storeKey(
+                    $event->id,
+                    null,
+                    $store['label'],
+                    $store['code'],
+                ))
+                ->map(function (Collection $parts): array {
+                    $store = $parts->first();
+
+                    return [
+                        ...$store,
+                        'zone_id' => null,
+                        'rows_count' => (int) $parts->sum('rows_count'),
+                    ];
+                })
+                ->values();
+        }
+
         $zones = $stores
             ->groupBy(fn (array $store): string => $this->zoneAttribution->labelFor(
                 $event->id,
@@ -239,9 +259,13 @@ class MobileEventAnalyticsService
             ->selectRaw('event_zone_id, store_name, store_code, COUNT(*) as tickets_count')
             ->groupBy('event_zone_id', 'store_name', 'store_code')
             ->get()
-            ->mapWithKeys(fn (object $row): array => [
-                $this->storeKey($row->event_zone_id, $row->store_name, $row->store_code) => (int) $row->tickets_count,
-            ]);
+            ->groupBy(fn (object $row): string => $this->storeKey(
+                $event->id,
+                $row->event_zone_id,
+                $row->store_name,
+                $row->store_code,
+            ))
+            ->map(fn (Collection $parts): int => (int) $parts->sum('tickets_count'));
 
         $stores = (clone $rows)
             ->selectRaw('event_zone_id, store_name, store_code')
@@ -256,12 +280,43 @@ class MobileEventAnalyticsService
                 'zone_id' => $row->event_zone_id,
                 'rows_count' => (int) $row->rows_count,
                 'quantity_total' => round((float) $row->quantity_total, 4),
-                'tickets_count' => (int) $ticketsByStore->get(
-                    $this->storeKey($row->event_zone_id, $row->store_name, $row->store_code),
-                    0,
-                ),
                 'total_sales' => round((float) $row->total_sales, 4),
             ]);
+
+        if (! $this->zoneAttribution->hasConfiguredZones($event->id)) {
+            $stores = $stores
+                ->groupBy(fn (array $store): string => $this->storeKey(
+                    $event->id,
+                    null,
+                    $store['store_name'],
+                    $store['store_code'],
+                ))
+                ->map(function (Collection $parts): array {
+                    $store = $parts->first();
+
+                    return [
+                        ...$store,
+                        'zone_id' => null,
+                        'rows_count' => (int) $parts->sum('rows_count'),
+                        'quantity_total' => round((float) $parts->sum('quantity_total'), 4),
+                        'total_sales' => round((float) $parts->sum('total_sales'), 4),
+                    ];
+                })
+                ->values();
+        }
+
+        $stores = $stores->map(fn (array $store): array => [
+            ...$store,
+            'tickets_count' => (int) $ticketsByStore->get(
+                $this->storeKey(
+                    $event->id,
+                    $store['zone_id'],
+                    $store['store_name'],
+                    $store['store_code'],
+                ),
+                0,
+            ),
+        ]);
 
         // Keep the zone popup responsive: aggregate its sold products once,
         // then attach each result to the zone it belongs to.
@@ -390,14 +445,24 @@ class MobileEventAnalyticsService
             ->selectRaw('event_zone_id, store_name, store_code, COALESCE(SUM(total_sum), 0) as total_sales')
             ->groupBy('event_zone_id', 'store_name', 'store_code')
             ->get()
-            ->mapWithKeys(fn (object $row): array => [
-                $this->storeKey($row->event_zone_id, $row->store_name, $row->store_code) => [
+            ->groupBy(fn (object $row): string => $this->storeKey(
+                $event->id,
+                $row->event_zone_id,
+                $row->store_name,
+                $row->store_code,
+            ))
+            ->map(function (Collection $parts) use ($event): array {
+                $row = $parts->first();
+
+                return [
                     'store_name' => (string) ($row->store_name ?: 'Sem device'),
                     'store_code' => $row->store_code,
-                    'zone_id' => $row->event_zone_id,
-                    'sales_total' => (float) $row->total_sales,
-                ],
-            ]);
+                    'zone_id' => $this->zoneAttribution->hasConfiguredZones($event->id)
+                        ? $row->event_zone_id
+                        : null,
+                    'sales_total' => (float) $parts->sum('total_sales'),
+                ];
+            });
 
         $summary = [
             'multibanco' => 0.0,
@@ -423,7 +488,12 @@ class MobileEventAnalyticsService
         foreach ($documents as $document) {
             $amount = (float) ($document->total ?? 0);
             $category = $this->paymentCategory((string) ($document->payment_code ?? ''));
-            $key = $this->storeKey($document->event_zone_id, $document->store_name, $document->store_code);
+            $key = $this->storeKey(
+                $event->id,
+                $document->event_zone_id,
+                $document->store_name,
+                $document->store_code,
+            );
             $documentKey = $this->paymentDocumentKey($document);
 
             if ($this->isTopUp($document)) {
@@ -797,11 +867,19 @@ class MobileEventAnalyticsService
         ]);
     }
 
-    private function storeKey(int|string|null $zoneId, ?string $storeName, ?string $storeCode): string
-    {
-        return ($zoneId ?? 'legacy').'|'.(filled($storeCode)
+    private function storeKey(
+        int $eventId,
+        int|string|null $zoneId,
+        ?string $storeName,
+        ?string $storeCode,
+    ): string {
+        $usesConfiguredZones = $this->zoneAttribution->hasConfiguredZones($eventId);
+        $zoneKey = $usesConfiguredZones ? ($zoneId ?? 'unassigned') : 'automatic';
+        $identity = $usesConfiguredZones && filled($storeCode)
             ? 'code:'.trim((string) $storeCode)
-            : 'name:'.Str::lower(trim((string) $storeName)));
+            : 'name:'.Str::lower(trim((string) $storeName)).'|code:'.trim((string) $storeCode);
+
+        return $zoneKey.'|'.$identity;
     }
 
     private function variation(float|int $current, float|int $previous): ?float

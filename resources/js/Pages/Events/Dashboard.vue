@@ -1776,14 +1776,6 @@ function getDifferenceClass(value: number | null) {
                         <span>Gerir TPA</span>
                     </Link>
 
-                    <Link
-                        v-if="props.dashboardEditor?.enabled"
-                        :href="props.dashboardEditor.manage_zones_url"
-                        class="contacto-sidebar-menu-item"
-                    >
-                        <AppSidebarIcon name="zones" />
-                        <span>Gerir zonas</span>
-                    </Link>
                 </div>
 
                 <div class="contacto-sidebar-sync">

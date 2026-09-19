@@ -176,7 +176,7 @@ class EventController extends Controller
         $additionalClientIds = $validated['additional_client_ids'] ?? [];
         unset($validated['additional_client_ids']);
 
-        $event = Event::create([...$validated, 'requires_explicit_zones' => true]);
+        $event = Event::create([...$validated, 'requires_explicit_zones' => false]);
 
         if ($additionalClientIds !== []) {
             $event->additionalClients()->sync($additionalClientIds);

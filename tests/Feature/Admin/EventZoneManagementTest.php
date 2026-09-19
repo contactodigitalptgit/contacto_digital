@@ -279,7 +279,7 @@ class EventZoneManagementTest extends TestCase
         $this->assertNull(EventZoneAssignment::query()->where('event_zone_id', $legacy->id)->firstOrFail()->ends_at);
     }
 
-    public function test_new_events_require_explicit_zones_from_creation(): void
+    public function test_new_events_use_automatic_name_based_zones_from_creation(): void
     {
         [$admin, $client] = $this->eventContext();
 
@@ -293,7 +293,48 @@ class EventZoneManagementTest extends TestCase
             ])
             ->assertRedirect(route('admin.events.index'));
 
-        $this->assertTrue(Event::query()->where('title', 'Novo evento')->firstOrFail()->requires_explicit_zones);
+        $this->assertFalse(Event::query()->where('title', 'Novo evento')->firstOrFail()->requires_explicit_zones);
+    }
+
+    public function test_automatic_mode_ignores_preserved_manual_zones_and_does_not_block_sync(): void
+    {
+        [$admin, $client, $event] = $this->eventContext();
+        $machine = $this->machine($client, $event, 191, 'Bar REDBULL - Raquel C');
+        $manualZone = EventZone::create([
+            'event_id' => $event->id,
+            'name' => 'Zona manual antiga',
+            'sort_order' => 1,
+        ]);
+        $event->update(['requires_explicit_zones' => false]);
+
+        $attribution = app(EventZoneAttributionService::class);
+
+        $this->assertSame(
+            'Bar REDBULL',
+            $attribution->labelFor($event->id, $manualZone->id, 'Bar REDBULL - Raquel C - POS 1'),
+        );
+        $this->assertNull($attribution->zoneIdFor($event->id, $machine->id, '2026-09-18 20:00:00'));
+        $this->assertTrue(app(EventZoneReadinessService::class)->isReady($event->fresh()));
+
+        $import = $this->import($event, $admin);
+        EventReportRow::create([
+            ...$this->saleRow($event, $import, $machine, '2026-09-18 20:00:00', '75.0000', 'automatic'),
+            'store_name' => 'Bar REDBULL - Raquel C - POS 1',
+            'event_zone_id' => $manualZone->id,
+        ]);
+        app(EventReportSyncService::class)->refreshRowAggregates($event->id, [$machine->id]);
+        $zoneQuery = http_build_query(['bar_groups' => ['Bar REDBULL']]);
+        $this->actingAs($admin)
+            ->get(route('admin.events.zones', $event).'?'.$zoneQuery)
+            ->assertOk()
+            ->assertInertia(fn (AssertableInertia $page) => $page
+                ->where('summary.total_sales', 75)
+                ->where('summary.bar_groups_count', 1)
+                ->loadDeferredProps('dashboard-operational', fn (AssertableInertia $details) => $details
+                    ->where('barGroups.0.label', 'Bar REDBULL')
+                    ->where('barGroups.0.sales_total', 75)));
+
+        $this->assertSame('processing', app(EventReportSyncService::class)->start($event->fresh(), $admin)->status);
     }
 
     public function test_new_tpa_stays_pending_and_blocks_sync_until_it_is_assigned(): void
@@ -637,6 +678,7 @@ class EventZoneManagementTest extends TestCase
             'event_date' => '2026-09-18 18:00:00',
             'report_starts_at' => '2026-09-18 18:00:00',
             'report_ends_at' => '2026-09-19 04:00:00',
+            'requires_explicit_zones' => true,
             'is_active' => true,
         ]);
 

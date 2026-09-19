@@ -37,37 +37,65 @@ class EventZoneAttributionService
             return 'Sem zona';
         }
 
-        if (preg_match('/\b(top\s*up|bc\s*top)\b/i', $storeName) === 1) {
+        $name = trim((string) preg_replace('/\s*-\s*POS\s+[^-]+$/i', '', trim($storeName)));
+
+        if ($name === '') {
+            return 'Sem zona';
+        }
+
+        if (preg_match('/\b(top\s*up|bc\s*top)\b/i', $name) === 1) {
             return 'Top Up';
         }
 
-        if (preg_match('/\bbar\s*vip\b/i', $storeName) === 1 || preg_match('/^(vip)\b/i', $storeName) === 1) {
-            return 'Bar Vip';
-        }
-
-        if (preg_match('/\bbar\s*(\d+)\b/i', $storeName, $matches) === 1) {
-            return 'Bar '.(int) $matches[1];
-        }
-
-        if (preg_match('/^(bengaleiro)\b/i', $storeName) === 1) {
-            return 'Bengaleiro';
-        }
-
-        if (preg_match('/^(bilheteira)\b/i', $storeName) === 1) {
-            return 'Bilheteira';
-        }
-
-        if (preg_match('/^(.+?)\s*-\s*TPA\b/i', $storeName, $matches) === 1) {
+        if (preg_match('/^(bar\s+[^-]+?)\s*-\s*.+$/i', $name, $matches) === 1) {
             return trim($matches[1]);
         }
 
-        return trim($storeName);
+        if (preg_match('/\bbar\s*vip\b/i', $name) === 1) {
+            return 'Bar Vip';
+        }
+
+        if (preg_match('/\bbar\s*(\d+)\b/i', $name, $matches) === 1) {
+            return 'Bar '.(int) $matches[1];
+        }
+
+        if (preg_match('/^(vip)\b/i', $name) === 1) {
+            return 'Bar Vip';
+        }
+
+        if (preg_match('/^(bengaleiro)\b/i', $name) === 1) {
+            return 'Bengaleiro';
+        }
+
+        if (preg_match('/^(bilheteira)\b/i', $name) === 1) {
+            return 'Bilheteira';
+        }
+
+        if (preg_match('/^(estacionamento|glamping|torto)\s*-\s*.+$/i', $name, $matches) === 1) {
+            return trim($matches[1]);
+        }
+
+        if (preg_match('/^(privados)\s+\d+$/i', $name, $matches) === 1) {
+            return trim($matches[1]);
+        }
+
+        if (preg_match('/^(restaura[cç][aã]o\s*-\s*.+?)\s+\d+$/iu', $name, $matches) === 1) {
+            return trim($matches[1]);
+        }
+
+        if (preg_match('/^(.+?)\s*-\s*TPA\b/i', $name, $matches) === 1) {
+            return trim($matches[1]);
+        }
+
+        return $name;
     }
 
     public function hasConfiguredZones(int $eventId): bool
     {
-        return $this->configuredCache[$eventId] ??= EventZone::query()
-            ->where('event_id', $eventId)
+        return $this->configuredCache[$eventId] ??= Event::query()
+            ->whereKey($eventId)
+            ->where('requires_explicit_zones', true)
+            ->whereHas('zones')
             ->exists();
     }
 
@@ -117,6 +145,10 @@ class EventZoneAttributionService
 
     public function labelFor(int $eventId, int|string|null $zoneId, ?string $storeName): string
     {
+        if (! $this->hasConfiguredZones($eventId)) {
+            return $this->fallbackLabel($storeName);
+        }
+
         if ($zoneId !== null) {
             $label = $this->labelsById($eventId)[(int) $zoneId] ?? null;
 
@@ -125,7 +157,7 @@ class EventZoneAttributionService
             }
         }
 
-        return $this->hasConfiguredZones($eventId) ? 'Sem zona' : $this->fallbackLabel($storeName);
+        return 'Sem zona';
     }
 
     public function zoneIdFor(int $eventId, int|string|null $machineId, mixed $saleDateTime, mixed $saleDate = null, bool $includeDraft = false): ?int

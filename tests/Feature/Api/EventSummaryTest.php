@@ -8,6 +8,7 @@ use App\Models\EventReportImport;
 use App\Models\EventReportPaymentDocument;
 use App\Models\EventReportRowAggregate;
 use App\Models\EventReportTicketAggregate;
+use App\Models\EventZone;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
@@ -230,6 +231,31 @@ class EventSummaryTest extends TestCase
             ->assertJsonCount(2, 'top_stores');
     }
 
+    public function test_mobile_contract_uses_name_based_zones_when_manual_history_is_disabled(): void
+    {
+        [$user, $client] = $this->makeClient();
+        $event = $this->makeEvent($client, 'Evento Automático');
+        $oldZone = EventZone::create(['event_id' => $event->id, 'name' => 'Zona de ontem', 'sort_order' => 1]);
+        $newZone = EventZone::create(['event_id' => $event->id, 'name' => 'Zona de hoje', 'sort_order' => 2]);
+        $event->update(['requires_explicit_zones' => false]);
+
+        $storeName = 'Bar REDBULL - Raquel C - POS 1';
+        $this->seedAggregateRow($event->id, $storeName, 'FS', 40, zoneId: $oldZone->id);
+        $this->seedAggregateRow($event->id, $storeName, 'FS', 60, zoneId: $newZone->id);
+        $this->seedTicket($event->id, 'FS', 12, $storeName, $oldZone->id);
+        $this->seedTicket($event->id, 'FS', 13, $storeName, $newZone->id);
+
+        $this->authenticated($user)
+            ->getJson("/api/events/{$event->id}/zones")
+            ->assertOk()
+            ->assertJsonPath('summary.total_sales', 100)
+            ->assertJsonPath('summary.tickets_count', 2)
+            ->assertJsonPath('summary.zones_count', 1)
+            ->assertJsonPath('items.0.label', 'Bar REDBULL')
+            ->assertJsonPath('items.0.devices_count', 1)
+            ->assertJsonCount(1, 'items.0.items');
+    }
+
     public function test_products_summary_matches_the_twelve_ranked_references_like_the_web_dashboard(): void
     {
         [$user, $client] = $this->makeClient();
@@ -433,9 +459,11 @@ class EventSummaryTest extends TestCase
         float $soldQuantity = 1,
         float $offeredQuantity = 0,
         int $hour = 12,
+        ?int $zoneId = null,
     ): void {
         EventReportRowAggregate::create([
             'event_id' => $eventId,
+            'event_zone_id' => $zoneId,
             'sale_date' => '2026-06-20',
             'sale_calendar_date' => '2026-06-20',
             'sale_hour' => $hour,
@@ -454,13 +482,19 @@ class EventSummaryTest extends TestCase
         ]);
     }
 
-    private function seedTicket(int $eventId, string $docType, int $hour = 12, string $storeName = 'Loja A'): void
-    {
+    private function seedTicket(
+        int $eventId,
+        string $docType,
+        int $hour = 12,
+        string $storeName = 'Loja A',
+        ?int $zoneId = null,
+    ): void {
         static $documentNumber = 0;
         $documentNumber++;
 
         EventReportTicketAggregate::create([
             'event_id' => $eventId,
+            'event_zone_id' => $zoneId,
             'sale_date' => '2026-06-20',
             'sale_calendar_date' => '2026-06-20',
             'sale_hour' => $hour,

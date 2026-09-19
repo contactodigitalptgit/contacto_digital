@@ -701,6 +701,7 @@ class EventReportImportTest extends TestCase
             'is_active' => true,
             'last_validated_at' => now(),
         ]);
+        $event->update(['requires_explicit_zones' => true]);
         $zone = EventZone::create([
             'event_id' => $event->id,
             'name' => 'Bilheteira',

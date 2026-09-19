@@ -2469,12 +2469,19 @@ class EventDashboardController extends Controller
             return;
         }
 
-        $query->where(function (Builder $builder) use ($barGroups): void {
-            foreach ($barGroups as $barGroup) {
-                $builder->orWhere(function (Builder $barGroupQuery) use ($barGroup): void {
-                    $this->applyBarGroupFilter($barGroupQuery, $barGroup);
-                });
-            }
-        });
+        $storeNames = EventReportRowAggregate::query()
+            ->where('event_id', $eventId)
+            ->whereNotNull('store_name')
+            ->distinct()
+            ->pluck('store_name')
+            ->filter(fn (?string $name): bool => in_array(
+                $this->zoneAttribution->fallbackLabel($name),
+                $barGroups,
+                true,
+            ))
+            ->values()
+            ->all();
+
+        $query->whereIn('store_name', $storeNames === [] ? ['__sem_loja_correspondente__'] : $storeNames);
     }
 }

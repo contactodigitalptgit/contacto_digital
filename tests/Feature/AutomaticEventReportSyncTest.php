@@ -60,6 +60,7 @@ class AutomaticEventReportSyncTest extends TestCase
 
         try {
             $event = $this->makeConfiguredEvent();
+            $event->update(['requires_explicit_zones' => true]);
             EventZoneAssignment::query()->where('event_id', $event->id)->delete();
             Bus::fake();
 
