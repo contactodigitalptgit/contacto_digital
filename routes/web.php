@@ -108,10 +108,10 @@ Route::middleware(['auth', 'active.client', 'admin'])
             ->name('events.tpas.sync-sales');
         Route::get('events/{event}/gerir-zonas', [EventZoneController::class, 'index'])
             ->name('events.zones.manage');
-        Route::post('events/{event}/gerir-zonas/inicializar', [EventZoneController::class, 'initialize'])
-            ->name('events.zones.initialize');
         Route::post('events/{event}/gerir-zonas', [EventZoneController::class, 'store'])
             ->name('events.zones.store');
+        Route::post('events/{event}/gerir-zonas/{zone}/tpas', [EventZoneController::class, 'assignMachines'])
+            ->name('events.zones.machines.assign');
         Route::patch('events/{event}/gerir-zonas/{zone}', [EventZoneController::class, 'update'])
             ->name('events.zones.update');
         Route::delete('events/{event}/gerir-zonas/{zone}', [EventZoneController::class, 'destroy'])

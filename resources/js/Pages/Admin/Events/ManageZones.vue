@@ -39,9 +39,9 @@ const props = defineProps<{
         event_date: string | null;
         report_starts_at: string | null;
         report_ends_at: string | null;
+        requires_explicit_zones: boolean;
     };
     client: { id: number; name: string };
-    initialized: boolean;
     default_effective_at: string;
     zones: ZoneItem[];
     unassigned_machines: MachineItem[];
@@ -51,11 +51,13 @@ const props = defineProps<{
 const createForm = useForm({ name: '' });
 const editForm = useForm({ name: '' });
 const moveForm = useForm({ effective_at: props.default_effective_at });
-const initializeForm = useForm({});
+const bulkForm = useForm({ machine_ids: [] as number[], effective_at: props.default_effective_at });
 const editingZone = ref<ZoneItem | null>(null);
 const draggedMachine = ref<MachineItem | null>(null);
 const draggedFromZoneId = ref<number | null>(null);
 const targetZone = ref<ZoneItem | null>(null);
+const bulkZoneId = ref<number | null>(null);
+const selectedPendingIds = ref<number[]>([]);
 
 const totalMachines = computed(() => props.zones.reduce(
     (total, zone) => total + zone.machines.length,
@@ -72,14 +74,6 @@ const formatDateTime = (value: string | null) => value
     : 'Em vigor';
 
 const machineName = (machine: MachineItem) => machine.store_label?.trim() || `Store ${machine.store_id}`;
-
-const initializeZones = () => {
-    initializeForm.post(route('admin.events.zones.initialize', props.event.id), {
-        preserveScroll: true,
-        onSuccess: () => void showSuccessToast('Zonas iniciais geradas.'),
-        onError: () => void showErrorToast('Não foi possível gerar as zonas iniciais.'),
-    });
-};
 
 const createZone = () => {
     createForm.post(route('admin.events.zones.store', props.event.id), {
@@ -164,9 +158,41 @@ const confirmMove = () => {
     ]), {
         preserveScroll: true,
         onSuccess: () => {
+            selectedPendingIds.value = selectedPendingIds.value.filter((id) => id !== draggedMachine.value?.id);
             closeMove();
             void showSuccessToast('TPA movido e faturação recalculada.');
         },
+    });
+};
+
+const togglePending = (id: number) => {
+    selectedPendingIds.value = selectedPendingIds.value.includes(id)
+        ? selectedPendingIds.value.filter((selectedId) => selectedId !== id)
+        : [...selectedPendingIds.value, id];
+};
+
+const toggleAllPending = () => {
+    const allIds = props.unassigned_machines.map((machine) => machine.id);
+    selectedPendingIds.value = allIds.every((id) => selectedPendingIds.value.includes(id))
+        ? []
+        : allIds;
+};
+
+const assignSelected = () => {
+    if (!bulkZoneId.value || !selectedPendingIds.value.length) return;
+
+    bulkForm.machine_ids = selectedPendingIds.value;
+    bulkForm.post(route('admin.events.zones.machines.assign', [props.event.id, bulkZoneId.value]), {
+        preserveScroll: true,
+        onSuccess: () => {
+            selectedPendingIds.value = [];
+            bulkZoneId.value = null;
+            bulkForm.reset();
+            void showSuccessToast('TPAs atribuídos à zona.');
+        },
+        onError: (errors) => void showErrorToast(
+            (errors.machine_ids as string | undefined) ?? 'Não foi possível atribuir os TPAs.',
+        ),
     });
 };
 </script>
@@ -199,7 +225,7 @@ const confirmMove = () => {
                     <div>
                         <h3 class="text-lg font-semibold">Organização operacional do evento</h3>
                         <p class="mt-1 max-w-3xl text-sm text-current/60">
-                            Arraste um TPA para outra zona e indique quando a mudança entrou em vigor. As vendas anteriores permanecem na zona original.
+                            Crie as zonas reais e atribua todos os TPAs antes de sincronizar vendas. Arraste um TPA para mudar de zona e indique quando a mudança entrou em vigor.
                         </p>
                     </div>
                     <div class="flex flex-wrap gap-2 text-xs font-semibold uppercase tracking-[0.12em] text-current/65">
@@ -209,17 +235,7 @@ const confirmMove = () => {
                 </div>
             </section>
 
-            <section v-if="!props.initialized" class="rounded-3xl border border-dashed border-sky-400/40 bg-sky-500/5 p-8 text-center">
-                <h3 class="text-xl font-semibold">Gerar configuração inicial</h3>
-                <p class="mx-auto mt-2 max-w-2xl text-sm text-current/65">
-                    As zonas serão criadas a partir dos nomes atuais dos TPAs. Depois poderá renomear zonas e mover os equipamentos livremente.
-                </p>
-                <button class="mt-5 rounded-xl bg-sky-600 px-5 py-3 text-sm font-semibold text-white hover:bg-sky-500 disabled:opacity-60" :disabled="initializeForm.processing" @click="initializeZones">
-                    {{ initializeForm.processing ? 'A gerar…' : 'Gerar zonas iniciais' }}
-                </button>
-            </section>
-
-            <section v-else class="space-y-4">
+            <section class="space-y-4">
                 <form class="flex flex-col gap-3 rounded-2xl border border-current/10 bg-white/[0.02] p-4 sm:flex-row" @submit.prevent="createZone">
                     <div class="flex-1">
                         <label for="zone_name" class="text-xs font-semibold uppercase tracking-[0.14em] text-current/60">Nova zona</label>
@@ -231,7 +247,12 @@ const confirmMove = () => {
                     </button>
                 </form>
 
-                <div class="grid gap-4 xl:grid-cols-3">
+                <p v-if="!props.zones.length" class="rounded-2xl border border-dashed border-sky-400/40 bg-sky-500/5 p-6 text-sm text-current/70">
+                    Ainda não há zonas. Crie a primeira zona acima; os TPAs permanecem pendentes até serem atribuídos por si.
+                    <span v-if="!props.event.requires_explicit_zones" class="mt-2 block font-medium text-amber-300">Ao criar a primeira zona neste evento antigo, as próximas sincronizações vão aguardar a atribuição de todos os TPAs ativos.</span>
+                </p>
+
+                <div v-if="props.zones.length" class="grid gap-4 xl:grid-cols-3">
                     <article
                         v-for="zone in props.zones"
                         :key="zone.id"
@@ -269,18 +290,29 @@ const confirmMove = () => {
                 </div>
 
                 <article v-if="props.unassigned_machines.length" class="rounded-3xl border border-amber-400/30 bg-amber-500/5 p-4">
-                    <h3 class="font-bold text-amber-300">TPAs sem zona</h3>
+                    <div class="flex flex-wrap items-center justify-between gap-3">
+                        <div>
+                            <h3 class="font-bold text-amber-300">TPAs sem zona ({{ props.unassigned_machines.length }})</h3>
+                            <p class="mt-1 text-sm text-current/65">Atribua-os antes de sincronizar. Os nomes dos TPAs não criam zonas automaticamente.</p>
+                        </div>
+                        <div class="flex gap-2">
+                            <button type="button" class="dash-link-button" @click="toggleAllPending">Selecionar todos</button>
+                            <button type="button" class="rounded-xl bg-sky-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50" :disabled="!selectedPendingIds.length || !props.zones.length" @click="bulkZoneId = props.zones[0].id">
+                                Atribuir selecionados ({{ selectedPendingIds.length }})
+                            </button>
+                        </div>
+                    </div>
                     <div class="mt-3 flex flex-wrap gap-2">
-                        <div
+                        <label
                             v-for="machine in props.unassigned_machines"
                             :key="machine.id"
                             draggable="true"
-                            class="cursor-grab rounded-xl border border-amber-400/25 bg-amber-500/10 px-4 py-3"
+                            class="flex cursor-grab items-start gap-3 rounded-xl border border-amber-400/25 bg-amber-500/10 px-4 py-3"
                             @dragstart="startDrag(machine, null)"
                         >
-                            <p class="font-semibold">{{ machineName(machine) }}</p>
-                            <p class="text-xs text-current/55">Store {{ machine.store_id }}</p>
-                        </div>
+                            <input type="checkbox" class="mt-1" :checked="selectedPendingIds.includes(machine.id)" @change="togglePending(machine.id)" />
+                            <span><span class="block font-semibold">{{ machineName(machine) }}</span><span class="text-xs text-current/55">Store {{ machine.store_id }}</span></span>
+                        </label>
                     </div>
                 </article>
             </section>
@@ -322,6 +354,15 @@ const confirmMove = () => {
                 <div><label for="effective_at" class="text-xs font-semibold uppercase tracking-[0.14em] text-current/60">Mudança efetiva em</label><input id="effective_at" v-model="moveForm.effective_at" type="datetime-local" class="dash-modal-input mt-2 w-full" /><p v-if="moveForm.errors.effective_at" class="mt-1 text-sm text-rose-400">{{ moveForm.errors.effective_at }}</p></div>
                 <p class="rounded-xl bg-sky-500/10 p-3 text-sm text-current/70">As vendas anteriores a este horário ficam na zona de origem; as posteriores passam para {{ targetZone?.name }}.</p>
                 <div class="flex justify-end gap-2"><button type="button" class="dash-link-button" @click="closeMove">Cancelar</button><button class="rounded-xl bg-sky-600 px-4 py-2 text-sm font-semibold text-white" :disabled="moveForm.processing">Confirmar mudança</button></div>
+            </form>
+        </Modal>
+
+        <Modal :show="bulkZoneId !== null" max-width="md" @close="bulkZoneId = null">
+            <form class="space-y-5 p-6" @submit.prevent="assignSelected">
+                <div><h3 class="text-lg font-semibold">Atribuir {{ selectedPendingIds.length }} TPAs</h3><p class="mt-1 text-sm text-current/60">Escolha a zona real e a hora a partir da qual as vendas pertencem a ela.</p></div>
+                <div><label for="bulk_zone" class="text-xs font-semibold uppercase tracking-[0.14em] text-current/60">Zona</label><select id="bulk_zone" v-model.number="bulkZoneId" class="dash-modal-input mt-2 w-full"><option v-for="zone in props.zones" :key="zone.id" :value="zone.id">{{ zone.name }}</option></select></div>
+                <div><label for="bulk_effective_at" class="text-xs font-semibold uppercase tracking-[0.14em] text-current/60">Atribuição efetiva em</label><input id="bulk_effective_at" v-model="bulkForm.effective_at" type="datetime-local" class="dash-modal-input mt-2 w-full" /><p v-if="bulkForm.errors.effective_at" class="mt-1 text-sm text-rose-400">{{ bulkForm.errors.effective_at }}</p></div>
+                <div class="flex justify-end gap-2"><button type="button" class="dash-link-button" @click="bulkZoneId = null">Cancelar</button><button class="rounded-xl bg-sky-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50" :disabled="bulkForm.processing">Confirmar atribuição</button></div>
             </form>
         </Modal>
     </AuthenticatedLayout>

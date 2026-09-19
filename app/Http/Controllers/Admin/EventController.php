@@ -115,7 +115,6 @@ class EventController extends Controller
     }
 
     /**
-     * @param  mixed  $issues
      * @return list<array{machine_id:int,store_id:int,store_label:?string,zs_client_id:string,message:string}>
      */
     private function normalizeMachineIssues(mixed $issues): array
@@ -176,7 +175,7 @@ class EventController extends Controller
         $additionalClientIds = $validated['additional_client_ids'] ?? [];
         unset($validated['additional_client_ids']);
 
-        $event = Event::create($validated);
+        $event = Event::create([...$validated, 'requires_explicit_zones' => true]);
 
         if ($additionalClientIds !== []) {
             $event->additionalClients()->sync($additionalClientIds);

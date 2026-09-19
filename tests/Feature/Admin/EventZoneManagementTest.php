@@ -12,9 +12,12 @@ use App\Models\EventZone;
 use App\Models\EventZoneAssignment;
 use App\Models\User;
 use App\Models\ZoneSoftApplication;
+use App\Services\EventReportSyncService;
 use App\Services\EventZoneManagementService;
+use App\Services\EventZoneReadinessService;
 use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Validation\ValidationException;
 use Inertia\Testing\AssertableInertia;
 use Tests\TestCase;
 
@@ -22,23 +25,110 @@ class EventZoneManagementTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_admin_initializes_event_zones_from_machine_names(): void
+    public function test_new_events_require_explicit_zones_from_creation(): void
+    {
+        [$admin, $client] = $this->eventContext();
+
+        $this->actingAs($admin)
+            ->post(route('admin.events.store'), [
+                'client_id' => $client->id,
+                'title' => 'Novo evento',
+                'event_date' => '2026-10-01 18:00:00',
+                'report_starts_at' => '2026-10-01 18:00:00',
+                'report_ends_at' => '2026-10-02 04:00:00',
+            ])
+            ->assertRedirect(route('admin.events.index'));
+
+        $this->assertTrue(Event::query()->where('title', 'Novo evento')->firstOrFail()->requires_explicit_zones);
+    }
+
+    public function test_new_tpa_stays_pending_and_blocks_sync_until_it_is_assigned(): void
+    {
+        [$admin, $client, $event] = $this->eventContext();
+        $first = $this->machine($client, $event, 1, 'Bar 1 - Ana');
+        $second = $this->machine($client, $event, 2, 'Bar 1 - Rui');
+
+        $this->actingAs($admin)
+            ->put(route('admin.events.tpas.sync', $event), ['machine_ids' => [$first->id, $second->id]])
+            ->assertRedirect(route('admin.events.tpas.manage', $event));
+        $this->assertDatabaseCount('event_zones', 0);
+        $this->assertDatabaseCount('event_zone_assignments', 0);
+
+        $zone = EventZone::create(['event_id' => $event->id, 'name' => 'Bar principal', 'sort_order' => 1]);
+        $this->actingAs($admin)
+            ->post(route('admin.events.zones.machines.assign', [$event, $zone]), [
+                'machine_ids' => [$first->id],
+                'effective_at' => '2026-09-18 18:00:00',
+            ])
+            ->assertRedirect(route('admin.events.zones.manage', $event));
+
+        $this->assertSame(
+            [$second->id],
+            app(EventZoneReadinessService::class)->unassignedMachines($event->fresh())->pluck('id')->all(),
+        );
+        $this->actingAs($admin)
+            ->get(route('admin.events.tpas.manage', $event))
+            ->assertInertia(fn (AssertableInertia $page) => $page
+                ->where('event.requires_explicit_zones', true)
+                ->where('unassigned_machine_ids', [$second->id]));
+        try {
+            app(EventReportSyncService::class)->start($event->fresh(), $admin);
+            $this->fail('A sincronização não pode começar com um TPA sem zona.');
+        } catch (ValidationException $exception) {
+            $this->assertStringContainsString('TPAs sem zona', $exception->validator->errors()->first('integration'));
+        }
+        $this->assertDatabaseCount('event_report_imports', 0);
+
+        $this->actingAs($admin)
+            ->post(route('admin.events.zones.machines.assign', [$event, $zone]), [
+                'machine_ids' => [$second->id],
+                'effective_at' => '2026-09-18 18:00:00',
+            ])
+            ->assertRedirect(route('admin.events.zones.manage', $event));
+        $this->assertDatabaseCount('event_zones', 1);
+        $this->assertSame('processing', app(EventReportSyncService::class)->start($event->fresh(), $admin)->status);
+    }
+
+    public function test_admin_creates_zones_and_assigns_multiple_tpas_explicitly(): void
     {
         [$admin, $client, $event] = $this->eventContext();
         $first = $this->machine($client, $event, 1, 'Tpa 1 - Bar 1 Ana - POS 1');
         $second = $this->machine($client, $event, 2, 'Tpa 2 - Bar 1 Rui - POS 1');
         $third = $this->machine($client, $event, 3, 'Tpa 3 - Bar 3 - POS 1');
 
+        $this->actingAs($admin)->get(route('admin.events.zones.manage', $event))
+            ->assertInertia(fn (AssertableInertia $page) => $page
+                ->has('zones', 0)
+                ->has('unassigned_machines', 3));
+        $this->assertDatabaseCount('event_zones', 0);
+
+        foreach (['Bar 1', 'Bar 3'] as $name) {
+            $this->actingAs($admin)
+                ->post(route('admin.events.zones.store', $event), ['name' => $name])
+                ->assertRedirect(route('admin.events.zones.manage', $event));
+        }
+
+        $barOne = EventZone::query()->where('event_id', $event->id)->where('name', 'Bar 1')->firstOrFail();
+        $barThree = EventZone::query()->where('event_id', $event->id)->where('name', 'Bar 3')->firstOrFail();
         $this->actingAs($admin)
-            ->post(route('admin.events.zones.initialize', $event))
+            ->post(route('admin.events.zones.machines.assign', [$event, $barOne]), [
+                'machine_ids' => [$first->id, $second->id],
+                'effective_at' => '2026-09-18 18:00:00',
+            ])
+            ->assertRedirect(route('admin.events.zones.manage', $event));
+        $this->actingAs($admin)
+            ->post(route('admin.events.zones.machines.assign', [$event, $barThree]), [
+                'machine_ids' => [$third->id],
+                'effective_at' => '2026-09-18 18:00:00',
+            ])
             ->assertRedirect(route('admin.events.zones.manage', $event));
 
         $this->assertDatabaseHas('event_zones', ['event_id' => $event->id, 'name' => 'Bar 1']);
         $this->assertDatabaseHas('event_zones', ['event_id' => $event->id, 'name' => 'Bar 3']);
+        $this->assertTrue($event->fresh()->requires_explicit_zones);
         $this->assertDatabaseCount('event_zones', 2);
         $this->assertDatabaseCount('event_zone_assignments', 3);
 
-        $barOne = EventZone::query()->where('event_id', $event->id)->where('name', 'Bar 1')->firstOrFail();
         $this->assertSame(
             [$first->id, $second->id],
             EventZoneAssignment::query()
@@ -47,15 +137,13 @@ class EventZoneManagementTest extends TestCase
                 ->pluck('machine_id')
                 ->all(),
         );
-        $this->assertNotNull($third->id);
-
         $this->actingAs($admin)
             ->get(route('admin.events.zones.manage', $event))
             ->assertOk()
             ->assertInertia(fn (AssertableInertia $page) => $page
                 ->component('Admin/Events/ManageZones')
-                ->where('initialized', true)
-                ->has('zones', 2));
+                ->has('zones', 2)
+                ->has('unassigned_machines', 0));
     }
 
     public function test_zone_move_splits_one_tpa_sales_by_effective_time_without_mobile_changes(): void
@@ -68,13 +156,18 @@ class EventZoneManagementTest extends TestCase
         EventReportRow::create($this->saleRow($event, $import, $machine, '2026-09-18 22:00:00', '400000.0000', '2'));
 
         $manager = app(EventZoneManagementService::class);
-        $manager->initializeMissingMachines($event, $admin);
-        $barOne = EventZone::query()->where('event_id', $event->id)->where('name', 'Bar 1')->firstOrFail();
+        $barOne = EventZone::create([
+            'event_id' => $event->id,
+            'name' => 'Bar 1',
+            'sort_order' => 1,
+        ]);
         $barThree = EventZone::create([
             'event_id' => $event->id,
             'name' => 'Bar 3',
             'sort_order' => 2,
         ]);
+
+        $manager->moveMachine($event, $barOne, $machine, CarbonImmutable::parse('2026-09-18 18:00:00'), $admin);
 
         $manager->moveMachine(
             $event,
@@ -142,7 +235,7 @@ class EventZoneManagementTest extends TestCase
                 ->where('history.1.sales_total', 300));
     }
 
-    public function test_corrected_machine_name_updates_generated_zone_and_existing_report_data(): void
+    public function test_corrected_machine_name_updates_report_data_without_changing_manually_assigned_zone(): void
     {
         [$admin, $client, $event] = $this->eventContext();
         $machine = $this->machine($client, $event, 193, 'Pausas Animadas - Lda');
@@ -169,28 +262,25 @@ class EventZoneManagementTest extends TestCase
             'dedupe_key' => 'label-correction',
         ]);
         $manager = app(EventZoneManagementService::class);
-        $manager->initializeMissingMachines($event, $admin);
-        $previousZone = EventZone::query()
-            ->where('event_id', $event->id)
-            ->where('name', 'Pausas Animadas - Lda')
-            ->firstOrFail();
+        $zone = EventZone::create([
+            'event_id' => $event->id,
+            'name' => 'Estacionamento',
+            'sort_order' => 1,
+        ]);
+        $manager->moveMachine($event, $zone, $machine, CarbonImmutable::parse('2026-09-18 18:00:00'), $admin);
 
         $machine->update(['store_label' => 'Estacionamento - Park 1']);
         $manager->synchronizeMachineLabel($machine->fresh(), 'Pausas Animadas - Lda');
 
-        $correctedZone = EventZone::query()
-            ->where('event_id', $event->id)
-            ->where('name', 'Estacionamento - Park 1')
-            ->firstOrFail();
         $this->assertSame('Estacionamento - Park 1 - POS 1', $row->fresh()->store_name);
         $this->assertSame('Estacionamento - Park 1 - POS 1', $payment->fresh()->store_name);
-        $this->assertSame($correctedZone->id, $row->fresh()->event_zone_id);
-        $this->assertSame($correctedZone->id, $payment->fresh()->event_zone_id);
-        $this->assertNotNull($previousZone->fresh()->archived_at);
+        $this->assertSame($zone->id, $row->fresh()->event_zone_id);
+        $this->assertSame($zone->id, $payment->fresh()->event_zone_id);
+        $this->assertDatabaseCount('event_zones', 1);
         $this->assertDatabaseHas('event_report_row_aggregates', [
             'event_id' => $event->id,
             'machine_id' => $machine->id,
-            'event_zone_id' => $correctedZone->id,
+            'event_zone_id' => $zone->id,
             'store_name' => 'Estacionamento - Park 1 - POS 1',
         ]);
     }
@@ -207,9 +297,15 @@ class EventZoneManagementTest extends TestCase
     public function test_admin_can_manage_empty_zones_but_cannot_archive_a_zone_with_assigned_tpas(): void
     {
         [$admin, $client, $event] = $this->eventContext();
-        $this->machine($client, $event, 1, 'Bar 1 - TPA 1');
-        app(EventZoneManagementService::class)->initializeMissingMachines($event, $admin);
-        $barOne = EventZone::query()->where('event_id', $event->id)->where('name', 'Bar 1')->firstOrFail();
+        $machine = $this->machine($client, $event, 1, 'Bar 1 - TPA 1');
+        $barOne = EventZone::create([
+            'event_id' => $event->id,
+            'name' => 'Bar 1',
+            'sort_order' => 1,
+        ]);
+        app(EventZoneManagementService::class)->moveMachine(
+            $event, $barOne, $machine, CarbonImmutable::parse('2026-09-18 18:00:00'), $admin,
+        );
 
         $this->actingAs($admin)
             ->delete(route('admin.events.zones.destroy', [$event, $barOne]))

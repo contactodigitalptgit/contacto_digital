@@ -49,6 +49,7 @@ class EventReportSyncService
     public function __construct(
         private readonly ZoneSoftApiClient $apiClient,
         private readonly EventZoneAttributionService $zoneAttribution,
+        private readonly EventZoneReadinessService $zoneReadiness,
     ) {}
 
     public function sync(Event $event, ?User $uploadedBy = null): EventReportImport
@@ -76,6 +77,7 @@ class EventReportSyncService
                 }
 
                 $machines = $this->resolveMachines($lockedEvent);
+                $this->zoneReadiness->assertReady($lockedEvent);
 
                 return $this->createSyncLog($lockedEvent, $machines, $uploadedBy);
             }),
@@ -150,6 +152,7 @@ class EventReportSyncService
 
         try {
             $machines = $this->resolveMachines($event);
+            $this->zoneReadiness->assertReady($event);
             $fetchStartedAt = microtime(true);
             $machineSync = $this->fetchRows($event, $machines, $syncLog);
             $fetchDurationMs = (int) round((microtime(true) - $fetchStartedAt) * 1000);
@@ -220,13 +223,18 @@ class EventReportSyncService
                     return $lockedSyncLog->fresh();
                 }
 
+                $this->zoneReadiness->assertReady($lockedEvent);
+                $this->zoneAttribution->forget($event->id);
+                if ($lockedEvent->requires_explicit_zones) {
+                    $this->assertFetchedSalesHaveZones($event->id, $machineSync);
+                }
+
                 // This is the only place event_report_rows/event_report_payment_documents
                 // are ever written. It only touches the delta this cycle actually
                 // fetched (bounded by what changed, not the whole dataset), and it
                 // runs inside this short transaction so a crash or a superseding
                 // sync before this point leaves the previously published data
                 // completely untouched.
-                $this->zoneAttribution->forget($event->id);
                 $this->upsertRows($event, $lockedSyncLog, $machineSync['pending_rows'], $timestamp);
                 $this->upsertPaymentDocuments($event, $lockedSyncLog, $machineSync['pending_payment_documents'], $timestamp);
                 $this->reconcileFetchedDocuments(
@@ -329,6 +337,32 @@ class EventReportSyncService
         }
 
         return $machines;
+    }
+
+    /** @param array<string, mixed> $machineSync */
+    private function assertFetchedSalesHaveZones(int $eventId, array $machineSync): void
+    {
+        foreach (['pending_rows', 'pending_payment_documents'] as $key) {
+            foreach ($machineSync[$key] ?? [] as $sale) {
+                $machineId = $sale['machine_id'] ?? null;
+
+                if ($this->zoneAttribution->zoneIdFor(
+                    $eventId,
+                    $machineId,
+                    $sale['sale_datetime'] ?? null,
+                    $sale['sale_date'] ?? null,
+                ) !== null) {
+                    continue;
+                }
+
+                throw ValidationException::withMessages([
+                    'integration' => sprintf(
+                        'Existem vendas do TPA %s fora do periodo atribuido a uma zona. Corrija a hora de inicio da atribuicao antes de sincronizar.',
+                        $machineId ?? 'desconhecido',
+                    ),
+                ]);
+            }
+        }
     }
 
     /**

@@ -9,6 +9,7 @@ use App\Models\Event;
 use App\Models\ZoneSoftApplication;
 use App\Services\EventReportSyncService;
 use App\Services\EventZoneManagementService;
+use App\Services\EventZoneReadinessService;
 use App\Services\ZoneSoft\ZoneSoftApiClient;
 use App\Services\ZoneSoft\ZoneSoftApiException;
 use App\Services\ZoneSoft\ZoneSoftDiscoveryService;
@@ -18,6 +19,7 @@ use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Crypt;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
@@ -84,8 +86,11 @@ class EventZoneSoftIntegrationController extends Controller
             ]);
         }
 
-        $event->zonesoftMachines()->sync($validMachineIds->all());
-        $zoneManagement->initializeMissingMachines($event->fresh(), $request->user());
+        DB::transaction(function () use ($event, $validMachineIds, $zoneManagement): void {
+            Event::query()->whereKey($event->id)->lockForUpdate()->firstOrFail();
+            $event->zonesoftMachines()->sync($validMachineIds->all());
+            $zoneManagement->closeDetachedAssignments($event);
+        });
 
         return to_route('admin.events.tpas.manage', $event);
     }
@@ -274,7 +279,6 @@ class EventZoneSoftIntegrationController extends Controller
     public function storeMachine(
         Request $request,
         Event $event,
-        EventZoneManagementService $zoneManagement,
     ): RedirectResponse {
         $application = $this->getReadableApplication();
         $validated = $request->validate([
@@ -298,8 +302,10 @@ class EventZoneSoftIntegrationController extends Controller
             'last_error' => null,
         ]);
         $machine->save();
-        $event->zonesoftMachines()->syncWithoutDetaching([$machine->id]);
-        $zoneManagement->initializeMissingMachines($event->fresh(), $request->user());
+        DB::transaction(function () use ($event, $machine): void {
+            Event::query()->whereKey($event->id)->lockForUpdate()->firstOrFail();
+            $event->zonesoftMachines()->syncWithoutDetaching([$machine->id]);
+        });
 
         return to_route('admin.events.integrations.show', $event);
     }
@@ -348,15 +354,22 @@ class EventZoneSoftIntegrationController extends Controller
         return to_route('admin.events.integrations.show', $event);
     }
 
-    public function destroyMachine(Event $event, ClientZoneSoftMachine $machine): RedirectResponse
-    {
+    public function destroyMachine(
+        Event $event,
+        ClientZoneSoftMachine $machine,
+        EventZoneManagementService $zoneManagement,
+    ): RedirectResponse {
         abort_unless(
             $machine->client_id === $event->client_id
             && $event->zonesoftMachines()->whereKey($machine->id)->exists(),
             404,
         );
 
-        $event->zonesoftMachines()->detach($machine->id);
+        DB::transaction(function () use ($event, $machine, $zoneManagement): void {
+            Event::query()->whereKey($event->id)->lockForUpdate()->firstOrFail();
+            $event->zonesoftMachines()->detach($machine->id);
+            $zoneManagement->closeDetachedAssignments($event);
+        });
 
         return to_route('admin.events.integrations.show', $event);
     }
@@ -560,17 +573,23 @@ class EventZoneSoftIntegrationController extends Controller
     {
         $event->load('client');
         $selectedMachineIds = $event->zonesoftMachines()->pluck('client_zonesoft_machines.id');
+        $unassignedIds = app(EventZoneReadinessService::class)
+            ->unassignedMachines($event)
+            ->pluck('id')
+            ->all();
 
         return Inertia::render('Admin/Events/ManageTpas', [
             'event' => [
                 'id' => $event->id,
                 'title' => $event->title,
                 'event_date' => $event->event_date->toISOString(),
+                'requires_explicit_zones' => $event->requires_explicit_zones,
             ],
             'client' => [
                 'id' => $event->client->id,
                 'name' => $event->client->name,
             ],
+            'unassigned_machine_ids' => $unassignedIds,
             'machines' => $event->client->zonesoftMachines()
                 ->orderBy('license')
                 ->orderBy('store_id')

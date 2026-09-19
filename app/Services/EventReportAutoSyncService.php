@@ -8,6 +8,8 @@ use Carbon\CarbonInterface;
 
 class EventReportAutoSyncService
 {
+    public function __construct(private readonly EventZoneReadinessService $zoneReadiness) {}
+
     public function enabled(): bool
     {
         return (bool) config('event-reports.automatic_sync.enabled', true);
@@ -63,6 +65,10 @@ class EventReportAutoSyncService
             return $this->makeStatus(true, 'processing');
         }
 
+        if (! $this->zoneReadiness->isReady($event)) {
+            return $this->makeStatus(false, 'zones_pending');
+        }
+
         $nextSyncAt = $this->nextSyncAt($event);
 
         if (! $nextSyncAt) {
@@ -103,6 +109,10 @@ class EventReportAutoSyncService
         }
 
         if ($event->latestReportImport?->status === 'processing') {
+            return false;
+        }
+
+        if (! $this->zoneReadiness->isReady($event)) {
             return false;
         }
 

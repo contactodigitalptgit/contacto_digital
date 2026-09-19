@@ -99,7 +99,7 @@ class EventZoneAttributionService
             }
         }
 
-        return $this->fallbackLabel($storeName);
+        return $this->hasConfiguredZones($eventId) ? 'Sem zona' : $this->fallbackLabel($storeName);
     }
 
     public function zoneIdFor(int $eventId, int|string|null $machineId, mixed $saleDateTime, mixed $saleDate = null): ?int

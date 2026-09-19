@@ -8,6 +8,13 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class EventZone extends Model
 {
+    protected static function booted(): void
+    {
+        static::created(fn (EventZone $zone) => Event::query()
+            ->whereKey($zone->event_id)
+            ->update(['requires_explicit_zones' => true]));
+    }
+
     protected $fillable = [
         'event_id',
         'name',

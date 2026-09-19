@@ -15,6 +15,7 @@ use Carbon\CarbonImmutable;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -62,13 +63,16 @@ class EventZoneController extends Controller
                 'event_date' => $event->event_date?->toISOString(),
                 'report_starts_at' => $event->report_starts_at?->toISOString(),
                 'report_ends_at' => $event->report_ends_at?->toISOString(),
+                'requires_explicit_zones' => $event->requires_explicit_zones,
             ],
             'client' => [
                 'id' => $event->client->id,
                 'name' => $event->client->name,
             ],
-            'initialized' => $zones->isNotEmpty(),
-            'default_effective_at' => $this->defaultEffectiveAt($event)->format('Y-m-d\TH:i'),
+            'default_effective_at' => ($event->activeReportImports()->exists()
+                ? $this->defaultEffectiveAt($event)
+                : CarbonImmutable::instance($event->report_starts_at ?? $event->event_date))
+                ->format('Y-m-d\TH:i'),
             'zones' => $zones->map(fn (EventZone $zone): array => [
                 'id' => $zone->id,
                 'name' => $zone->name,
@@ -111,14 +115,6 @@ class EventZoneController extends Controller
                     'sales_total' => round((float) $assignment->sales_total, 4),
                 ])->values(),
         ]);
-    }
-
-    public function initialize(Request $request, Event $event): RedirectResponse
-    {
-        $this->zoneManagement->initializeMissingMachines($event, $request->user());
-
-        return to_route('admin.events.zones.manage', $event)
-            ->with('success', 'Zonas iniciais geradas a partir dos nomes dos TPAs.');
     }
 
     public function store(Request $request, Event $event): RedirectResponse
@@ -189,15 +185,7 @@ class EventZoneController extends Controller
         $validated = $request->validate([
             'effective_at' => ['required', 'date'],
         ]);
-        $effectiveAt = CarbonImmutable::parse($validated['effective_at']);
-        $startsAt = CarbonImmutable::instance($event->report_starts_at ?? $event->event_date);
-        $endsAt = $event->report_ends_at ? CarbonImmutable::instance($event->report_ends_at) : null;
-
-        if ($effectiveAt->lessThan($startsAt) || ($endsAt && $effectiveAt->greaterThan($endsAt))) {
-            throw ValidationException::withMessages([
-                'effective_at' => 'A mudança deve ocorrer dentro do período configurado para o evento.',
-            ]);
-        }
+        $effectiveAt = $this->validatedEffectiveAt($event, $validated['effective_at']);
 
         $this->zoneManagement->moveMachine(
             $event,
@@ -209,6 +197,64 @@ class EventZoneController extends Controller
 
         return to_route('admin.events.zones.manage', $event)
             ->with('success', 'TPA movido e faturação recalculada pelo horário da mudança.');
+    }
+
+    public function assignMachines(Request $request, Event $event, EventZone $zone): RedirectResponse
+    {
+        $this->resolveZone($event, $zone);
+        abort_if($zone->archived_at !== null, 404);
+        $validated = $request->validate([
+            'machine_ids' => ['required', 'array', 'min:1', 'max:500'],
+            'machine_ids.*' => ['required', 'integer', 'distinct'],
+            'effective_at' => ['required', 'date'],
+        ]);
+        $effectiveAt = $this->validatedEffectiveAt($event, $validated['effective_at']);
+        $machineIds = collect($validated['machine_ids'])->map(fn (int|string $id): int => (int) $id);
+
+        DB::transaction(function () use ($event, $zone, $machineIds, $effectiveAt, $request): void {
+            Event::query()->whereKey($event->id)->lockForUpdate()->firstOrFail();
+            $machines = $event->zonesoftMachines()->whereIn('client_zonesoft_machines.id', $machineIds)->get();
+
+            if ($machines->count() !== $machineIds->count()) {
+                throw ValidationException::withMessages([
+                    'machine_ids' => 'Só pode atribuir TPAs associados a este evento.',
+                ]);
+            }
+
+            $alreadyAssigned = EventZoneAssignment::query()
+                ->where('event_id', $event->id)
+                ->whereIn('machine_id', $machineIds)
+                ->whereNull('ends_at')
+                ->exists();
+
+            if ($alreadyAssigned) {
+                throw ValidationException::withMessages([
+                    'machine_ids' => 'A seleção inclui TPAs já atribuídos. Use a mudança individual de zona.',
+                ]);
+            }
+
+            foreach ($machines as $machine) {
+                $this->zoneManagement->moveMachine($event, $zone, $machine, $effectiveAt, $request->user());
+            }
+        });
+
+        return to_route('admin.events.zones.manage', $event)
+            ->with('success', 'TPAs atribuídos à zona.');
+    }
+
+    private function validatedEffectiveAt(Event $event, string $value): CarbonImmutable
+    {
+        $effectiveAt = CarbonImmutable::parse($value);
+        $startsAt = CarbonImmutable::instance($event->report_starts_at ?? $event->event_date);
+        $endsAt = $event->report_ends_at ? CarbonImmutable::instance($event->report_ends_at) : null;
+
+        if ($effectiveAt->lessThan($startsAt) || ($endsAt && $effectiveAt->greaterThan($endsAt))) {
+            throw ValidationException::withMessages([
+                'effective_at' => 'A atribuição deve ocorrer dentro do período configurado para o evento.',
+            ]);
+        }
+
+        return $effectiveAt;
     }
 
     private function resolveZone(Event $event, EventZone $zone): EventZone

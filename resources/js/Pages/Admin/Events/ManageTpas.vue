@@ -10,6 +10,7 @@ interface EventData {
     id: number;
     title: string;
     event_date: string;
+    requires_explicit_zones: boolean;
 }
 
 interface ClientData {
@@ -49,6 +50,7 @@ const props = defineProps<{
     event: EventData;
     client: ClientData;
     machines: MachineItem[];
+    unassigned_machine_ids: number[];
 }>();
 
 const initialSelectedMachines = props.machines.filter((machine) => machine.is_selected);
@@ -82,6 +84,7 @@ const licenseMachines = computed(() => props.machines.filter(
     (machine) => (machine.license?.trim() ?? '') === selectedLicense.value,
 ));
 const selectedCount = computed(() => selectedMachineIds.value.length);
+const pendingZoneCount = computed(() => props.unassigned_machine_ids.length);
 const matchesMachineSearch = (machine: MachineItem, normalizedSearch: string) => normalizedSearch === ''
     || [
         machine.store_label,
@@ -285,11 +288,19 @@ const saveSelection = () => {
                     <Link :href="route('admin.events.dashboard', props.event.id)" class="dash-link-button">
                         Voltar ao dashboard
                     </Link>
+                    <Link :href="route('admin.events.zones.manage', props.event.id)" class="dash-link-button">
+                        Gerir zonas
+                    </Link>
                 </div>
             </div>
         </template>
 
         <div class="dash-page space-y-6">
+            <section v-if="props.event.requires_explicit_zones && pendingZoneCount" class="rounded-2xl border border-amber-400/30 bg-amber-500/10 px-6 py-5 text-sm">
+                <p class="font-semibold text-amber-200">{{ pendingZoneCount }} TPA{{ pendingZoneCount === 1 ? '' : 's' }} ativo{{ pendingZoneCount === 1 ? '' : 's' }} sem zona</p>
+                <p class="mt-1 text-current/70">A sincronização fica suspensa até atribuir cada TPA a uma zona do evento.</p>
+                <Link :href="route('admin.events.zones.manage', props.event.id)" class="mt-2 inline-block font-semibold text-sky-300 underline">Atribuir zonas</Link>
+            </section>
             <section class="rounded-2xl border border-current/10 bg-white/[0.02] px-6 py-5">
                 <div class="grid gap-4 lg:grid-cols-[minmax(18rem,42rem)_auto] lg:items-center lg:justify-between">
                     <div class="max-w-2xl">
@@ -740,7 +751,7 @@ const saveSelection = () => {
                             <button
                                 type="button"
                                 class="rounded-xl border border-sky-400/20 bg-sky-500/10 px-5 py-3 text-sm font-semibold text-sky-100 transition hover:bg-sky-500/20 disabled:cursor-not-allowed disabled:opacity-60"
-                                :disabled="syncingSales"
+                                :disabled="syncingSales || (props.event.requires_explicit_zones && pendingZoneCount > 0)"
                                 @click="syncMachineSales"
                             >
                                 {{ syncingSales ? 'A sincronizar...' : 'Sincronizar vendas' }}

@@ -20,15 +20,13 @@ class EventZoneManagementService
         private readonly EventReportSyncService $reportSync,
     ) {}
 
-    /** @return array<int, int> */
-    public function initializeMissingMachines(Event $event, ?User $actor = null): array
+    /** Close assignments for TPAs removed from the event without guessing zones for new TPAs. */
+    public function closeDetachedAssignments(Event $event): void
     {
-        $machines = $event->zonesoftMachines()->orderBy('id')->get();
-        $startsAt = CarbonImmutable::instance($event->report_starts_at ?? $event->event_date);
+        $linkedMachineIds = $event->zonesoftMachines()->pluck('client_zonesoft_machines.id')->all();
         $changeAt = $this->effectiveNow($event);
-        $touchedMachineIds = DB::transaction(function () use ($event, $actor, $machines, $startsAt, $changeAt): array {
+        DB::transaction(function () use ($event, $linkedMachineIds, $changeAt): void {
             Event::query()->whereKey($event->id)->lockForUpdate()->firstOrFail();
-            $linkedMachineIds = $machines->pluck('id')->map(fn (int|string $id): int => (int) $id)->all();
             $detachedAssignments = EventZoneAssignment::query()
                 ->where('event_id', $event->id)
                 ->whereNull('ends_at')
@@ -48,88 +46,8 @@ class EventZoneManagementService
                 ]);
                 $touched[] = $assignment->machine_id;
             }
-
-            $existingMachineIds = EventZoneAssignment::query()
-                ->where('event_id', $event->id)
-                ->whereIn('machine_id', $machines->pluck('id'))
-                ->whereNull('ends_at')
-                ->pluck('machine_id')
-                ->map(fn (int|string $id): int => (int) $id)
-                ->all();
-            $known = array_fill_keys($existingMachineIds, true);
-            $historicalMachineIds = EventZoneAssignment::query()
-                ->where('event_id', $event->id)
-                ->whereIn('machine_id', $machines->pluck('id'))
-                ->distinct()
-                ->pluck('machine_id')
-                ->map(fn (int|string $id): int => (int) $id)
-                ->all();
-            $hasHistory = array_fill_keys($historicalMachineIds, true);
-            $zones = EventZone::query()
-                ->where('event_id', $event->id)
-                ->lockForUpdate()
-                ->get()
-                ->keyBy(fn (EventZone $zone): string => mb_strtolower(trim($zone->name)));
-            $nextOrder = ((int) $zones->max('sort_order')) + 1;
-
-            foreach ($machines as $machine) {
-                if (isset($known[$machine->id])) {
-                    continue;
-                }
-
-                $fallbackName = $machine->store_label ?: 'Loja '.$machine->store_id;
-                $name = $this->attribution->fallbackLabel($fallbackName);
-                $key = mb_strtolower($name);
-                $zone = $zones->get($key);
-
-                if (! $zone) {
-                    $zone = EventZone::create([
-                        'event_id' => $event->id,
-                        'name' => $name,
-                        'sort_order' => $nextOrder++,
-                    ]);
-                    $zones->put($key, $zone);
-                } elseif ($zone->archived_at !== null) {
-                    $zone->update(['archived_at' => null]);
-                }
-
-                $assignmentStartsAt = isset($hasHistory[$machine->id]) ? $changeAt : $startsAt;
-                $boundaryAssignment = EventZoneAssignment::query()
-                    ->where('event_id', $event->id)
-                    ->where('machine_id', $machine->id)
-                    ->where('starts_at', $assignmentStartsAt)
-                    ->first();
-
-                if ($boundaryAssignment) {
-                    $boundaryAssignment->update([
-                        'event_zone_id' => $zone->id,
-                        'ends_at' => null,
-                        'assigned_by_user_id' => $actor?->id,
-                        'source' => 'relinked',
-                    ]);
-                    $touched[] = $machine->id;
-
-                    continue;
-                }
-
-                EventZoneAssignment::create([
-                    'event_id' => $event->id,
-                    'event_zone_id' => $zone->id,
-                    'machine_id' => $machine->id,
-                    'starts_at' => $assignmentStartsAt,
-                    'ends_at' => null,
-                    'assigned_by_user_id' => $actor?->id,
-                    'source' => isset($hasHistory[$machine->id]) ? 'relinked' : 'initial',
-                ]);
-                $touched[] = $machine->id;
-            }
-
             $this->refreshAttribution($event->id, $touched);
-
-            return $touched;
         });
-
-        return $touchedMachineIds;
     }
 
     public function synchronizeMachineLabel(
@@ -146,7 +64,6 @@ class EventZoneManagementService
         $machine->events()->get()->each(function (Event $event) use ($machine, $previousLabel, $currentLabel): void {
             DB::transaction(function () use ($event, $machine, $previousLabel, $currentLabel): void {
                 $this->renameMachineStoreData($event->id, $machine, $previousLabel, $currentLabel);
-                $this->moveGeneratedAssignmentsToCurrentLabel($event, $machine, $previousLabel, $currentLabel);
                 $this->refreshAttribution($event->id, [$machine->id]);
             });
         });
@@ -299,78 +216,6 @@ class EventZoneManagementService
         }
 
         return null;
-    }
-
-    private function moveGeneratedAssignmentsToCurrentLabel(
-        Event $event,
-        ClientZoneSoftMachine $machine,
-        string $previousLabel,
-        string $currentLabel,
-    ): void {
-        $currentZoneName = $this->attribution->fallbackLabel($currentLabel);
-        $previousZoneNames = collect([
-            $previousLabel,
-            'Loja '.$machine->store_id,
-            'Store '.$machine->store_id,
-        ])
-            ->filter()
-            ->map(fn (string $label): string => mb_strtolower($this->attribution->fallbackLabel($label)))
-            ->unique();
-
-        $assignments = EventZoneAssignment::query()
-            ->with('zone')
-            ->where('event_id', $event->id)
-            ->where('machine_id', $machine->id)
-            ->where('source', '!=', 'manual')
-            ->get()
-            ->filter(fn (EventZoneAssignment $assignment): bool => (
-                $previousZoneNames->contains(mb_strtolower(trim((string) $assignment->zone?->name)))
-            ));
-
-        if ($assignments->isEmpty()) {
-            return;
-        }
-
-        $zones = EventZone::query()
-            ->where('event_id', $event->id)
-            ->lockForUpdate()
-            ->get();
-        $targetZone = $zones->first(
-            fn (EventZone $zone): bool => mb_strtolower(trim($zone->name)) === mb_strtolower($currentZoneName),
-        );
-
-        if (! $targetZone) {
-            $targetZone = EventZone::create([
-                'event_id' => $event->id,
-                'name' => $currentZoneName,
-                'sort_order' => ((int) $zones->max('sort_order')) + 1,
-            ]);
-        } elseif ($targetZone->archived_at !== null) {
-            $targetZone->update(['archived_at' => null]);
-        }
-
-        $previousZoneIds = $assignments
-            ->pluck('event_zone_id')
-            ->map(fn (int|string $zoneId): int => (int) $zoneId)
-            ->unique();
-
-        EventZoneAssignment::query()
-            ->whereIn('id', $assignments->pluck('id'))
-            ->update(['event_zone_id' => $targetZone->id]);
-
-        foreach ($previousZoneIds as $previousZoneId) {
-            if ($previousZoneId === $targetZone->id) {
-                continue;
-            }
-
-            $stillAssigned = EventZoneAssignment::query()
-                ->where('event_zone_id', $previousZoneId)
-                ->exists();
-
-            if (! $stillAssigned) {
-                EventZone::query()->whereKey($previousZoneId)->update(['archived_at' => now()]);
-            }
-        }
     }
 
     private function effectiveNow(Event $event): CarbonImmutable

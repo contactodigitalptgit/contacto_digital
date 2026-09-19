@@ -9,6 +9,8 @@ use App\Models\Event;
 use App\Models\EventReportImport;
 use App\Models\EventReportPaymentDocument;
 use App\Models\EventReportRow;
+use App\Models\EventZone;
+use App\Models\EventZoneAssignment;
 use App\Models\User;
 use App\Models\ZoneSoftApplication;
 use App\Services\EventReportSyncService;
@@ -672,7 +674,7 @@ class EventReportImportTest extends TestCase
         $application = $this->makeApplication();
         $event = $this->makeEvent($client);
 
-        ClientZoneSoftMachine::create([
+        $machine = ClientZoneSoftMachine::create([
             'client_id' => $client->id,
             'event_id' => $event->id,
             'zonesoft_application_id' => $application->id,
@@ -683,6 +685,18 @@ class EventReportImportTest extends TestCase
             'permissions' => 'API + All document interfaces',
             'is_active' => true,
             'last_validated_at' => now(),
+        ]);
+        $zone = EventZone::create([
+            'event_id' => $event->id,
+            'name' => 'Bilheteira',
+            'sort_order' => 1,
+        ]);
+        EventZoneAssignment::create([
+            'event_id' => $event->id,
+            'event_zone_id' => $zone->id,
+            'machine_id' => $machine->id,
+            'starts_at' => $event->report_starts_at,
+            'source' => 'manual',
         ]);
 
         Http::fake([
@@ -821,6 +835,7 @@ class EventReportImportTest extends TestCase
         $this->assertTrue($import->is_active);
         $this->assertSame('completed', $import->status);
         $this->assertSame(2, $import->imported_rows_count);
+        $this->assertSame([$zone->id], $import->rows()->distinct()->pluck('event_zone_id')->all());
         $this->assertSame('zonesoft_api', $import->summary['source'] ?? null);
         $this->assertSame(1, $import->summary['machines_count'] ?? null);
         $this->assertSame(2, $import->summary['payment_documents_count'] ?? null);

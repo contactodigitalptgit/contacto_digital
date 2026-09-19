@@ -7,6 +7,8 @@ use App\Models\Client;
 use App\Models\ClientZoneSoftMachine;
 use App\Models\Event;
 use App\Models\EventReportImport;
+use App\Models\EventZone;
+use App\Models\EventZoneAssignment;
 use App\Models\User;
 use App\Models\ZoneSoftApplication;
 use App\Services\EventReportAutoSyncService;
@@ -47,6 +49,27 @@ class AutomaticEventReportSyncTest extends TestCase
                 ->assertSuccessful();
 
             $this->assertSame(1, EventReportImport::query()->count());
+        } finally {
+            CarbonImmutable::setTestNow();
+        }
+    }
+
+    public function test_scheduler_waits_for_explicit_zone_assignment(): void
+    {
+        CarbonImmutable::setTestNow('2026-07-18 20:00:00');
+
+        try {
+            $event = $this->makeConfiguredEvent();
+            EventZoneAssignment::query()->where('event_id', $event->id)->delete();
+            Bus::fake();
+
+            $this->assertSame('zones_pending', app(EventReportAutoSyncService::class)->status($event)['state']);
+            $this->artisan('events:sync-due-reports')
+                ->expectsOutput('No event report synchronization is due.')
+                ->assertSuccessful();
+
+            Bus::assertNothingDispatched();
+            $this->assertDatabaseCount('event_report_imports', 0);
         } finally {
             CarbonImmutable::setTestNow();
         }
@@ -252,7 +275,7 @@ class AutomaticEventReportSyncTest extends TestCase
             'is_active' => true,
         ]);
 
-        ClientZoneSoftMachine::create([
+        $machine = ClientZoneSoftMachine::create([
             'client_id' => $client->id,
             'event_id' => $event->id,
             'zonesoft_application_id' => $application->id,
@@ -263,7 +286,20 @@ class AutomaticEventReportSyncTest extends TestCase
             'is_active' => true,
         ]);
 
-        return $event;
+        $zone = EventZone::create([
+            'event_id' => $event->id,
+            'name' => 'Zona definida',
+            'sort_order' => 1,
+        ]);
+        EventZoneAssignment::create([
+            'event_id' => $event->id,
+            'event_zone_id' => $zone->id,
+            'machine_id' => $machine->id,
+            'starts_at' => $event->report_starts_at,
+            'source' => 'manual',
+        ]);
+
+        return $event->refresh();
     }
 
     private function makeCompletedImport(

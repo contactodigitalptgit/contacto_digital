@@ -26,6 +26,7 @@ class Event extends Model
         'report_ends_at',
         'show_zt_card',
         'dashboard_configuration',
+        'requires_explicit_zones',
         'is_active',
     ];
 
@@ -40,6 +41,7 @@ class Event extends Model
             'report_ends_at' => 'datetime',
             'show_zt_card' => 'boolean',
             'dashboard_configuration' => 'array',
+            'requires_explicit_zones' => 'boolean',
             'is_active' => 'boolean',
         ];
     }
