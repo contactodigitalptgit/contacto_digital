@@ -334,7 +334,7 @@ class ZoneSoftIntegrationController extends Controller
                 }
 
                 $stores = collect(
-                    $discoveryService->discoverStores($application, (string) $zsClientId),
+                    $discoveryService->discoverStores($application, (string) $zsClientId, false),
                 )->keyBy('id');
 
                 foreach ($clientMachines as $machine) {

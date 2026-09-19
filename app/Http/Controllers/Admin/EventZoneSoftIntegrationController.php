@@ -393,7 +393,7 @@ class EventZoneSoftIntegrationController extends Controller
                 }
 
                 $stores = collect(
-                    $discoveryService->discoverStores($application, (string) $zsClientId),
+                    $discoveryService->discoverStores($application, (string) $zsClientId, false),
                 )->keyBy('id');
 
                 foreach ($machines as $machine) {
