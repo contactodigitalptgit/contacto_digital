@@ -85,12 +85,12 @@ class ZoneSoftDiscoveryService
 
     private function resolveStoreLabel(array $store, int $id): string
     {
-        $description = isset($store['descricao']) ? trim((string) $store['descricao']) : '';
+        $designation = isset($store['designacao']) ? trim((string) $store['designacao']) : '';
 
-        // In ZSBMS, `descricao` is "Nome da Loja" and `designacao` is
-        // "Empresa". The company name must never be used as the store/TPA
-        // label, even as a fallback.
-        return $description !== '' ? $description : 'Loja '.$id;
+        // The stores/getInstances API exposes `designacao` as "Nome da Loja"
+        // and `descricao` as "Empresa". The company name must never be used
+        // as the store/TPA label, even as a fallback.
+        return $designation !== '' ? $designation : 'Loja '.$id;
     }
 
     private function resolveStoreDetails(array $store, string $label): ?string

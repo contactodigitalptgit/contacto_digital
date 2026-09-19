@@ -256,16 +256,16 @@ class EventReportImportTest extends TestCase
                     'Content' => [
                         'store' => [
                             ['codigo' => 0, 'designacao' => 'Loja 0', 'pais' => 'PT'],
-                            ['codigo' => 30, 'descricao' => 'Loja 30', 'pais' => 'PT'],
+                            ['codigo' => 30, 'designacao' => 'Loja 30', 'pais' => 'PT'],
                             [
                                 'codigo' => 193,
-                                'designacao' => 'Pausas Animadas - Lda',
-                                'descricao' => 'Estacionamento - Park 1',
+                                'designacao' => 'Estacionamento - Park 1',
+                                'descricao' => 'Pausas Animadas - Lda',
                                 'pais' => 'PT',
                             ],
                             [
                                 'codigo' => 194,
-                                'designacao' => 'Pausas Animadas - Lda',
+                                'descricao' => 'Pausas Animadas - Lda',
                                 'pais' => 'PT',
                             ],
                         ],
@@ -484,7 +484,7 @@ class EventReportImportTest extends TestCase
                         'StatusMessage' => 'OK',
                         'Content' => [
                             'store' => [
-                                ['codigo' => 115, 'descricao' => 'Bar 2 Leonor', 'pais' => 'PT'],
+                                ['codigo' => 115, 'designacao' => 'Bar 2 Leonor', 'pais' => 'PT'],
                             ],
                         ],
                     ],
