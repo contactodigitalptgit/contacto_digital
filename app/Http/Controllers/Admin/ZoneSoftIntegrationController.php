@@ -7,6 +7,7 @@ use App\Http\Requests\Admin\ZoneSoftMachineBulkImportRequest;
 use App\Models\Client;
 use App\Models\ClientZoneSoftMachine;
 use App\Models\ZoneSoftApplication;
+use App\Services\EventZoneManagementService;
 use App\Services\ZoneSoft\ZoneSoftApiException;
 use App\Services\ZoneSoft\ZoneSoftDiscoveryService;
 use App\Services\ZoneSoft\ZoneSoftMachineBulkImportService;
@@ -169,6 +170,7 @@ class ZoneSoftIntegrationController extends Controller
     public function validateAllMachines(
         Request $request,
         ZoneSoftDiscoveryService $discoveryService,
+        EventZoneManagementService $zoneManagement,
     ): JsonResponse {
         $validated = $request->validate([
             'client_id' => ['nullable', 'integer', 'exists:clients,id'],
@@ -185,6 +187,7 @@ class ZoneSoftIntegrationController extends Controller
         return $this->validateMachines(
             $machines,
             $discoveryService,
+            $zoneManagement,
             'Nenhum Client ID global registado para validar.',
         );
     }
@@ -236,6 +239,7 @@ class ZoneSoftIntegrationController extends Controller
     public function updateMachine(
         Request $request,
         ClientZoneSoftMachine $machine,
+        EventZoneManagementService $zoneManagement,
     ): RedirectResponse {
         if ($machine->events()->exists() && $request->integer('client_id') !== $machine->client_id) {
             throw ValidationException::withMessages([
@@ -245,6 +249,7 @@ class ZoneSoftIntegrationController extends Controller
 
         $application = $machine->application ?? $this->getReadableApplication();
         $validated = $this->validateMachine($request, $application, $machine);
+        $previousLabel = $machine->store_label;
 
         $machine->update([
             ...$validated,
@@ -252,6 +257,7 @@ class ZoneSoftIntegrationController extends Controller
             'last_validated_at' => now(),
             'last_error' => null,
         ]);
+        $zoneManagement->synchronizeMachineLabel($machine->fresh(), $previousLabel);
 
         return to_route('admin.integrations.zonesoft.index');
     }
@@ -303,6 +309,7 @@ class ZoneSoftIntegrationController extends Controller
     private function validateMachines(
         Collection $machines,
         ZoneSoftDiscoveryService $discoveryService,
+        EventZoneManagementService $zoneManagement,
         string $emptyMessage,
     ): JsonResponse {
         $machines->loadMissing('application');
@@ -334,11 +341,13 @@ class ZoneSoftIntegrationController extends Controller
                     $matchedStore = $stores->get($machine->store_id);
 
                     if (is_array($matchedStore)) {
+                        $previousLabel = $machine->store_label;
                         $machine->update([
                             'store_label' => $matchedStore['label'],
                             'last_validated_at' => $validatedAt,
                             'last_error' => null,
                         ]);
+                        $zoneManagement->synchronizeMachineLabel($machine->fresh(), $previousLabel);
                         $validatedCount++;
 
                         continue;

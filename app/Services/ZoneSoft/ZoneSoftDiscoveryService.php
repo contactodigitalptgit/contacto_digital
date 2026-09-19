@@ -85,16 +85,12 @@ class ZoneSoftDiscoveryService
 
     private function resolveStoreLabel(array $store, int $id): string
     {
-        $candidates = collect([
-            isset($store['designacao']) ? trim((string) $store['designacao']) : '',
-            isset($store['descricao']) ? trim((string) $store['descricao']) : '',
-        ])
-            ->filter(fn (string $value): bool => $value !== '')
-            ->unique()
-            ->sortBy(fn (string $value): int => mb_strlen($value))
-            ->values();
+        $description = isset($store['descricao']) ? trim((string) $store['descricao']) : '';
 
-        return $candidates->first() ?? 'Loja '.$id;
+        // In ZSBMS, `descricao` is "Nome da Loja" and `designacao` is
+        // "Empresa". The company name must never be used as the store/TPA
+        // label, even as a fallback.
+        return $description !== '' ? $description : 'Loja '.$id;
     }
 
     private function resolveStoreDetails(array $store, string $label): ?string
@@ -116,7 +112,7 @@ class ZoneSoftDiscoveryService
         $display = sprintf('Loja %d - %s', $id, $label);
 
         if ($details) {
-            $display .= ' / '.$details;
+            $display .= ' / Empresa: '.$details;
         }
 
         if ($country) {

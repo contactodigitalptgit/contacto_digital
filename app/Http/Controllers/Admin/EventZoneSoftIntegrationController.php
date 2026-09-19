@@ -261,10 +261,12 @@ class EventZoneSoftIntegrationController extends Controller
     public function validateAllMachines(
         Event $event,
         ZoneSoftDiscoveryService $discoveryService,
+        EventZoneManagementService $zoneManagement,
     ): JsonResponse {
         return $this->validateMachines(
             $event->zonesoftMachines()->orderBy('store_id')->get(),
             $discoveryService,
+            $zoneManagement,
             'Nenhum Client ID registado para este evento.',
         );
     }
@@ -306,6 +308,7 @@ class EventZoneSoftIntegrationController extends Controller
         Request $request,
         Event $event,
         ClientZoneSoftMachine $machine,
+        EventZoneManagementService $zoneManagement,
     ): RedirectResponse {
         abort_unless(
             $machine->client_id === $event->client_id
@@ -333,12 +336,14 @@ class EventZoneSoftIntegrationController extends Controller
             'is_active' => ['required', 'boolean'],
         ]);
 
+        $previousLabel = $machine->store_label;
         $machine->update([
             ...$validated,
             'permissions' => self::DEFAULT_MACHINE_PERMISSIONS,
             'last_validated_at' => now(),
             'last_error' => null,
         ]);
+        $zoneManagement->synchronizeMachineLabel($machine->fresh(), $previousLabel);
 
         return to_route('admin.events.integrations.show', $event);
     }
@@ -362,6 +367,7 @@ class EventZoneSoftIntegrationController extends Controller
     private function validateMachines(
         Collection $machines,
         ZoneSoftDiscoveryService $discoveryService,
+        EventZoneManagementService $zoneManagement,
         string $emptyMessage,
     ): JsonResponse {
         $machines->loadMissing('application');
@@ -394,11 +400,13 @@ class EventZoneSoftIntegrationController extends Controller
                     $matchedStore = $stores->get($machine->store_id);
 
                     if (is_array($matchedStore)) {
+                        $previousLabel = $machine->store_label;
                         $machine->update([
                             'store_label' => $matchedStore['label'],
                             'last_validated_at' => $validatedAt,
                             'last_error' => null,
                         ]);
+                        $zoneManagement->synchronizeMachineLabel($machine->fresh(), $previousLabel);
 
                         $validatedCount++;
 

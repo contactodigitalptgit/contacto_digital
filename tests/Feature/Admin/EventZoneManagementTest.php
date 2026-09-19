@@ -6,6 +6,7 @@ use App\Models\Client;
 use App\Models\ClientZoneSoftMachine;
 use App\Models\Event;
 use App\Models\EventReportImport;
+use App\Models\EventReportPaymentDocument;
 use App\Models\EventReportRow;
 use App\Models\EventZone;
 use App\Models\EventZoneAssignment;
@@ -139,6 +140,59 @@ class EventZoneManagementTest extends TestCase
                 ->where('history.0.sales_total', 400000)
                 ->where('history.1.zone', 'Bar 1')
                 ->where('history.1.sales_total', 300));
+    }
+
+    public function test_corrected_machine_name_updates_generated_zone_and_existing_report_data(): void
+    {
+        [$admin, $client, $event] = $this->eventContext();
+        $machine = $this->machine($client, $event, 193, 'Pausas Animadas - Lda');
+        $import = $this->import($event, $admin);
+        $row = EventReportRow::create([
+            ...$this->saleRow($event, $import, $machine, '2026-09-18 19:00:00', '300.0000', '1'),
+            'store_name' => 'Pausas Animadas - Lda - POS 1',
+        ]);
+        $payment = EventReportPaymentDocument::create([
+            'event_id' => $event->id,
+            'event_report_import_id' => $import->id,
+            'machine_id' => $machine->id,
+            'machine_client_id' => $machine->zs_client_id,
+            'store_code' => (string) $machine->store_id,
+            'store_name' => 'Pausas Animadas - Lda - POS 1',
+            'sale_date' => '2026-09-18',
+            'sale_datetime' => '2026-09-18 19:00:00',
+            'doc_type' => 'FS',
+            'document_series' => 'A2026',
+            'document_number' => '1',
+            'payment_key' => 'header',
+            'payment_code' => '3',
+            'total' => '300.0000',
+            'dedupe_key' => 'label-correction',
+        ]);
+        $manager = app(EventZoneManagementService::class);
+        $manager->initializeMissingMachines($event, $admin);
+        $previousZone = EventZone::query()
+            ->where('event_id', $event->id)
+            ->where('name', 'Pausas Animadas - Lda')
+            ->firstOrFail();
+
+        $machine->update(['store_label' => 'Estacionamento - Park 1']);
+        $manager->synchronizeMachineLabel($machine->fresh(), 'Pausas Animadas - Lda');
+
+        $correctedZone = EventZone::query()
+            ->where('event_id', $event->id)
+            ->where('name', 'Estacionamento - Park 1')
+            ->firstOrFail();
+        $this->assertSame('Estacionamento - Park 1 - POS 1', $row->fresh()->store_name);
+        $this->assertSame('Estacionamento - Park 1 - POS 1', $payment->fresh()->store_name);
+        $this->assertSame($correctedZone->id, $row->fresh()->event_zone_id);
+        $this->assertSame($correctedZone->id, $payment->fresh()->event_zone_id);
+        $this->assertNotNull($previousZone->fresh()->archived_at);
+        $this->assertDatabaseHas('event_report_row_aggregates', [
+            'event_id' => $event->id,
+            'machine_id' => $machine->id,
+            'event_zone_id' => $correctedZone->id,
+            'store_name' => 'Estacionamento - Park 1 - POS 1',
+        ]);
     }
 
     public function test_clients_cannot_access_zone_management(): void

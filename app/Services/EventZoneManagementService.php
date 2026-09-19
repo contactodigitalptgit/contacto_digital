@@ -132,6 +132,26 @@ class EventZoneManagementService
         return $touchedMachineIds;
     }
 
+    public function synchronizeMachineLabel(
+        ClientZoneSoftMachine $machine,
+        ?string $previousLabel,
+    ): void {
+        $currentLabel = trim((string) $machine->store_label);
+        $previousLabel = trim((string) $previousLabel);
+
+        if ($currentLabel === '' || $currentLabel === $previousLabel) {
+            return;
+        }
+
+        $machine->events()->get()->each(function (Event $event) use ($machine, $previousLabel, $currentLabel): void {
+            DB::transaction(function () use ($event, $machine, $previousLabel, $currentLabel): void {
+                $this->renameMachineStoreData($event->id, $machine, $previousLabel, $currentLabel);
+                $this->moveGeneratedAssignmentsToCurrentLabel($event, $machine, $previousLabel, $currentLabel);
+                $this->refreshAttribution($event->id, [$machine->id]);
+            });
+        });
+    }
+
     public function moveMachine(
         Event $event,
         EventZone $zone,
@@ -216,6 +236,140 @@ class EventZoneManagementService
 
         if ($machineIds !== []) {
             $this->reportSync->refreshRowAggregates($eventId, $machineIds);
+        }
+    }
+
+    private function renameMachineStoreData(
+        int $eventId,
+        ClientZoneSoftMachine $machine,
+        string $previousLabel,
+        string $currentLabel,
+    ): void {
+        $previousCandidates = array_values(array_unique(array_filter([
+            $previousLabel,
+            'Loja '.$machine->store_id,
+            'Store '.$machine->store_id,
+        ])));
+
+        foreach (['event_report_rows', 'event_report_payment_documents'] as $table) {
+            $storedNames = DB::table($table)
+                ->where('event_id', $eventId)
+                ->where('machine_id', $machine->id)
+                ->whereNotNull('store_name')
+                ->distinct()
+                ->pluck('store_name');
+
+            foreach ($storedNames as $storedName) {
+                $storedName = (string) $storedName;
+                $replacement = $this->replaceStoreNamePrefix(
+                    $storedName,
+                    $previousCandidates,
+                    $currentLabel,
+                );
+
+                if ($replacement === null || $replacement === $storedName) {
+                    continue;
+                }
+
+                DB::table($table)
+                    ->where('event_id', $eventId)
+                    ->where('machine_id', $machine->id)
+                    ->where('store_name', $storedName)
+                    ->update(['store_name' => $replacement]);
+            }
+        }
+    }
+
+    /** @param list<string> $previousCandidates */
+    private function replaceStoreNamePrefix(
+        string $storedName,
+        array $previousCandidates,
+        string $currentLabel,
+    ): ?string {
+        foreach ($previousCandidates as $candidate) {
+            if ($storedName === $candidate) {
+                return $currentLabel;
+            }
+
+            $posPrefix = $candidate.' - POS ';
+
+            if (str_starts_with($storedName, $posPrefix)) {
+                return $currentLabel.substr($storedName, strlen($candidate));
+            }
+        }
+
+        return null;
+    }
+
+    private function moveGeneratedAssignmentsToCurrentLabel(
+        Event $event,
+        ClientZoneSoftMachine $machine,
+        string $previousLabel,
+        string $currentLabel,
+    ): void {
+        $currentZoneName = $this->attribution->fallbackLabel($currentLabel);
+        $previousZoneNames = collect([
+            $previousLabel,
+            'Loja '.$machine->store_id,
+            'Store '.$machine->store_id,
+        ])
+            ->filter()
+            ->map(fn (string $label): string => mb_strtolower($this->attribution->fallbackLabel($label)))
+            ->unique();
+
+        $assignments = EventZoneAssignment::query()
+            ->with('zone')
+            ->where('event_id', $event->id)
+            ->where('machine_id', $machine->id)
+            ->where('source', '!=', 'manual')
+            ->get()
+            ->filter(fn (EventZoneAssignment $assignment): bool => (
+                $previousZoneNames->contains(mb_strtolower(trim((string) $assignment->zone?->name)))
+            ));
+
+        if ($assignments->isEmpty()) {
+            return;
+        }
+
+        $zones = EventZone::query()
+            ->where('event_id', $event->id)
+            ->lockForUpdate()
+            ->get();
+        $targetZone = $zones->first(
+            fn (EventZone $zone): bool => mb_strtolower(trim($zone->name)) === mb_strtolower($currentZoneName),
+        );
+
+        if (! $targetZone) {
+            $targetZone = EventZone::create([
+                'event_id' => $event->id,
+                'name' => $currentZoneName,
+                'sort_order' => ((int) $zones->max('sort_order')) + 1,
+            ]);
+        } elseif ($targetZone->archived_at !== null) {
+            $targetZone->update(['archived_at' => null]);
+        }
+
+        $previousZoneIds = $assignments
+            ->pluck('event_zone_id')
+            ->map(fn (int|string $zoneId): int => (int) $zoneId)
+            ->unique();
+
+        EventZoneAssignment::query()
+            ->whereIn('id', $assignments->pluck('id'))
+            ->update(['event_zone_id' => $targetZone->id]);
+
+        foreach ($previousZoneIds as $previousZoneId) {
+            if ($previousZoneId === $targetZone->id) {
+                continue;
+            }
+
+            $stillAssigned = EventZoneAssignment::query()
+                ->where('event_zone_id', $previousZoneId)
+                ->exists();
+
+            if (! $stillAssigned) {
+                EventZone::query()->whereKey($previousZoneId)->update(['archived_at' => now()]);
+            }
         }
     }
 
