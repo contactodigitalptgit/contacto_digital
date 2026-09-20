@@ -19,6 +19,7 @@ use App\Services\EventZoneManagementService;
 use App\Services\EventZoneReadinessService;
 use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 use Inertia\Testing\AssertableInertia;
 use Tests\TestCase;
@@ -675,6 +676,92 @@ class EventZoneManagementTest extends TestCase
             'event_id' => $event->id,
             'machine_id' => $matching->id,
             'store_name' => 'Pausas Animadas - Lda - POS 1',
+        ]);
+    }
+
+    public function test_bloom_day_two_company_placeholders_are_repaired_from_the_preserved_store_plan(): void
+    {
+        [$admin, $client, $event] = $this->eventContext();
+        DB::table('events')->where('id', $event->id)->update(['id' => 13]);
+        $event = Event::query()->findOrFail(13);
+        $import = $this->import($event, $admin);
+        $ciroc = $this->machine($client, $event, 218, 'A current label that must not be used');
+        $somersbyBeatriz = $this->machine($client, $event, 219, 'Another current label that must not be used');
+        $somersbyPedro = $this->machine($client, $event, 221, 'A third current label that must not be used');
+        $somersbyRodrigo = $this->machine($client, $event, 223, 'A fourth current label that must not be used');
+
+        $cirocRow = EventReportRow::create([
+            ...$this->saleRow($event, $import, $ciroc, '2026-09-19 15:30:00', '97.5000', '1'),
+            'store_name' => 'Pausas Animadas - Lda - POS 1',
+        ]);
+        $beatrizRow = EventReportRow::create([
+            ...$this->saleRow($event, $import, $somersbyBeatriz, '2026-09-20 01:00:00', '56.5000', '2'),
+            'store_name' => 'Pausas Animadas - Lda - POS 1',
+        ]);
+        $pedroRow = EventReportRow::create([
+            ...$this->saleRow($event, $import, $somersbyPedro, '2026-09-20 01:05:00', '3.0000', '5'),
+            'store_name' => 'Pausas Animadas - Lda - POS 1',
+        ]);
+        $rodrigoRow = EventReportRow::create([
+            ...$this->saleRow($event, $import, $somersbyRodrigo, '2026-09-20 01:10:00', '15.0000', '6'),
+            'store_name' => 'Pausas Animadas - Lda - POS 1',
+        ]);
+        $firstDayRow = EventReportRow::create([
+            ...$this->saleRow($event, $import, $ciroc, '2026-09-19 06:00:00', '10.0000', '3'),
+            'store_name' => 'Pausas Animadas - Lda - POS 1',
+        ]);
+        $unmappedRow = EventReportRow::create([
+            ...$this->saleRow($event, $import, $ciroc, '2026-09-19 16:00:00', '10.0000', '4'),
+            'store_code' => '999',
+            'store_name' => 'Pausas Animadas - Lda - POS 1',
+        ]);
+        $payment = EventReportPaymentDocument::create([
+            'event_id' => $event->id,
+            'event_report_import_id' => $import->id,
+            'machine_id' => $somersbyBeatriz->id,
+            'machine_client_id' => $somersbyBeatriz->zs_client_id,
+            'store_code' => '219',
+            'store_name' => 'Pausas Animadas - Lda - POS 1',
+            'sale_date' => '2026-09-20',
+            'sale_datetime' => '2026-09-20 01:00:00',
+            'doc_type' => 'FS',
+            'document_series' => 'A2026',
+            'document_number' => '2',
+            'payment_key' => 'header',
+            'payment_code' => '3',
+            'total' => '56.5000',
+            'dedupe_key' => 'bloom-day-two-company-placeholder',
+        ]);
+
+        app(EventReportSyncService::class)->refreshRowAggregates($event->id, [
+            $ciroc->id,
+            $somersbyBeatriz->id,
+            $somersbyPedro->id,
+            $somersbyRodrigo->id,
+        ]);
+
+        $migration = require database_path('migrations/2026_09_20_010000_repair_bloom_day_two_store_labels.php');
+        $migration->up();
+
+        $this->assertSame('Bar VIP Ciroc - Tiago S - POS 1', $cirocRow->fresh()->store_name);
+        $this->assertSame('Bar Somersby - Beatriz S - POS 1', $beatrizRow->fresh()->store_name);
+        $this->assertSame('Bar Somersby - Pedro A - POS 1', $pedroRow->fresh()->store_name);
+        $this->assertSame('Bar Somersby - Rodrigo P - POS 1', $rodrigoRow->fresh()->store_name);
+        $this->assertSame('Bar Somersby - Beatriz S - POS 1', $payment->fresh()->store_name);
+        $this->assertSame('Pausas Animadas - Lda - POS 1', $firstDayRow->fresh()->store_name);
+        $this->assertSame('Pausas Animadas - Lda - POS 1', $unmappedRow->fresh()->store_name);
+        $this->assertDatabaseHas('event_report_row_aggregates', [
+            'event_id' => $event->id,
+            'machine_id' => $ciroc->id,
+            'store_name' => 'Bar VIP Ciroc - Tiago S - POS 1',
+        ]);
+        $this->assertDatabaseMissing('event_report_row_aggregates', [
+            'event_id' => $event->id,
+            'machine_id' => $ciroc->id,
+            'store_name' => 'Pausas Animadas - Lda - POS 1',
+            'store_code' => '218',
+            'sale_calendar_date' => '2026-09-19',
+            'sale_hour' => 15,
         ]);
     }
 
