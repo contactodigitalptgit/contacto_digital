@@ -51,6 +51,14 @@ class EventZoneAttributionService
             return 'Restauração';
         }
 
+        if (preg_match('/^privados?\b/iu', $name) === 1) {
+            return 'Privados';
+        }
+
+        if (preg_match('/^bar\s+vip(?:\s|-|$)/iu', $name) === 1) {
+            return 'Bar Vip';
+        }
+
         if (preg_match('/\b(top\s*up|bc\s*top)\b/i', $name) === 1) {
             return 'Top Up';
         }
@@ -80,10 +88,6 @@ class EventZoneAttributionService
         }
 
         if (preg_match('/^(estacionamento|glamping|torto)\s*-\s*.+$/i', $name, $matches) === 1) {
-            return trim($matches[1]);
-        }
-
-        if (preg_match('/^(privados)\s+\d+$/i', $name, $matches) === 1) {
             return trim($matches[1]);
         }
 

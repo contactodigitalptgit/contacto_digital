@@ -304,23 +304,37 @@ class EventSummaryTest extends TestCase
         $this->seedAggregateRow($event->id, 'Bar RedBull - TPA 7 - POS 1', 'FS', 40);
         $this->seedAggregateRow($event->id, 'Restauração - Street 1 - POS 1', 'FS', 50);
         $this->seedAggregateRow($event->id, 'Restauração - Cookie - POS 1', 'FS', 30);
+        $this->seedAggregateRow($event->id, 'Bar VIP Ciroc - Tiago - POS 1', 'FS', 70);
+        $this->seedAggregateRow($event->id, 'Bar VIP Palco - Sonia - POS 1', 'FS', 30);
+        $this->seedAggregateRow($event->id, 'Privados - Device 1 - POS 1', 'FS', 25);
+        $this->seedAggregateRow($event->id, 'Privados 2 - POS 1', 'FS', 10);
         $this->seedTicket($event->id, 'FS', 12, 'Bar Central - TPA 1 - POS 1');
         $this->seedTicket($event->id, 'FS', 12, 'Bar Central - TPA 2 - POS 1');
         $this->seedTicket($event->id, 'FS', 12, 'Bar RedBull - TPA 7 - POS 1');
         $this->seedTicket($event->id, 'FS', 12, 'Restauração - Street 1 - POS 1');
         $this->seedTicket($event->id, 'FS', 12, 'Restauração - Cookie - POS 1');
+        $this->seedTicket($event->id, 'FS', 12, 'Bar VIP Ciroc - Tiago - POS 1');
+        $this->seedTicket($event->id, 'FS', 12, 'Bar VIP Palco - Sonia - POS 1');
+        $this->seedTicket($event->id, 'FS', 12, 'Privados - Device 1 - POS 1');
+        $this->seedTicket($event->id, 'FS', 12, 'Privados 2 - POS 1');
 
         $this->authenticated($user)
             ->getJson("/api/events/{$event->id}/zones")
             ->assertOk()
-            ->assertJsonPath('summary.zones_count', 3)
+            ->assertJsonPath('summary.zones_count', 5)
             ->assertJsonPath('items.0.label', 'Bar Central')
             ->assertJsonPath('items.0.devices_count', 2)
             ->assertJsonPath('items.0.total_sales', 160)
-            ->assertJsonPath('items.1.label', 'Restauração')
+            ->assertJsonPath('items.1.label', 'Bar Vip')
             ->assertJsonPath('items.1.devices_count', 2)
-            ->assertJsonPath('items.1.total_sales', 80)
-            ->assertJsonPath('items.2.label', 'Bar RedBull');
+            ->assertJsonPath('items.1.total_sales', 100)
+            ->assertJsonPath('items.2.label', 'Restauração')
+            ->assertJsonPath('items.2.devices_count', 2)
+            ->assertJsonPath('items.2.total_sales', 80)
+            ->assertJsonPath('items.3.label', 'Bar RedBull')
+            ->assertJsonPath('items.4.label', 'Privados')
+            ->assertJsonPath('items.4.devices_count', 2)
+            ->assertJsonPath('items.4.total_sales', 35);
 
         $query = http_build_query(['bar_groups' => ['Bar Central']]);
 
