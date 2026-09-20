@@ -43,6 +43,14 @@ class EventZoneAttributionService
             return 'Sem zona';
         }
 
+        if ($this->isInvalidCompanyLabel($name)) {
+            return 'Sem zona';
+        }
+
+        if (preg_match('/^restaura[cç][aã]o(?:\s*-|\s|$)/iu', $name) === 1) {
+            return 'Restauração';
+        }
+
         if (preg_match('/\b(top\s*up|bc\s*top)\b/i', $name) === 1) {
             return 'Top Up';
         }
@@ -79,15 +87,22 @@ class EventZoneAttributionService
             return trim($matches[1]);
         }
 
-        if (preg_match('/^(restaura[cç][aã]o\s*-\s*.+?)\s+\d+$/iu', $name, $matches) === 1) {
-            return trim($matches[1]);
-        }
-
         if (preg_match('/^(.+?)\s*-\s*TPA\b/i', $name, $matches) === 1) {
             return trim($matches[1]);
         }
 
         return $name;
+    }
+
+    public function isInvalidCompanyLabel(?string $storeName): bool
+    {
+        if ($storeName === null) {
+            return false;
+        }
+
+        $name = trim((string) preg_replace('/\s*-\s*POS\s+[^-]+$/i', '', trim($storeName)));
+
+        return Str::lower($name) === 'pausas animadas - lda';
     }
 
     public function hasConfiguredZones(int $eventId): bool

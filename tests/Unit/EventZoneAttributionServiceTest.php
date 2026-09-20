@@ -26,11 +26,12 @@ class EventZoneAttributionServiceTest extends TestCase
             'top up' => ['Top UP - Left - POS 1', 'Top Up'],
             'estacionamento' => ['Estacionamento - Park 1 - POS 1', 'Estacionamento'],
             'privados' => ['Privados 2 - POS 1', 'Privados'],
-            'restauracao street' => ['Restauração - Street 2 - POS 1', 'Restauração - Street'],
-            'restauracao individual' => ['Restauração - Cookie - POS 1', 'Restauração - Cookie'],
+            'restauracao street' => ['Restauração - Street 2 - POS 1', 'Restauração'],
+            'restauracao individual' => ['Restauração - Cookie - POS 1', 'Restauração'],
             'torto' => ['Torto - João Salgado - POS 1', 'Torto'],
             'legacy vip' => ['Tpa 8 - Bar Vip Alison - POS 1', 'Bar Vip'],
             'legacy numbered bar' => ['Tpa 7 - Bar 3 Ana - POS 1', 'Bar 3'],
+            'company name is not a store' => ['Pausas Animadas - Lda - POS 1', 'Sem zona'],
         ];
     }
 }

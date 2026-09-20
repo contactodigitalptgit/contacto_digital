@@ -617,6 +617,67 @@ class EventZoneManagementTest extends TestCase
         $this->assertSame($legacy->id, $today->fresh()->event_zone_id);
     }
 
+    public function test_company_placeholder_is_repaired_only_when_the_current_store_matches_its_historical_zone(): void
+    {
+        [$admin, $client, $event] = $this->eventContext();
+        $somersby = EventZone::create(['event_id' => $event->id, 'name' => 'Bar Somersby', 'sort_order' => 1]);
+        $matching = $this->machine($client, $event, 221, 'Bar Somersby - Pedro A');
+        $mismatched = $this->machine($client, $event, 218, 'Bar VIP Ciroc - Tiago S');
+        $import = $this->import($event, $admin);
+
+        $matchingRow = EventReportRow::create([
+            ...$this->saleRow($event, $import, $matching, '2026-09-19 16:00:00', '3.0000', '1'),
+            'store_name' => 'Pausas Animadas - Lda - POS 1',
+            'event_zone_id' => $somersby->id,
+        ]);
+        $mismatchedRow = EventReportRow::create([
+            ...$this->saleRow($event, $import, $mismatched, '2026-09-18 20:00:00', '97.5000', '2'),
+            'store_name' => 'Pausas Animadas - Lda - POS 1',
+            'event_zone_id' => $somersby->id,
+        ]);
+        $payment = EventReportPaymentDocument::create([
+            'event_id' => $event->id,
+            'event_report_import_id' => $import->id,
+            'machine_id' => $matching->id,
+            'event_zone_id' => $somersby->id,
+            'machine_client_id' => $matching->zs_client_id,
+            'store_code' => (string) $matching->store_id,
+            'store_name' => 'Pausas Animadas - Lda - POS 1',
+            'sale_date' => '2026-09-19',
+            'sale_datetime' => '2026-09-19 16:00:00',
+            'doc_type' => 'FS',
+            'document_series' => 'A2026',
+            'document_number' => '1',
+            'payment_key' => 'header',
+            'payment_code' => '3',
+            'total' => '3.0000',
+            'dedupe_key' => 'company-placeholder-repair',
+        ]);
+        app(EventReportSyncService::class)->refreshRowAggregates($event->id, [$matching->id, $mismatched->id]);
+
+        $migration = require database_path('migrations/2026_09_20_003000_repair_company_store_labels.php');
+        $migration->up();
+
+        $this->assertSame('Bar Somersby - Pedro A - POS 1', $matchingRow->fresh()->store_name);
+        $this->assertSame('Bar Somersby - Pedro A - POS 1', $payment->fresh()->store_name);
+        $this->assertSame('Pausas Animadas - Lda - POS 1', $mismatchedRow->fresh()->store_name);
+        $this->assertDatabaseHas('event_report_row_aggregates', [
+            'event_id' => $event->id,
+            'machine_id' => $matching->id,
+            'store_name' => 'Bar Somersby - Pedro A - POS 1',
+        ]);
+        $this->assertDatabaseHas('event_report_ticket_aggregates', [
+            'event_id' => $event->id,
+            'machine_id' => $matching->id,
+            'store_name' => 'Bar Somersby - Pedro A - POS 1',
+        ]);
+        $this->assertDatabaseMissing('event_report_row_aggregates', [
+            'event_id' => $event->id,
+            'machine_id' => $matching->id,
+            'store_name' => 'Pausas Animadas - Lda - POS 1',
+        ]);
+    }
+
     public function test_clients_cannot_access_zone_management(): void
     {
         [, , $event, $clientUser] = $this->eventContext();
