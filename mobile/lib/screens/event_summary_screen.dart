@@ -108,18 +108,18 @@ class _EventSummaryScreenState extends State<EventSummaryScreen> {
         orElse: () => events.first,
       );
       final selectedId = selectedEvent['id'] as int;
-      final preserveFilters =
-          selectedId == _selectedEventId && _filters.activeCount > 0;
+      final requestFilters =
+          selectedId == _selectedEventId ? _filters : _filters.dateRangeOnly;
       final responses = await Future.wait<dynamic>([
-        preserveFilters
+        requestFilters.activeCount > 0
             ? widget.apiClient.fetchEventSection(
                 selectedId,
                 'dashboard',
-                filters: _filters.toQuery(),
+                filters: requestFilters.toQuery(),
               )
             : widget.apiClient.fetchDashboard(selectedId),
         _fetchConfigurationSafely(selectedId),
-        _fetchZonesSafely(selectedId),
+        _fetchZonesSafely(selectedId, filters: requestFilters),
       ]);
       final dashboard = (responses[0] as Map).cast<String, dynamic>();
       final configuration = responses[1] as Map<String, dynamic>?;
@@ -165,7 +165,7 @@ class _EventSummaryScreenState extends State<EventSummaryScreen> {
         if (eventChanged) {
           _activeSection = _initialSection(configuration);
           sectionToLoad = _activeSection;
-          _filters = const DashboardFilters();
+          _filters = requestFilters;
           _filterOptions = null;
           _sectionData.clear();
           _sectionError = null;
@@ -204,12 +204,15 @@ class _EventSummaryScreenState extends State<EventSummaryScreen> {
     }
   }
 
-  Future<Map<String, dynamic>?> _fetchZonesSafely(int eventId) async {
+  Future<Map<String, dynamic>?> _fetchZonesSafely(
+    int eventId, {
+    DashboardFilters? filters,
+  }) async {
     try {
       return await widget.apiClient.fetchEventSection(
         eventId,
         'zones',
-        filters: _filters.toQuery(),
+        filters: (filters ?? _filters).toQuery(),
       );
     } on ApiException {
       return null;
@@ -374,9 +377,9 @@ class _EventSummaryScreenState extends State<EventSummaryScreen> {
                     const SizedBox(height: 24),
                     _eventSelector(),
                     const SizedBox(height: 12),
-                    _syncStatus(_summary?['last_synced_at'] as String?),
-                    const SizedBox(height: 12),
                     _filterToolbar(),
+                    const SizedBox(height: 12),
+                    _syncStatus(_summary?['last_synced_at'] as String?),
                     if (_error != null) ...[
                       const SizedBox(height: 12),
                       _staleDataNotice(),

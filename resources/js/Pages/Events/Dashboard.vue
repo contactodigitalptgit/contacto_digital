@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout.vue';
 import AppSidebarIcon from '@/Components/AppSidebarIcon.vue';
+import EventDateRangePicker from '@/Components/EventDateRangePicker.vue';
 import { showErrorToast, showSuccessToast } from '@/lib/swal';
 import type {
     DashboardConfiguration,
@@ -394,6 +395,7 @@ const activePayment = ref<ChartPaymentItem | null>(null);
 const zonePanelExpanded = ref(true);
 const detailModal = ref<DetailModal>(null);
 const filtersOpen = ref(false);
+const dateRangeOpen = ref(false);
 const eventSwitcherOpen = ref(false);
 const isSyncingReport = ref(false);
 const syncIntegrationError = ref('');
@@ -460,6 +462,46 @@ watch(() => props.initialSection, (section) => {
     activeSection.value = section;
 });
 
+const dashboardFilterKeys: Array<keyof DashboardFilters> = [
+    'bar_groups',
+    'store',
+    'product',
+    'date_from',
+    'date_to',
+    'hour_from',
+    'hour_to',
+    'total_min',
+    'total_max',
+];
+
+function appendFilterQuery(
+    url: string,
+    filters: DashboardFilters,
+    keys: Array<keyof DashboardFilters> = dashboardFilterKeys,
+): string {
+    const query = new URLSearchParams();
+
+    keys.forEach((key) => {
+        const value = filters[key];
+
+        if (Array.isArray(value)) {
+            value.forEach((item) => query.append(`${key}[]`, item));
+
+            return;
+        }
+
+        if (value !== '') {
+            query.set(key, value);
+        }
+    });
+
+    const serialized = query.toString();
+
+    return serialized === ''
+        ? url
+        : `${url}${url.includes('?') ? '&' : '?'}${serialized}`;
+}
+
 function sidebarSectionUrl(section: DashboardSection): string | null {
     const routeSuffixes: Partial<Record<DashboardSection, string>> = {
         summary: 'dashboard',
@@ -475,7 +517,14 @@ function sidebarSectionUrl(section: DashboardSection): string | null {
         return null;
     }
 
-    return route(`${props.previewMode ? 'admin.events' : 'events'}.${routeSuffix}`, props.event.id);
+    return appendFilterQuery(
+        route(`${props.previewMode ? 'admin.events' : 'events'}.${routeSuffix}`, props.event.id),
+        props.filters,
+    );
+}
+
+function eventOptionUrl(url: string): string {
+    return appendFilterQuery(url, props.filters, ['date_from', 'date_to']);
 }
 
 const reportSectionTitle = computed(() => {
@@ -1120,6 +1169,37 @@ const eventPeriodLabel = computed(() => {
 
     return lastDay && lastDay !== firstDay ? `${firstDay} - ${lastDay}` : firstDay;
 });
+const selectedDateRangeLabel = computed(() => {
+    const firstDay = formatFilterDate(props.filters.date_from);
+    const lastDay = formatFilterDate(props.filters.date_to);
+
+    if (firstDay && lastDay) {
+        return firstDay === lastDay ? firstDay : `${firstDay} – ${lastDay}`;
+    }
+
+    if (firstDay) {
+        return `Desde ${firstDay}`;
+    }
+
+    if (lastDay) {
+        return `Até ${lastDay}`;
+    }
+
+    return 'Todo o evento';
+});
+const dateRangeInvalid = computed(() => (
+    localFilters.value.date_from !== ''
+    && localFilters.value.date_to !== ''
+    && localFilters.value.date_to < localFilters.value.date_from
+));
+const todayFilterDate = () => {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+
+    return `${year}-${month}-${day}`;
+};
 const eventStatusLabel = computed(() => hasProcessingSync.value || props.autoSync.enabled
     ? 'Em curso'
     : 'Concluído');
@@ -1348,16 +1428,6 @@ const closeEventSwitcher = () => {
     eventSwitcherOpen.value = false;
 };
 
-const printDashboard = () => {
-    if (typeof window === 'undefined') {
-        return;
-    }
-
-    eventSwitcherOpen.value = false;
-    filtersOpen.value = false;
-    window.print();
-};
-
 const openDetailModal = (modal: Exclude<DetailModal, null>) => {
     detailModal.value = modal;
 };
@@ -1370,6 +1440,7 @@ const handleEscapeKey = (event: KeyboardEvent) => {
     if (event.key === 'Escape') {
         closeDetailModal();
         filtersOpen.value = false;
+        dateRangeOpen.value = false;
         eventSwitcherOpen.value = false;
     }
 };
@@ -1444,11 +1515,33 @@ const submitFilters = (closePanel: boolean) => {
             if (closePanel) {
                 filtersOpen.value = false;
             }
+            dateRangeOpen.value = false;
         },
     });
 };
 
-const applyFilters = () => submitFilters(true);
+const applyFilters = () => {
+    if (dateRangeInvalid.value) {
+        return;
+    }
+
+    submitFilters(true);
+};
+
+const applyDateRange = () => {
+    if (dateRangeInvalid.value) {
+        return;
+    }
+
+    submitFilters(false);
+};
+
+const resetDateRangeToToday = () => {
+    const today = todayFilterDate();
+    localFilters.value.date_from = today;
+    localFilters.value.date_to = today;
+    submitFilters(false);
+};
 
 const applyBarGroupFilter = (barGroup: string) => {
     if (barGroup === '') {
@@ -1463,23 +1556,28 @@ const applyBarGroupFilter = (barGroup: string) => {
 };
 
 const clearFilters = () => {
+    const today = todayFilterDate();
     localFilters.value = {
         bar_groups: [],
         store: '',
         product: '',
-        date_from: '',
-        date_to: '',
+        date_from: today,
+        date_to: today,
         hour_from: '',
         hour_to: '',
         total_min: '',
         total_max: '',
     };
-    router.get(getDashboardPath(), {}, {
+    router.get(getDashboardPath(), {
+        date_from: today,
+        date_to: today,
+    }, {
         preserveState: true,
         preserveScroll: true,
         replace: true,
         onSuccess: () => {
             filtersOpen.value = false;
+            dateRangeOpen.value = false;
         },
     });
 };
@@ -1547,6 +1645,16 @@ function formatPeriodDate(value: string) {
         month: '2-digit',
         year: 'numeric',
     }).format(new Date(value));
+}
+
+function formatFilterDate(value: string) {
+    if (!value) {
+        return '';
+    }
+
+    const [year, month, day] = value.split('-');
+
+    return year && month && day ? `${day}/${month}/${year}` : value;
 }
 
 function niceChartAxisMax(value: number): number {
@@ -1811,7 +1919,7 @@ function getDifferenceClass(value: number | null) {
                         <Link
                             v-for="eventOption in props.eventOptions"
                             :key="eventOption.id"
-                            :href="eventOption.url"
+                            :href="eventOptionUrl(eventOption.url)"
                             class="report-dashboard-event-option"
                             :class="{ 'is-current': eventOption.is_current }"
                             preserve-scroll
@@ -1827,19 +1935,60 @@ function getDifferenceClass(value: number | null) {
                 </div>
 
                 <div class="contacto-dashboard-actions">
-                    <span class="contacto-header-period">
-                        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                            <path d="M7 3v3m10-3v3M4 9h16M5 5h14a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1Z" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" />
-                        </svg>
-                        {{ eventPeriodLabel }}
-                    </span>
+                    <div class="contacto-header-date-filter" :class="{ 'is-open': dateRangeOpen }">
+                        <button
+                            type="button"
+                            class="contacto-header-period is-interactive"
+                            :aria-expanded="dateRangeOpen"
+                            aria-haspopup="dialog"
+                            @click="dateRangeOpen = !dateRangeOpen"
+                        >
+                            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                                <path d="M7 3v3m10-3v3M4 9h16M5 5h14a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1Z" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" />
+                            </svg>
+                            <span>
+                                <small>Período</small>
+                                <strong>{{ selectedDateRangeLabel }}</strong>
+                            </span>
+                            <svg class="contacto-header-date-chevron" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+                                <path d="m5 7.5 5 5 5-5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+                            </svg>
+                        </button>
 
-                    <button type="button" class="contacto-header-button" @click="printDashboard">
-                        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                            <path d="M12 3v11m0 0 4-4m-4 4-4-4M5 14v5h14v-5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
-                        </svg>
-                        Exportar relatório
-                    </button>
+                        <form
+                            v-if="dateRangeOpen"
+                            class="contacto-header-date-popover"
+                            aria-label="Selecionar período do relatório"
+                            @submit.prevent="applyDateRange"
+                        >
+                            <div class="contacto-header-date-popover-title">
+                                <strong>Período do relatório</strong>
+                                <span>A seleção mantém-se em todas as áreas.</span>
+                            </div>
+                            <EventDateRangePicker
+                                id-prefix="header-period"
+                                v-model:date-from="localFilters.date_from"
+                                v-model:date-to="localFilters.date_to"
+                                :event-start="props.event.report_starts_at || props.event.event_date"
+                                :event-end="props.event.report_ends_at || props.event.report_starts_at || props.event.event_date"
+                            />
+                            <p v-if="dateRangeInvalid" class="contacto-header-date-error">
+                                A data final deve ser igual ou posterior à data inicial.
+                            </p>
+                            <div class="contacto-header-date-actions">
+                                <button type="button" class="dash-link-button" @click="resetDateRangeToToday">
+                                    Hoje
+                                </button>
+                                <button
+                                    type="submit"
+                                    class="dash-action-button dash-action-button-inline"
+                                    :disabled="dateRangeInvalid"
+                                >
+                                    Aplicar período
+                                </button>
+                            </div>
+                        </form>
+                    </div>
 
                     <a
                         :href="whatsappSupportUrl"
@@ -1943,14 +2092,18 @@ function getDifferenceClass(value: number | null) {
                                     </option>
                                 </select>
                             </label>
-                            <label>
-                                <span>Data inicial</span>
-                                <input v-model="localFilters.date_from" type="date" class="dash-input" />
-                            </label>
-                            <label>
-                                <span>Data final</span>
-                                <input v-model="localFilters.date_to" type="date" class="dash-input" />
-                            </label>
+                            <div class="report-dashboard-date-range-filter">
+                                <EventDateRangePicker
+                                    id-prefix="filters-period"
+                                    v-model:date-from="localFilters.date_from"
+                                    v-model:date-to="localFilters.date_to"
+                                    :event-start="props.event.report_starts_at || props.event.event_date"
+                                    :event-end="props.event.report_ends_at || props.event.report_starts_at || props.event.event_date"
+                                />
+                                <p v-if="dateRangeInvalid" class="contacto-header-date-error">
+                                    A data final deve ser igual ou posterior à data inicial.
+                                </p>
+                            </div>
                             <label>
                                 <span>Hora inicial</span>
                                 <select v-model="localFilters.hour_from" class="dash-input">
@@ -1977,7 +2130,13 @@ function getDifferenceClass(value: number | null) {
 
                         <div class="report-dashboard-filter-actions">
                             <button type="button" class="dash-link-button" @click="clearFilters">Limpar</button>
-                            <button type="submit" class="dash-action-button dash-action-button-inline">Aplicar filtros</button>
+                            <button
+                                type="submit"
+                                class="dash-action-button dash-action-button-inline"
+                                :disabled="dateRangeInvalid"
+                            >
+                                Aplicar filtros
+                            </button>
                         </div>
                     </form>
 

@@ -44,6 +44,11 @@ class DashboardFilters {
 
   String get signature => toQuery().toString();
 
+  DashboardFilters get dateRangeOnly => DashboardFilters(
+        dateFrom: dateFrom,
+        dateTo: dateTo,
+      );
+
   /// `clearX: true` resets that field to null; passing a new value for it
   /// at the same time is not supported (clear wins) since callers only ever
   /// need one or the other.
@@ -592,13 +597,11 @@ extension _EventPortalSections on _EventSummaryScreenState {
                     _dashboardHeader(),
                     const SizedBox(height: 20),
                     _eventSelector(),
+                    const SizedBox(height: 12),
+                    _filterToolbar(),
                     const SizedBox(height: 22),
                     _featureHeading(),
-                    if (_activeSection != 'more') ...[
-                      const SizedBox(height: 14),
-                      _filterToolbar(),
-                      const SizedBox(height: 18),
-                    ],
+                    const SizedBox(height: 18),
                     if (_activeSection == 'more')
                       _morePage()
                     else if (_sectionLoading && _activeSectionData == null)
@@ -731,13 +734,6 @@ extension _EventPortalSections on _EventSummaryScreenState {
         onRemove: () => _applyFilters(_filters.copyWith(clearProduct: true)),
       ));
     }
-    if (_filters.dateFrom != null || _filters.dateTo != null) {
-      chips.add((
-        label: _formatDateRange(_filters.dateFrom, _filters.dateTo),
-        onRemove: () => _applyFilters(
-            _filters.copyWith(clearDateFrom: true, clearDateTo: true)),
-      ));
-    }
     if (_filters.hourFrom != null || _filters.hourTo != null) {
       chips.add((
         label: _formatHourRange(_filters.hourFrom, _filters.hourTo),
@@ -764,6 +760,10 @@ extension _EventPortalSections on _EventSummaryScreenState {
 
   Widget _filterToolbar() {
     final chips = _activeFilterChips();
+    final hasDateRange = _filters.dateFrom != null || _filters.dateTo != null;
+    final dateFilterCount =
+        (_filters.dateFrom == null ? 0 : 1) + (_filters.dateTo == null ? 0 : 1);
+    final additionalFilterCount = _filters.activeCount - dateFilterCount;
 
     return Container(
       padding: const EdgeInsets.all(12),
@@ -772,64 +772,263 @@ extension _EventPortalSections on _EventSummaryScreenState {
         border: Border.all(color: AppColors.border),
         borderRadius: BorderRadius.circular(22),
       ),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Expanded(
-            child: chips.isEmpty
-                ? const Text(
-                    'Todo o evento',
-                    style: TextStyle(color: AppColors.textMuted, fontSize: 13),
-                  )
-                : SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    child: Row(
-                      children: [
-                        for (final chip in chips)
-                          Padding(
-                            padding: const EdgeInsets.only(right: 7),
-                            child: _ActiveFilterPill(
-                                label: chip.label, onRemove: chip.onRemove),
-                          ),
-                        if (chips.length > 1)
-                          Padding(
-                            padding: const EdgeInsets.only(left: 3),
-                            child: TextButton(
-                              onPressed: () =>
-                                  _applyFilters(const DashboardFilters()),
-                              style: TextButton.styleFrom(
-                                foregroundColor: AppColors.textMuted,
-                                visualDensity: VisualDensity.compact,
-                                padding:
-                                    const EdgeInsets.symmetric(horizontal: 8),
-                              ),
-                              child: const Text('Limpar tudo',
-                                  style: TextStyle(fontSize: 12)),
+          Row(
+            children: [
+              Expanded(
+                child: Semantics(
+                  button: true,
+                  label: hasDateRange
+                      ? 'Período selecionado: ${_formatDateRange(_filters.dateFrom, _filters.dateTo)}'
+                      : 'Selecionar período. Todo o evento.',
+                  child: InkWell(
+                    key: const ValueKey('dashboard-date-range'),
+                    onTap: _showDateRangePicker,
+                    borderRadius: BorderRadius.circular(16),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 7),
+                      child: Row(
+                        children: [
+                          Container(
+                            width: 34,
+                            height: 34,
+                            decoration: BoxDecoration(
+                              color: AppColors.blue.withValues(alpha: 0.18),
+                              borderRadius: BorderRadius.circular(11),
+                            ),
+                            child: const Icon(
+                              Icons.date_range_rounded,
+                              size: 19,
+                              color: AppColors.textSoft,
                             ),
                           ),
-                      ],
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text(
+                                  'PERÍODO',
+                                  style: TextStyle(
+                                    color: AppColors.textMuted,
+                                    fontSize: 9,
+                                    fontWeight: FontWeight.w700,
+                                    letterSpacing: 1.2,
+                                  ),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  hasDateRange
+                                      ? _formatDateRange(
+                                          _filters.dateFrom, _filters.dateTo)
+                                      : 'Todo o evento',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    color: AppColors.white,
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          if (hasDateRange)
+                            IconButton(
+                              tooltip: 'Limpar período',
+                              visualDensity: VisualDensity.compact,
+                              onPressed: _clearDateRange,
+                              icon: const Icon(
+                                Icons.close_rounded,
+                                size: 18,
+                                color: AppColors.textMuted,
+                              ),
+                            )
+                          else
+                            const Icon(
+                              Icons.keyboard_arrow_down_rounded,
+                              color: AppColors.textMuted,
+                            ),
+                        ],
+                      ),
                     ),
                   ),
-          ),
-          const SizedBox(width: 8),
-          Badge(
-            isLabelVisible: _filters.activeCount > 0,
-            label: Text('${_filters.activeCount}'),
-            backgroundColor: AppColors.lime,
-            textColor: AppColors.navy,
-            child: IconButton.filled(
-              tooltip: 'Ajustar filtros',
-              onPressed: _showFilters,
-              style: IconButton.styleFrom(
-                backgroundColor: AppColors.blue,
-                foregroundColor: AppColors.white,
+                ),
               ),
-              icon: const Icon(Icons.tune_rounded),
-            ),
+              const SizedBox(width: 8),
+              Badge(
+                isLabelVisible: additionalFilterCount > 0,
+                label: Text('$additionalFilterCount'),
+                backgroundColor: AppColors.lime,
+                textColor: AppColors.navy,
+                child: IconButton.filled(
+                  tooltip: 'Ajustar filtros',
+                  onPressed: _showFilters,
+                  style: IconButton.styleFrom(
+                    backgroundColor: AppColors.blue,
+                    foregroundColor: AppColors.white,
+                  ),
+                  icon: const Icon(Icons.tune_rounded),
+                ),
+              ),
+            ],
           ),
+          if (chips.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: [
+                  for (final chip in chips)
+                    Padding(
+                      padding: const EdgeInsets.only(right: 7),
+                      child: _ActiveFilterPill(
+                          label: chip.label, onRemove: chip.onRemove),
+                    ),
+                  if (chips.length > 1)
+                    Padding(
+                      padding: const EdgeInsets.only(left: 3),
+                      child: TextButton(
+                        onPressed: () => _applyFilters(
+                          DashboardFilters(
+                            dateFrom: _filters.dateFrom,
+                            dateTo: _filters.dateTo,
+                          ),
+                        ),
+                        style: TextButton.styleFrom(
+                          foregroundColor: AppColors.textMuted,
+                          visualDensity: VisualDensity.compact,
+                          padding: const EdgeInsets.symmetric(horizontal: 8),
+                        ),
+                        child: const Text('Limpar tudo',
+                            style: TextStyle(fontSize: 12)),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ],
         ],
       ),
     );
   }
+
+  Future<void> _showDateRangePicker() async {
+    var dateFrom = _filters.dateFrom;
+    var dateTo = _filters.dateTo;
+    final selected = await showModalBottomSheet<DashboardFilters>(
+      context: context,
+      backgroundColor: AppColors.surface,
+      showDragHandle: true,
+      useSafeArea: true,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setModalState) => Padding(
+          padding: const EdgeInsets.fromLTRB(20, 2, 20, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const Text(
+                'Selecionar período',
+                style: TextStyle(fontSize: 22, fontWeight: FontWeight.w700),
+              ),
+              const SizedBox(height: 5),
+              const Text(
+                'Este período será usado em todas as áreas do evento.',
+                style: TextStyle(color: AppColors.textMuted),
+              ),
+              const SizedBox(height: 20),
+              Row(
+                children: [
+                  Expanded(
+                    child: _DateFilterButton(
+                      label: 'Início',
+                      value: dateFrom,
+                      onTap: () async {
+                        final picked = await showDatePicker(
+                          context: context,
+                          firstDate: DateTime(2020),
+                          lastDate: DateTime(2035, 12, 31),
+                          initialDate: dateFrom ?? dateTo ?? DateTime.now(),
+                        );
+                        if (picked != null) {
+                          setModalState(() {
+                            dateFrom = picked;
+                            if (dateTo != null && dateTo!.isBefore(picked)) {
+                              dateTo = picked;
+                            }
+                          });
+                        }
+                      },
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: _DateFilterButton(
+                      label: 'Fim',
+                      value: dateTo,
+                      onTap: () async {
+                        final picked = await showDatePicker(
+                          context: context,
+                          firstDate: dateFrom ?? DateTime(2020),
+                          lastDate: DateTime(2035, 12, 31),
+                          initialDate: dateTo ?? dateFrom ?? DateTime.now(),
+                        );
+                        if (picked != null) {
+                          setModalState(() => dateTo = picked);
+                        }
+                      },
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 20),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () => Navigator.of(context).pop(
+                        _filters.copyWith(
+                          clearDateFrom: true,
+                          clearDateTo: true,
+                        ),
+                      ),
+                      child: const Text('Todo o evento'),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: FilledButton(
+                      onPressed: () => Navigator.of(context).pop(
+                        _filters.copyWith(
+                          dateFrom: dateFrom,
+                          clearDateFrom: dateFrom == null,
+                          dateTo: dateTo,
+                          clearDateTo: dateTo == null,
+                        ),
+                      ),
+                      child: const Text('Aplicar período'),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    if (selected != null) {
+      await _applyFilters(selected);
+    }
+  }
+
+  Future<void> _clearDateRange() => _applyFilters(
+        _filters.copyWith(clearDateFrom: true, clearDateTo: true),
+      );
 
   Future<void> _showFilters() async {
     final eventId = _selectedEventId;
@@ -971,7 +1170,12 @@ extension _EventPortalSections on _EventSummaryScreenState {
                             initialDate: dateFrom ?? DateTime.now(),
                           );
                           if (picked != null) {
-                            setModalState(() => dateFrom = picked);
+                            setModalState(() {
+                              dateFrom = picked;
+                              if (dateTo != null && dateTo!.isBefore(picked)) {
+                                dateTo = picked;
+                              }
+                            });
                           }
                         },
                       ),

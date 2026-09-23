@@ -277,7 +277,11 @@ class EventSummaryController extends Controller
             'store' => ['nullable', 'string', 'max:255'],
             'product' => ['nullable', 'string', 'max:255'],
             'date_from' => ['nullable', 'date_format:Y-m-d'],
-            'date_to' => ['nullable', 'date_format:Y-m-d', 'after_or_equal:date_from'],
+            'date_to' => [
+                'nullable',
+                'date_format:Y-m-d',
+                ...($request->filled('date_from') ? ['after_or_equal:date_from'] : []),
+            ],
             'hour_from' => ['nullable', 'integer', 'between:0,23'],
             'hour_to' => ['nullable', 'integer', 'between:0,23'],
         ]);

@@ -324,7 +324,11 @@ class EventZoneManagementTest extends TestCase
             'event_zone_id' => $manualZone->id,
         ]);
         app(EventReportSyncService::class)->refreshRowAggregates($event->id, [$machine->id]);
-        $zoneQuery = http_build_query(['bar_groups' => ['Bar REDBULL']]);
+        $zoneQuery = http_build_query([
+            'bar_groups' => ['Bar REDBULL'],
+            'date_from' => '2026-09-18',
+            'date_to' => '2026-09-18',
+        ]);
         $this->actingAs($admin)
             ->get(route('admin.events.zones', $event).'?'.$zoneQuery)
             ->assertOk()
@@ -492,7 +496,11 @@ class EventZoneManagementTest extends TestCase
         $zones = collect($response->json('items'))->keyBy('label');
         $this->assertEqualsWithDelta(300, $zones['Bar 1']['total_sales'], 0.0001);
         $this->assertEqualsWithDelta(400000, $zones['Bar 3']['total_sales'], 0.0001);
-        $barThreeQuery = http_build_query(['bar_groups' => ['Bar 3']]);
+        $barThreeQuery = http_build_query([
+            'bar_groups' => ['Bar 3'],
+            'date_from' => '2026-09-18',
+            'date_to' => '2026-09-18',
+        ]);
         $this->withHeader('Authorization', "Bearer {$token}")
             ->getJson("/api/events/{$event->id}/zones?{$barThreeQuery}")
             ->assertOk()

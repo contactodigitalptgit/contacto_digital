@@ -40,7 +40,12 @@ return [
             'connection' => env('DB_QUEUE_CONNECTION'),
             'table' => env('DB_QUEUE_TABLE', 'jobs'),
             'queue' => env('DB_QUEUE', 'default'),
-            'retry_after' => (int) env('DB_QUEUE_RETRY_AFTER', 900),
+            // Full ZoneSoft event synchronizations can legitimately take
+            // longer than 15 minutes. Keep the reservation alive long enough
+            // for the job's bounded machine workers to finish, otherwise a
+            // second worker can reserve the same job and Laravel marks it as
+            // attempted too many times while the first attempt is still valid.
+            'retry_after' => (int) env('DB_QUEUE_RETRY_AFTER', 7200),
             'after_commit' => false,
         ],
 

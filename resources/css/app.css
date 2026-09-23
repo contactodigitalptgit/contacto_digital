@@ -1495,6 +1495,146 @@ body {
     color: #8ea3b8;
 }
 
+.contacto-header-date-filter {
+    position: relative;
+    flex: none;
+}
+
+.contacto-header-period.is-interactive {
+    min-width: 13.5rem;
+    justify-content: flex-start;
+    color: #ededed;
+    background: #082742;
+    text-align: left;
+    cursor: pointer;
+    transition: border-color 160ms ease, background 160ms ease;
+}
+
+.contacto-header-period.is-interactive:hover,
+.contacto-header-period.is-interactive:focus-visible,
+.contacto-header-date-filter.is-open .contacto-header-period.is-interactive {
+    border-color: rgba(231, 255, 73, 0.45);
+    background: #0a3152;
+    outline: none;
+}
+
+.contacto-header-period.is-interactive > span {
+    display: flex;
+    min-width: 0;
+    flex: 1;
+    flex-direction: column;
+    line-height: 1.15;
+}
+
+.contacto-header-period.is-interactive small {
+    color: #8ea3b8;
+    font-size: 0.5625rem;
+    font-weight: 700;
+    letter-spacing: 0.11em;
+    text-transform: uppercase;
+}
+
+.contacto-header-period.is-interactive strong {
+    overflow: hidden;
+    margin-top: 0.15rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.contacto-header-period .contacto-header-date-chevron {
+    width: 0.8rem;
+    height: 0.8rem;
+    transition: transform 160ms ease;
+}
+
+.contacto-header-date-filter.is-open .contacto-header-date-chevron {
+    transform: rotate(180deg);
+}
+
+.contacto-header-date-popover {
+    position: absolute;
+    z-index: 60;
+    top: calc(100% + 0.55rem);
+    right: 0;
+    width: min(26rem, calc(100vw - 2rem));
+    border: 1px solid rgba(237, 237, 237, 0.14);
+    border-radius: 0.9rem;
+    padding: 1rem;
+    background: #061f36;
+    box-shadow: 0 22px 55px rgba(0, 0, 0, 0.42);
+}
+
+.contacto-header-date-popover-title {
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+    margin-bottom: 0.9rem;
+}
+
+.contacto-header-date-popover-title strong {
+    color: #ededed;
+    font-size: 0.9rem;
+}
+
+.contacto-header-date-popover-title span {
+    color: #8ea3b8;
+    font-size: 0.7rem;
+}
+
+.contacto-header-date-fields {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.65rem;
+}
+
+.contacto-header-date-fields label {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    gap: 0.35rem;
+}
+
+.contacto-header-date-fields label > span {
+    color: #aebdca;
+    font-size: 0.6875rem;
+    font-weight: 600;
+}
+
+.contacto-header-date-fields .dash-input {
+    width: 100%;
+    min-width: 0;
+    font-size: 0.75rem;
+}
+
+.contacto-header-date-error {
+    margin-top: 0.65rem;
+    color: #ff9c9c;
+    font-size: 0.6875rem;
+}
+
+.contacto-header-date-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.55rem;
+    margin-top: 1rem;
+}
+
+.contacto-header-date-actions button:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
+.report-dashboard-date-range-filter {
+    grid-column: span 2;
+    min-width: 0;
+    border: 1px solid rgba(237, 237, 237, 0.1);
+    border-radius: 0.75rem;
+    padding: 0.8rem;
+    background: rgba(3, 24, 43, 0.35);
+}
+
 .contacto-header-button {
     display: inline-flex;
     min-height: 2.5rem;
@@ -3013,10 +3153,6 @@ body {
 }
 
 @media (max-width: 1220px) {
-    .contacto-header-period {
-        display: none;
-    }
-
     .contacto-dashboard-actions .contacto-header-button:not(.is-primary) {
         padding-inline: 0.65rem;
         font-size: 0;
@@ -3130,10 +3266,32 @@ body {
         justify-content: stretch;
     }
 
+    .contacto-header-date-filter {
+        width: 100%;
+    }
+
     .contacto-dashboard-actions .contacto-header-period {
         display: flex;
         width: 100%;
         justify-content: center;
+    }
+
+    .contacto-dashboard-actions .contacto-header-period.is-interactive {
+        justify-content: flex-start;
+    }
+
+    .contacto-header-date-popover {
+        right: auto;
+        left: 0;
+        width: 100%;
+    }
+
+    .contacto-header-date-fields {
+        grid-template-columns: 1fr;
+    }
+
+    .report-dashboard-date-range-filter {
+        grid-column: 1 / -1;
     }
 
     .contacto-dashboard-actions .contacto-header-button {

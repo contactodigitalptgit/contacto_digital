@@ -44,6 +44,8 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Festival de Verão'), findsOneWidget);
+    expect(find.byKey(const ValueKey('dashboard-date-range')), findsOneWidget);
+    expect(find.text('Todo o evento'), findsOneWidget);
     expect(find.text('TOTAL'), findsOneWidget);
     await tester.scrollUntilVisible(
       find.text('Vendas por hora'),
@@ -63,6 +65,46 @@ void main() {
       scrollable: find.byType(Scrollable).first,
     );
     expect(find.text('Desempenho por device'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  test('date range remains available when event-specific filters are reset',
+      () {
+    final filters = DashboardFilters(
+      zones: const ['Bar 1'],
+      store: 'Bar 1 - POS A',
+      dateFrom: DateTime(2026, 9, 19),
+      dateTo: DateTime(2026, 9, 20),
+    );
+
+    expect(filters.dateRangeOnly.toQuery(), {
+      'bar_groups': <String>[],
+      'date_from': '2026-09-19',
+      'date_to': '2026-09-20',
+    });
+  });
+
+  testWidgets('date range selector opens from the dashboard header',
+      (WidgetTester tester) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: AppTheme.dark,
+        home: EventSummaryScreen(apiClient: _FakeApiClient()),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const ValueKey('dashboard-date-range')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Selecionar período'), findsOneWidget);
+    expect(find.text('Início'), findsOneWidget);
+    expect(find.text('Fim'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 

@@ -23,6 +23,32 @@ class EventDashboardTest extends TestCase
 {
     use RefreshDatabase;
 
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        CarbonImmutable::setTestNow('2026-03-14 12:00:00');
+    }
+
+    protected function tearDown(): void
+    {
+        CarbonImmutable::setTestNow();
+
+        parent::tearDown();
+    }
+
+    public function test_dashboard_defaults_the_date_range_to_the_current_lisbon_day(): void
+    {
+        [, $clientUser, $event] = $this->makeDashboardContext();
+
+        $this->actingAs($clientUser)
+            ->get(route('events.dashboard', $event))
+            ->assertOk()
+            ->assertInertia(fn (AssertableInertia $page) => $page
+                ->where('filters.date_from', '2026-03-14')
+                ->where('filters.date_to', '2026-03-14'));
+    }
+
     public function test_client_dashboard_exposes_the_next_automatic_sync_countdown(): void
     {
         CarbonImmutable::setTestNow('2026-03-14 12:00:00');
@@ -129,6 +155,18 @@ class EventDashboardTest extends TestCase
                 )), ['pagination', 'documentTypes', 'rows']));
     }
 
+    public function test_dashboard_rejects_a_date_range_that_ends_before_it_starts(): void
+    {
+        [, $clientUser, $event] = $this->makeDashboardContext();
+
+        $this
+            ->actingAs($clientUser)
+            ->from(route('events.dashboard', $event))
+            ->get(route('events.dashboard', $event).'?date_from=2026-03-15&date_to=2026-03-14')
+            ->assertRedirect(route('events.dashboard', $event))
+            ->assertSessionHasErrors('date_to');
+    }
+
     public function test_event_report_menus_open_the_expected_section_for_clients_and_admins(): void
     {
         [$admin, $clientUser, $event] = $this->makeDashboardContext();
@@ -143,19 +181,23 @@ class EventDashboardTest extends TestCase
 
         foreach ($sections as $routeSuffix => $expectedSection) {
             $this->actingAs($clientUser)
-                ->get(route("events.{$routeSuffix}", $event))
+                ->get(route("events.{$routeSuffix}", $event).'?date_from=2026-03-14&date_to=2026-03-14')
                 ->assertOk()
                 ->assertInertia(fn (AssertableInertia $page) => $page
                     ->component('Events/Dashboard')
                     ->where('initialSection', $expectedSection)
+                    ->where('filters.date_from', '2026-03-14')
+                    ->where('filters.date_to', '2026-03-14')
                     ->where('previewMode', false));
 
             $this->actingAs($admin)
-                ->get(route("admin.events.{$routeSuffix}", $event))
+                ->get(route("admin.events.{$routeSuffix}", $event).'?date_from=2026-03-14&date_to=2026-03-14')
                 ->assertOk()
                 ->assertInertia(fn (AssertableInertia $page) => $page
                     ->component('Events/Dashboard')
                     ->where('initialSection', $expectedSection)
+                    ->where('filters.date_from', '2026-03-14')
+                    ->where('filters.date_to', '2026-03-14')
                     ->where('previewMode', true));
         }
     }
@@ -302,9 +344,10 @@ class EventDashboardTest extends TestCase
     {
         [$admin, , $event] = $this->makeDashboardContext();
         $this->seedSyncedRows($event, $admin);
+        $dashboardUrl = route('admin.events.dashboard', $event).'?date_from=2026-03-14&date_to=2026-03-15';
 
         $this->actingAs($admin)
-            ->get(route('admin.events.dashboard', $event))
+            ->get($dashboardUrl)
             ->assertOk()
             ->assertInertia(fn (AssertableInertia $page) => $page
                 ->where('summary.total_sales', 15.75));
@@ -315,7 +358,7 @@ class EventDashboardTest extends TestCase
             ->update(['total_sum' => 101.5]);
 
         $this->actingAs($admin)
-            ->get(route('admin.events.dashboard', $event))
+            ->get($dashboardUrl)
             ->assertOk()
             ->assertInertia(fn (AssertableInertia $page) => $page
                 ->where('summary.total_sales', 15.75));
@@ -326,7 +369,7 @@ class EventDashboardTest extends TestCase
             ->update(['updated_at' => now()->addMinute()]);
 
         $this->actingAs($admin)
-            ->get(route('admin.events.dashboard', $event))
+            ->get($dashboardUrl)
             ->assertOk()
             ->assertInertia(fn (AssertableInertia $page) => $page
                 ->where('summary.total_sales', 115.75));
@@ -679,7 +722,7 @@ class EventDashboardTest extends TestCase
 
         $response = $this
             ->actingAs($admin)
-            ->get(route('admin.events.dashboard', $event));
+            ->get(route('admin.events.dashboard', $event).'?date_from=2026-03-14&date_to=2026-03-15');
 
         $response->assertOk();
         $response->assertInertia(fn (AssertableInertia $page) => $page
@@ -834,7 +877,7 @@ class EventDashboardTest extends TestCase
         $this->assertNull($otherEvent->dashboard_configuration);
 
         $this->actingAs($clientUser)
-            ->get(route('events.dashboard', $event))
+            ->get(route('events.dashboard', $event).'?date_from=2026-03-14&date_to=2026-03-15')
             ->assertOk()
             ->assertInertia(fn (AssertableInertia $page) => $page
                 ->where('dashboardEditor', null)
@@ -936,7 +979,7 @@ class EventDashboardTest extends TestCase
         app(EventReportSyncService::class)->refreshRowAggregates($event->id, [null]);
 
         $this->actingAs($admin)
-            ->get(route('admin.events.dashboard', $event))
+            ->get(route('admin.events.dashboard', $event).'?date_from=2026-03-14&date_to=2026-03-24')
             ->assertOk()
             ->assertInertia(fn (AssertableInertia $page) => $page
                 ->loadDeferredProps('dashboard-analytics', fn (AssertableInertia $details) => $details
@@ -1186,7 +1229,7 @@ class EventDashboardTest extends TestCase
         ]);
 
         $this->actingAs($admin)
-            ->get(route('admin.events.dashboard', $event))
+            ->get(route('admin.events.dashboard', $event).'?date_from=2026-03-14&date_to=2026-03-15')
             ->assertOk()
             ->assertInertia(fn (AssertableInertia $page) => $page
                 ->where('syncStatus.status', 'processing')

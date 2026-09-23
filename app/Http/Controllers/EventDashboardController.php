@@ -579,8 +579,12 @@ class EventDashboardController extends Controller
             'bar_groups.*' => ['string', 'max:255'],
             'store' => ['nullable', 'string', 'max:255'],
             'product' => ['nullable', 'string', 'max:255'],
-            'date_from' => ['nullable', 'date'],
-            'date_to' => ['nullable', 'date'],
+            'date_from' => ['nullable', 'date_format:Y-m-d'],
+            'date_to' => [
+                'nullable',
+                'date_format:Y-m-d',
+                ...($request->filled('date_from') ? ['after_or_equal:date_from'] : []),
+            ],
             'hour_from' => ['nullable', 'integer', 'between:0,23'],
             'hour_to' => ['nullable', 'integer', 'between:0,23'],
             'total_min' => ['nullable', 'string', 'max:40'],
@@ -598,12 +602,16 @@ class EventDashboardController extends Controller
             ->values()
             ->all();
 
+        $defaultDate = ! $request->exists('date_from') && ! $request->exists('date_to')
+            ? now('Europe/Lisbon')->toDateString()
+            : '';
+
         return [
             'bar_groups' => $barGroups,
             'store' => trim((string) ($validated['store'] ?? '')),
             'product' => trim((string) ($validated['product'] ?? '')),
-            'date_from' => trim((string) ($validated['date_from'] ?? '')),
-            'date_to' => trim((string) ($validated['date_to'] ?? '')),
+            'date_from' => trim((string) ($validated['date_from'] ?? $defaultDate)),
+            'date_to' => trim((string) ($validated['date_to'] ?? $defaultDate)),
             'hour_from' => isset($validated['hour_from']) ? (string) $validated['hour_from'] : '',
             'hour_to' => isset($validated['hour_to']) ? (string) $validated['hour_to'] : '',
             'total_min' => $this->normalizeDecimalString($validated['total_min'] ?? null),
