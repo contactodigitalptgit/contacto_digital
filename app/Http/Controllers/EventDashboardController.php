@@ -132,7 +132,8 @@ class EventDashboardController extends Controller
     ): Response {
         // PERF-402: renderDashboard() no longer writes anything — a GET
         // request must never mark imports as failed. Stale processing
-        // imports (stuck > 30 min) are simply excluded from the count
+        // Imports beyond the sync service's stale timeout are excluded from
+        // the count without mutating them from this read-only request.
         // here; events:sync-due-reports (routes/console.php, scheduled
         // every minute) is the only place that actually flips their status.
         $staleProcessingCutoff = now()->subMinutes(EventReportSyncService::STALE_PROCESSING_TIMEOUT_MINUTES);

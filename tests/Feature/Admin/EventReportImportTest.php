@@ -2427,8 +2427,8 @@ class EventReportImportTest extends TestCase
         EventReportImport::query()
             ->whereKey($staleImport->id)
             ->update([
-                'created_at' => now()->subHours(2),
-                'updated_at' => now()->subHours(2),
+                'created_at' => now()->subMinutes(EventReportSyncService::STALE_PROCESSING_TIMEOUT_MINUTES + 1),
+                'updated_at' => now()->subMinutes(EventReportSyncService::STALE_PROCESSING_TIMEOUT_MINUTES + 1),
             ]);
 
         Http::fake([

@@ -36,7 +36,12 @@ class EventReportSyncService
      * — the scheduler (routes/console.php, events:sync-due-reports, every
      * minute) is the only place that actually flips them to 'failed'.
      */
-    public const STALE_PROCESSING_TIMEOUT_MINUTES = 30;
+    // Must remain longer than the database queue reservation (currently
+    // 120 minutes). A complete 81-machine ZoneSoft refresh can spend more
+    // than 30 minutes inside the parallel fetch before the first heartbeat
+    // reaches the import row; treating that legitimate work as abandoned
+    // prevents the worker from publishing its completed snapshot.
+    public const STALE_PROCESSING_TIMEOUT_MINUTES = 150;
 
     private const RATE_LIMIT_SERIAL_RETRY_ROUNDS = 2;
 
