@@ -46,6 +46,8 @@ interface MachineSessionStatus {
     } | null;
 }
 
+type SalesSyncMode = 'complete-documents' | 'document-sales';
+
 const props = defineProps<{
     event: EventData;
     client: ClientData;
@@ -77,7 +79,7 @@ const detailMachine = ref<MachineItem | null>(null);
 const detailOpen = ref(false);
 const sessionStatus = ref<MachineSessionStatus | null>(null);
 const loadingSessionStatus = ref(false);
-const syncingSales = ref(false);
+const syncingSalesMode = ref<SalesSyncMode | null>(null);
 const validatingMachines = ref(false);
 const form = useForm({ machine_ids: selectedMachineIds.value });
 
@@ -209,20 +211,20 @@ const closeMachineDetail = () => {
     detailMachine.value = null;
     sessionStatus.value = null;
     loadingSessionStatus.value = false;
-    syncingSales.value = false;
+    syncingSalesMode.value = null;
 };
 
-const syncMachineSales = async () => {
-    if (!detailMachine.value || syncingSales.value) {
+const syncMachineSales = async (mode: SalesSyncMode = 'complete-documents') => {
+    if (!detailMachine.value || syncingSalesMode.value !== null) {
         return;
     }
 
-    syncingSales.value = true;
+    syncingSalesMode.value = mode;
 
     try {
         const response = await axios.post(
             route('admin.events.tpas.sync-sales', [props.event.id, detailMachine.value.id]),
-            { redirect_to: getCurrentPageUrl() },
+            { redirect_to: getCurrentPageUrl(), mode },
         );
         const message = response.data?.message as string | undefined;
 
@@ -237,7 +239,7 @@ const syncMachineSales = async () => {
 
         void showErrorToast(responseMessage ?? 'Não foi possível iniciar a sincronização das vendas.');
     } finally {
-        syncingSales.value = false;
+        syncingSalesMode.value = null;
     }
 };
 
@@ -786,15 +788,29 @@ const validateEventMachineLabels = async () => {
                                 </p>
                             </div>
 
-                            <button
-                                type="button"
-                                class="rounded-xl border border-sky-400/20 bg-sky-500/10 px-5 py-3 text-sm font-semibold text-sky-100 transition hover:bg-sky-500/20 disabled:cursor-not-allowed disabled:opacity-60"
-                                :disabled="syncingSales || (props.event.requires_explicit_zones && pendingZoneCount > 0)"
-                                @click="syncMachineSales"
-                            >
-                                {{ syncingSales ? 'A sincronizar...' : 'Sincronizar vendas' }}
-                            </button>
+                            <div class="flex flex-col gap-2 sm:flex-row">
+                                <button
+                                    type="button"
+                                    class="rounded-xl border border-sky-400/20 bg-sky-500/10 px-5 py-3 text-sm font-semibold text-sky-100 transition hover:bg-sky-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+                                    :disabled="syncingSalesMode !== null || (props.event.requires_explicit_zones && pendingZoneCount > 0)"
+                                    @click="syncMachineSales('complete-documents')"
+                                >
+                                    {{ syncingSalesMode === 'complete-documents' ? 'A sincronizar...' : 'Sincronizar normal' }}
+                                </button>
+                                <button
+                                    type="button"
+                                    class="rounded-xl border border-amber-400/25 bg-amber-500/10 px-5 py-3 text-sm font-semibold text-amber-100 transition hover:bg-amber-500/20 disabled:cursor-not-allowed disabled:opacity-60"
+                                    :disabled="syncingSalesMode !== null || (props.event.requires_explicit_zones && pendingZoneCount > 0)"
+                                    title="Consulta cada documento diretamente na interface de vendas da ZoneSoft."
+                                    @click="syncMachineSales('document-sales')"
+                                >
+                                    {{ syncingSalesMode === 'document-sales' ? 'A sincronizar...' : 'Sincronização alternativa' }}
+                                </button>
+                            </div>
                         </div>
+                        <p class="mt-3 text-xs text-amber-100/75">
+                            A alternativa consulta as linhas de cada documento pela interface de vendas e deve ser usada quando a sincronização normal não trouxer algum produto.
+                        </p>
                     </section>
                 </div>
             </aside>

@@ -685,6 +685,49 @@ class EventReportImportTest extends TestCase
             ]);
     }
 
+    public function test_admin_can_start_alternative_document_sales_sync_from_event_tpa_panel(): void
+    {
+        [$admin, $client] = $this->makeAdminClientContext();
+        $event = $this->makeEvent($client);
+        $application = $this->makeApplication();
+        $machine = ClientZoneSoftMachine::create([
+            'client_id' => $client->id,
+            'event_id' => $event->id,
+            'zonesoft_application_id' => $application->id,
+            'zs_client_id' => 'SYNC-TPA-DOCUMENT-SALES',
+            'license' => 'SYNC-LICENSE',
+            'store_id' => 271,
+            'store_label' => 'Merch',
+            'permissions' => 'API + All document interfaces',
+            'is_active' => true,
+        ]);
+
+        $this->mock(EventReportSyncService::class, function ($mock) use ($event, $machine, $admin): void {
+            $mock->shouldReceive('syncMachineUsingDocumentSales')
+                ->once()
+                ->withArgs(fn (Event $receivedEvent, ClientZoneSoftMachine $receivedMachine, User $receivedUser): bool => $receivedEvent->is($event)
+                    && $receivedMachine->is($machine)
+                    && $receivedUser->is($admin))
+                ->andReturn(new EventReportImport([
+                    'event_id' => $event->id,
+                    'uploaded_by_user_id' => $admin->id,
+                    'status' => 'completed',
+                ]));
+        });
+
+        $this
+            ->actingAs($admin)
+            ->post(route('admin.events.tpas.sync-sales', [$event, $machine]), [
+                'mode' => 'document-sales',
+                'redirect_to' => route('admin.events.tpas.manage', $event, absolute: false),
+            ])
+            ->assertOk()
+            ->assertJson([
+                'message' => 'Sincronização alternativa por documento iniciada apenas para o TPA Merch.',
+                'redirect_to' => route('admin.events.tpas.manage', $event, absolute: false),
+            ]);
+    }
+
     public function test_admin_can_sync_event_report_from_zonesoft_api(): void
     {
         [$admin, $client] = $this->makeAdminClientContext();
@@ -1392,6 +1435,95 @@ class EventReportImportTest extends TestCase
         $this->assertSame(['full' => 1, 'incremental' => 0], $import->summary['document_fetch_mode_counts'] ?? null);
         $this->assertSame(1, $import->summary['synced_machines_count'] ?? null);
         $this->assertSame(2, $import->summary['machines_count'] ?? null);
+    }
+
+    public function test_alternative_tpa_sync_reads_each_document_from_sales_interface(): void
+    {
+        config(['event-reports.zonesoft.complete_documents' => true]);
+
+        [$admin, $client] = $this->makeAdminClientContext();
+        $application = $this->makeApplication();
+        $event = $this->makeEvent($client);
+        $machine = ClientZoneSoftMachine::create([
+            'client_id' => $client->id,
+            'event_id' => $event->id,
+            'zonesoft_application_id' => $application->id,
+            'zs_client_id' => 'MERCH-271-CLIENT',
+            'license' => 'Z11JSMZIYP',
+            'store_id' => 271,
+            'store_label' => 'Merch',
+            'permissions' => 'API + All document interfaces',
+            'is_active' => true,
+            'last_validated_at' => now(),
+        ]);
+
+        Http::fake([
+            'https://api.zonesoft.org/v3/documents/getDocumentsHeaders' => Http::response([
+                'Response' => [
+                    'StatusCode' => 200,
+                    'StatusMessage' => 'OK',
+                    'Content' => [
+                        'document' => [[
+                            'numero' => 27101,
+                            'doc' => 'FS',
+                            'serie' => 'MERCH2026',
+                            'loja' => 271,
+                            'data' => '2026-06-20',
+                            'datahora' => '2026-06-20 17:00:00',
+                            'pagamento' => 3,
+                            'total' => 60,
+                            'pago' => 1,
+                        ]],
+                    ],
+                ],
+            ]),
+            'https://api.zonesoft.org/v3/sales/getInstancesFromDocument' => Http::response([
+                'Response' => [
+                    'StatusCode' => 200,
+                    'StatusMessage' => 'OK',
+                    'Content' => [
+                        'sale' => [[
+                            'id' => 271011,
+                            'loja' => 271,
+                            'numero' => 27101,
+                            'doc' => 'FS',
+                            'serie' => 'MERCH2026',
+                            'data' => '2026-06-20',
+                            'datahora' => '2026-06-20 17:00:00',
+                            'codigo' => 27100116,
+                            'descricao' => 'LANYARD PORTA COPOS',
+                            'qtd' => 10,
+                            'valor' => 60,
+                            'desconto' => 0,
+                            'desconto2' => 0,
+                            'total' => 60,
+                            'posto' => 1,
+                        ]],
+                    ],
+                ],
+            ]),
+        ]);
+
+        $import = app(EventReportSyncService::class)->syncMachineUsingDocumentSales(
+            $event,
+            $machine,
+            $admin,
+        );
+
+        $this->assertSame('completed', $import->status);
+        $this->assertSame([$machine->id], $import->headers['force_document_sales_machine_ids'] ?? null);
+        $this->assertSame('60.0000', $import->summary['sales_total'] ?? null);
+        $this->assertDatabaseHas('event_report_rows', [
+            'event_id' => $event->id,
+            'machine_id' => $machine->id,
+            'document_number' => '27101',
+            'product_code' => '27100116',
+            'description' => 'LANYARD PORTA COPOS',
+            'total' => 60,
+        ]);
+        Http::assertSent(fn ($request): bool => str_contains($request->url(), '/documents/getDocumentsHeaders'));
+        Http::assertSent(fn ($request): bool => str_contains($request->url(), '/sales/getInstancesFromDocument'));
+        Http::assertNotSent(fn ($request): bool => str_contains($request->url(), '/documents/getInstances'));
     }
 
     /**

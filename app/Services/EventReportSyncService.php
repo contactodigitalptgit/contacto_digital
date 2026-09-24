@@ -74,6 +74,16 @@ class EventReportSyncService
         return $this->run($syncLog);
     }
 
+    public function syncMachineUsingDocumentSales(
+        Event $event,
+        ClientZoneSoftMachine $machine,
+        ?User $uploadedBy = null,
+    ): EventReportImport {
+        $syncLog = $this->startMachineUsingDocumentSales($event, $machine, $uploadedBy);
+
+        return $this->run($syncLog);
+    }
+
     public function start(Event $event, ?User $uploadedBy = null): EventReportImport
     {
         return $this->startWithMachineSelection($event, null, $uploadedBy);
@@ -87,15 +97,29 @@ class EventReportSyncService
         return $this->startWithMachineSelection($event, [$machine->id], $uploadedBy);
     }
 
+    public function startMachineUsingDocumentSales(
+        Event $event,
+        ClientZoneSoftMachine $machine,
+        ?User $uploadedBy = null,
+    ): EventReportImport {
+        return $this->startWithMachineSelection(
+            $event,
+            [$machine->id],
+            $uploadedBy,
+            forceDocumentSales: true,
+        );
+    }
+
     /** @param list<int>|null $machineIds */
     private function startWithMachineSelection(
         Event $event,
         ?array $machineIds,
         ?User $uploadedBy,
+        bool $forceDocumentSales = false,
     ): EventReportImport
     {
         $syncLog = Cache::lock(self::GLOBAL_SYNC_START_LOCK, 30)->get(
-            fn (): EventReportImport => DB::transaction(function () use ($event, $machineIds, $uploadedBy): EventReportImport {
+            fn (): EventReportImport => DB::transaction(function () use ($event, $machineIds, $uploadedBy, $forceDocumentSales): EventReportImport {
                 $lockedEvent = Event::query()
                     ->with('client')
                     ->lockForUpdate()
@@ -118,6 +142,7 @@ class EventReportSyncService
                     $uploadedBy,
                     $machineIds === null ? 'event' : 'machines',
                     $machineIds !== null,
+                    $forceDocumentSales,
                 );
             }),
         );
@@ -454,6 +479,7 @@ class EventReportSyncService
         ?User $uploadedBy,
         string $syncScope,
         bool $forceFull,
+        bool $forceDocumentSales,
     ): EventReportImport
     {
         $startedAt = now();
@@ -469,6 +495,7 @@ class EventReportSyncService
                 'source' => 'zonesoft_api',
                 'sync_scope' => $syncScope,
                 'force_full_machine_ids' => $forceFull ? $machines->modelKeys() : [],
+                'force_document_sales_machine_ids' => $forceDocumentSales ? $machines->modelKeys() : [],
                 'machines' => $machines->map(fn (ClientZoneSoftMachine $machine): array => [
                     'id' => $machine->id,
                     'zs_client_id' => $machine->zs_client_id,
@@ -576,6 +603,9 @@ class EventReportSyncService
             'end' => $syncRange['end']->toIso8601String(),
             'sync_import_id' => $syncLog->id,
             'machine_document_cursors' => $requestCursorsByMachine,
+            'force_document_sales_machine_ids' => array_values(
+                $syncLog->headers['force_document_sales_machine_ids'] ?? [],
+            ),
             'machine_sync_concurrency' => $anyMachineNeedsFullMode
                 ? (int) config('event-reports.zonesoft.full_machine_sync_concurrency', 10)
                 : (int) config('event-reports.zonesoft.incremental_machine_sync_concurrency', 4),
@@ -842,7 +872,7 @@ class EventReportSyncService
      * (buildMachineResultFromDocuments()).
      *
      * @param  Collection<int, ClientZoneSoftMachine>  $machines
-     * @param  array{start:string,end:string,sync_import_id:int,machine_document_cursors:array<string, array<string, mixed>>,machine_sync_concurrency?:int}  $rangePayload
+     * @param  array{start:string,end:string,sync_import_id:int,machine_document_cursors:array<string, array<string, mixed>>,force_document_sales_machine_ids?:list<int>,machine_sync_concurrency?:int}  $rangePayload
      * @return array<int, array<string, mixed>>
      */
     private function fetchMachineResults(Collection $machines, array $rangePayload): array
@@ -851,7 +881,6 @@ class EventReportSyncService
             'start' => CarbonImmutable::parse($rangePayload['start']),
             'end' => CarbonImmutable::parse($rangePayload['end']),
         ];
-        $usesCompleteDocuments = (bool) config('event-reports.zonesoft.complete_documents', true);
         $concurrency = $this->machineSyncConcurrency(
             isset($rangePayload['machine_sync_concurrency'])
                 ? (int) $rangePayload['machine_sync_concurrency']
@@ -869,13 +898,23 @@ class EventReportSyncService
             );
         }
 
-        $fetches = $this->fetchDocumentsAcrossMachines(
-            $machines,
-            $syncRange,
-            $usesCompleteDocuments,
-            $lastUpdatedAfterByMachine,
-            $concurrency,
+        $machinesByFetchMode = $machines->groupBy(
+            fn (ClientZoneSoftMachine $machine): string => $this->usesCompleteDocumentsForMachine(
+                $machine->id,
+                $rangePayload,
+            ) ? 'complete' : 'document-sales',
         );
+        $fetches = [];
+
+        foreach ($machinesByFetchMode as $fetchMode => $modeMachines) {
+            $fetches += $this->fetchDocumentsAcrossMachines(
+                $modeMachines,
+                $syncRange,
+                $fetchMode === 'complete',
+                $lastUpdatedAfterByMachine,
+                $concurrency,
+            );
+        }
 
         $results = [];
 
@@ -918,7 +957,7 @@ class EventReportSyncService
                 $fetch['documents'],
                 $fetch['request_count'],
                 $syncRange,
-                $usesCompleteDocuments,
+                $this->usesCompleteDocumentsForMachine($machine->id, $rangePayload),
                 $requestCursor,
                 $lastUpdatedAfterByMachine[$machine->id] ?? null,
                 $startedAt,
@@ -1158,7 +1197,7 @@ class EventReportSyncService
     }
 
     /**
-     * @param  array{start:string,end:string,sync_import_id?:int}  $rangePayload
+     * @param  array{start:string,end:string,sync_import_id?:int,force_document_sales_machine_ids?:list<int>}  $rangePayload
      * @return array{
      *     failure_message:string|null,
      *     warning_message:string|null,
@@ -1209,7 +1248,7 @@ class EventReportSyncService
         ];
         $requestCursor = CarbonImmutable::now(self::REPORT_TIMEZONE);
         $lastUpdatedAfter = $this->resolveMachineLastUpdatedAfter($machineId, $rangePayload);
-        $usesCompleteDocuments = (bool) config('event-reports.zonesoft.complete_documents', true);
+        $usesCompleteDocuments = $this->usesCompleteDocumentsForMachine($machineId, $rangePayload);
         $documentRequestCount = 0;
 
         try {
@@ -1242,6 +1281,23 @@ class EventReportSyncService
             $lastUpdatedAfter,
             $startedAt,
         );
+    }
+
+    /**
+     * @param  array{force_document_sales_machine_ids?:list<int>}  $rangePayload
+     */
+    private function usesCompleteDocumentsForMachine(int $machineId, array $rangePayload): bool
+    {
+        if (! (bool) config('event-reports.zonesoft.complete_documents', true)) {
+            return false;
+        }
+
+        $forcedMachineIds = array_map(
+            'intval',
+            $rangePayload['force_document_sales_machine_ids'] ?? [],
+        );
+
+        return ! in_array($machineId, $forcedMachineIds, true);
     }
 
     /**

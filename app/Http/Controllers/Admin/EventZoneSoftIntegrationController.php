@@ -175,26 +175,38 @@ class EventZoneSoftIntegrationController extends Controller
         $machine = $this->resolveEventMachine($event, $machine);
         $validated = $request->validate([
             'redirect_to' => ['nullable', 'string', 'max:2048'],
+            'mode' => ['nullable', Rule::in(['complete-documents', 'document-sales'])],
         ]);
+        $useDocumentSales = ($validated['mode'] ?? 'complete-documents') === 'document-sales';
 
         if (app()->runningUnitTests() || app()->isLocal()) {
-            $syncService->syncMachine($event, $machine, $request->user());
+            if ($useDocumentSales) {
+                $syncService->syncMachineUsingDocumentSales($event, $machine, $request->user());
+            } else {
+                $syncService->syncMachine($event, $machine, $request->user());
+            }
 
             return response()->json([
                 'message' => sprintf(
-                    'Sincronização completa das vendas iniciada apenas para o TPA %s.',
+                    $useDocumentSales
+                        ? 'Sincronização alternativa por documento iniciada apenas para o TPA %s.'
+                        : 'Sincronização completa das vendas iniciada apenas para o TPA %s.',
                     $machine->store_label ?: 'Store '.$machine->store_id,
                 ),
                 'redirect_to' => $validated['redirect_to'] ?? null,
             ]);
         }
 
-        $syncLog = $syncService->startMachine($event, $machine, $request->user());
+        $syncLog = $useDocumentSales
+            ? $syncService->startMachineUsingDocumentSales($event, $machine, $request->user())
+            : $syncService->startMachine($event, $machine, $request->user());
         SyncEventReportJob::dispatch($syncLog->id, $event->id);
 
         return response()->json([
             'message' => sprintf(
-                'Sincronização completa das vendas iniciada apenas para o TPA %s.',
+                $useDocumentSales
+                    ? 'Sincronização alternativa por documento iniciada apenas para o TPA %s.'
+                    : 'Sincronização completa das vendas iniciada apenas para o TPA %s.',
                 $machine->store_label ?: 'Store '.$machine->store_id,
             ),
             'redirect_to' => $validated['redirect_to'] ?? null,
