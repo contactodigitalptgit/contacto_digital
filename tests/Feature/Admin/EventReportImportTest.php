@@ -660,10 +660,12 @@ class EventReportImportTest extends TestCase
             'is_active' => true,
         ]);
 
-        $this->mock(EventReportSyncService::class, function ($mock) use ($event, $admin): void {
-            $mock->shouldReceive('sync')
+        $this->mock(EventReportSyncService::class, function ($mock) use ($event, $machine, $admin): void {
+            $mock->shouldReceive('syncMachine')
                 ->once()
-                ->withArgs(fn (Event $receivedEvent, User $receivedUser): bool => $receivedEvent->is($event) && $receivedUser->is($admin))
+                ->withArgs(fn (Event $receivedEvent, ClientZoneSoftMachine $receivedMachine, User $receivedUser): bool => $receivedEvent->is($event)
+                    && $receivedMachine->is($machine)
+                    && $receivedUser->is($admin))
                 ->andReturn(new EventReportImport([
                     'event_id' => $event->id,
                     'uploaded_by_user_id' => $admin->id,
@@ -678,7 +680,7 @@ class EventReportImportTest extends TestCase
             ])
             ->assertOk()
             ->assertJson([
-                'message' => 'Sincronização das vendas iniciada para o evento a partir do TPA Bar Expo.',
+                'message' => 'Sincronização completa das vendas iniciada apenas para o TPA Bar Expo.',
                 'redirect_to' => route('admin.events.tpas.manage', $event, absolute: false),
             ]);
     }
@@ -1333,6 +1335,63 @@ class EventReportImportTest extends TestCase
         } finally {
             CarbonImmutable::setTestNow();
         }
+    }
+
+    public function test_tpa_panel_sync_refetches_only_the_selected_machine(): void
+    {
+        config(['event-reports.zonesoft.complete_documents' => true]);
+
+        [$admin, $client] = $this->makeAdminClientContext();
+        $application = $this->makeApplication();
+        $event = $this->makeEvent($client);
+        $selectedMachine = ClientZoneSoftMachine::create([
+            'client_id' => $client->id,
+            'event_id' => $event->id,
+            'zonesoft_application_id' => $application->id,
+            'zs_client_id' => 'SELECTED-CLIENT',
+            'license' => 'Z11JSMZIYP',
+            'store_id' => 191,
+            'store_label' => 'Bilheteira',
+            'permissions' => 'API + All document interfaces',
+            'is_active' => true,
+            'last_validated_at' => now(),
+        ]);
+        ClientZoneSoftMachine::create([
+            'client_id' => $client->id,
+            'event_id' => $event->id,
+            'zonesoft_application_id' => $application->id,
+            'zs_client_id' => 'UNSELECTED-CLIENT',
+            'license' => 'Z11JSMZIYP',
+            'store_id' => 271,
+            'store_label' => 'Merch',
+            'permissions' => 'API + All document interfaces',
+            'is_active' => true,
+            'last_validated_at' => now(),
+        ]);
+
+        $requestedClientIds = [];
+        Http::fake([
+            'https://api.zonesoft.org/v3/documents/getInstances' => function ($request) use (&$requestedClientIds) {
+                $requestedClientIds[] = $request->header('X-ZS-CLIENT-ID')[0] ?? null;
+
+                return Http::response([
+                    'Response' => [
+                        'StatusCode' => 200,
+                        'StatusMessage' => 'OK',
+                        'Content' => ['document' => []],
+                    ],
+                ]);
+            },
+        ]);
+
+        $import = app(EventReportSyncService::class)->syncMachine($event, $selectedMachine, $admin);
+
+        $this->assertSame(['SELECTED-CLIENT'], $requestedClientIds);
+        $this->assertSame('machines', $import->headers['sync_scope'] ?? null);
+        $this->assertSame([$selectedMachine->id], $import->headers['force_full_machine_ids'] ?? null);
+        $this->assertSame(['full' => 1, 'incremental' => 0], $import->summary['document_fetch_mode_counts'] ?? null);
+        $this->assertSame(1, $import->summary['synced_machines_count'] ?? null);
+        $this->assertSame(2, $import->summary['machines_count'] ?? null);
     }
 
     /**

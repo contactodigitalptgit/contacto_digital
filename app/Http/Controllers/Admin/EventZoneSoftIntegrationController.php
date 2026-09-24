@@ -178,23 +178,23 @@ class EventZoneSoftIntegrationController extends Controller
         ]);
 
         if (app()->runningUnitTests() || app()->isLocal()) {
-            $syncService->sync($event, $request->user());
+            $syncService->syncMachine($event, $machine, $request->user());
 
             return response()->json([
                 'message' => sprintf(
-                    'Sincronização das vendas iniciada para o evento a partir do TPA %s.',
+                    'Sincronização completa das vendas iniciada apenas para o TPA %s.',
                     $machine->store_label ?: 'Store '.$machine->store_id,
                 ),
                 'redirect_to' => $validated['redirect_to'] ?? null,
             ]);
         }
 
-        $syncLog = $syncService->start($event, $request->user());
+        $syncLog = $syncService->startMachine($event, $machine, $request->user());
         SyncEventReportJob::dispatch($syncLog->id, $event->id);
 
         return response()->json([
             'message' => sprintf(
-                'Sincronização das vendas iniciada para o evento a partir do TPA %s.',
+                'Sincronização completa das vendas iniciada apenas para o TPA %s.',
                 $machine->store_label ?: 'Store '.$machine->store_id,
             ),
             'redirect_to' => $validated['redirect_to'] ?? null,

@@ -780,9 +780,9 @@ const validateEventMachineLabels = async () => {
                         <div class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                             <div>
                                 <p class="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Vendas</p>
-                                <h4 class="mt-2 text-lg font-semibold text-white">Sincronização do evento</h4>
+                                <h4 class="mt-2 text-lg font-semibold text-white">Sincronização deste TPA</h4>
                                 <p class="mt-2 text-sm text-slate-300">
-                                    Inicia a sincronização das vendas do evento usando a configuração ativa desta licença.
+                                    Atualiza apenas as vendas deste TPA, sem voltar a consultar os restantes dispositivos do evento.
                                 </p>
                             </div>
 

@@ -64,10 +64,38 @@ class EventReportSyncService
         return $this->run($syncLog);
     }
 
+    public function syncMachine(
+        Event $event,
+        ClientZoneSoftMachine $machine,
+        ?User $uploadedBy = null,
+    ): EventReportImport {
+        $syncLog = $this->startMachine($event, $machine, $uploadedBy);
+
+        return $this->run($syncLog);
+    }
+
     public function start(Event $event, ?User $uploadedBy = null): EventReportImport
     {
+        return $this->startWithMachineSelection($event, null, $uploadedBy);
+    }
+
+    public function startMachine(
+        Event $event,
+        ClientZoneSoftMachine $machine,
+        ?User $uploadedBy = null,
+    ): EventReportImport {
+        return $this->startWithMachineSelection($event, [$machine->id], $uploadedBy);
+    }
+
+    /** @param list<int>|null $machineIds */
+    private function startWithMachineSelection(
+        Event $event,
+        ?array $machineIds,
+        ?User $uploadedBy,
+    ): EventReportImport
+    {
         $syncLog = Cache::lock(self::GLOBAL_SYNC_START_LOCK, 30)->get(
-            fn (): EventReportImport => DB::transaction(function () use ($event, $uploadedBy): EventReportImport {
+            fn (): EventReportImport => DB::transaction(function () use ($event, $machineIds, $uploadedBy): EventReportImport {
                 $lockedEvent = Event::query()
                     ->with('client')
                     ->lockForUpdate()
@@ -81,10 +109,16 @@ class EventReportSyncService
                     ]);
                 }
 
-                $machines = $this->resolveMachines($lockedEvent);
+                $machines = $this->resolveMachines($lockedEvent, $machineIds);
                 $this->zoneReadiness->assertReady($lockedEvent);
 
-                return $this->createSyncLog($lockedEvent, $machines, $uploadedBy);
+                return $this->createSyncLog(
+                    $lockedEvent,
+                    $machines,
+                    $uploadedBy,
+                    $machineIds === null ? 'event' : 'machines',
+                    $machineIds !== null,
+                );
             }),
         );
 
@@ -156,7 +190,7 @@ class EventReportSyncService
         $syncLog->touch();
 
         try {
-            $machines = $this->resolveMachines($event);
+            $machines = $this->resolveMachinesForSync($event, $syncLog);
             $this->zoneReadiness->assertReady($event);
             $fetchStartedAt = microtime(true);
             $machineSync = $this->fetchRows($event, $machines, $syncLog);
@@ -282,6 +316,16 @@ class EventReportSyncService
                 // machine) pivot row (EventZoneSoftMachine).
                 $summary['document_fetch_mode_counts'] = $machineSync['document_fetch_mode_counts'];
                 $summary['machine_document_cursors'] = $machineSync['machine_document_cursors'];
+                $summary['sync_scope'] = $lockedSyncLog->headers['sync_scope'] ?? 'event';
+                $summary['synced_machines_count'] = $successfulMachinesCount;
+
+                if ($summary['sync_scope'] === 'machines') {
+                    // A one-TPA refresh publishes a complete event snapshot, so
+                    // keep the dashboard's device denominator at the event total.
+                    $summary['machines_count'] = $lockedEvent->zonesoftMachines()
+                        ->where('client_zonesoft_machines.is_active', true)
+                        ->count();
+                }
 
                 $lockedEvent->reportImports()
                     ->where('is_active', true)
@@ -320,12 +364,24 @@ class EventReportSyncService
     /**
      * @return Collection<int, ClientZoneSoftMachine>
      */
-    private function resolveMachines(Event $event): Collection
+    private function resolveMachines(Event $event, ?array $machineIds = null): Collection
     {
-        $machines = $event->zonesoftMachines()
+        $query = $event->zonesoftMachines()
             ->with('application')
-            ->where('is_active', true)
-            ->get();
+            ->where('client_zonesoft_machines.is_active', true);
+
+        if ($machineIds !== null) {
+            $machineIds = array_values(array_unique(array_map('intval', $machineIds)));
+            $query->whereIn('client_zonesoft_machines.id', $machineIds);
+        }
+
+        $machines = $query->get();
+
+        if ($machineIds !== null && $machines->count() !== count($machineIds)) {
+            throw ValidationException::withMessages([
+                'integration' => 'O TPA selecionado nao esta ativo ou nao pertence a este evento.',
+            ]);
+        }
 
         if ($machines->isEmpty()) {
             throw ValidationException::withMessages([
@@ -342,6 +398,25 @@ class EventReportSyncService
         }
 
         return $machines;
+    }
+
+    private function resolveMachinesForSync(Event $event, EventReportImport $syncLog): Collection
+    {
+        $headers = is_array($syncLog->headers) ? $syncLog->headers : [];
+
+        if (($headers['sync_scope'] ?? 'event') !== 'machines') {
+            return $this->resolveMachines($event);
+        }
+
+        $machineIds = collect($headers['machines'] ?? [])
+            ->pluck('id')
+            ->filter(fn (mixed $id): bool => is_numeric($id))
+            ->map(fn (mixed $id): int => (int) $id)
+            ->unique()
+            ->values()
+            ->all();
+
+        return $this->resolveMachines($event, $machineIds);
     }
 
     /** @param array<string, mixed> $machineSync */
@@ -373,7 +448,13 @@ class EventReportSyncService
     /**
      * @param  Collection<int, ClientZoneSoftMachine>  $machines
      */
-    private function createSyncLog(Event $event, Collection $machines, ?User $uploadedBy): EventReportImport
+    private function createSyncLog(
+        Event $event,
+        Collection $machines,
+        ?User $uploadedBy,
+        string $syncScope,
+        bool $forceFull,
+    ): EventReportImport
     {
         $startedAt = now();
 
@@ -386,6 +467,8 @@ class EventReportSyncService
             'file_hash' => hash('sha256', implode('|', [$event->id, $startedAt->toISOString(), $machines->count()])),
             'headers' => [
                 'source' => 'zonesoft_api',
+                'sync_scope' => $syncScope,
+                'force_full_machine_ids' => $forceFull ? $machines->modelKeys() : [],
                 'machines' => $machines->map(fn (ClientZoneSoftMachine $machine): array => [
                     'id' => $machine->id,
                     'zs_client_id' => $machine->zs_client_id,
@@ -463,9 +546,14 @@ class EventReportSyncService
         $machineFetchModes = [];
         $requestCursorsByMachine = [];
         $anyMachineNeedsFullMode = false;
+        $forceFullMachineIds = collect($syncLog->headers['force_full_machine_ids'] ?? [])
+            ->map(fn (mixed $id): int => (int) $id)
+            ->flip();
 
         foreach ($machines as $machine) {
-            $mode = $this->resolveMachineSyncMode($machine);
+            $mode = $forceFullMachineIds->has($machine->id)
+                ? ['document_fetch_mode' => 'full', 'cursor' => null]
+                : $this->resolveMachineSyncMode($machine);
             $machineFetchModes[$machine->id] = $mode['document_fetch_mode'];
             $documentFetchModeCounts[$mode['document_fetch_mode']]++;
 
