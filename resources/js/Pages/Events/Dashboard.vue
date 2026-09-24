@@ -2972,7 +2972,7 @@ function getDifferenceClass(value: number | null) {
                             <article>
                                 <span>Oferecido</span>
                                 <strong>{{ formatNumber(productOfferedQuantity) }}</strong>
-                                <small>Unidades com total zero</small>
+                                <small>Unidades com oferta total ou parcial</small>
                             </article>
                             <article>
                                 <span>Total servido</span>
