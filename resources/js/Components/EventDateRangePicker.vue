@@ -295,7 +295,7 @@ function onDateToInput(event: Event): void {
 .event-date-calendar {
     border: 1px solid rgba(237, 237, 237, 0.1);
     border-radius: 0.75rem;
-    padding: 0.7rem;
+    padding: 0.6rem;
     background: rgba(3, 24, 43, 0.55);
 }
 
@@ -303,7 +303,7 @@ function onDateToInput(event: Event): void {
     display: grid;
     grid-template-columns: 2rem 1fr 2rem;
     align-items: center;
-    margin-bottom: 0.55rem;
+    margin-bottom: 0.35rem;
 }
 
 .event-date-calendar-header strong {
@@ -336,6 +336,10 @@ function onDateToInput(event: Event): void {
     grid-template-columns: repeat(7, minmax(0, 1fr));
 }
 
+.event-date-calendar-grid {
+    grid-auto-rows: clamp(2rem, 4vw, 2.45rem);
+}
+
 .event-date-calendar-weekdays span {
     padding-block: 0.25rem;
     color: #71879b;
@@ -348,7 +352,6 @@ function onDateToInput(event: Event): void {
 .event-date-calendar-grid button {
     position: relative;
     display: inline-flex;
-    aspect-ratio: 1;
     min-width: 0;
     align-items: center;
     justify-content: center;
