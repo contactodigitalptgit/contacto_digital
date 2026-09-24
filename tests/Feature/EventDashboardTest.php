@@ -690,6 +690,106 @@ class EventDashboardTest extends TestCase
                     ))));
     }
 
+    public function test_partially_discounted_products_are_counted_as_offered(): void
+    {
+        [$admin, , $event] = $this->makeDashboardContext();
+        $this->seedSyncedRows($event, $admin);
+        $activeImport = $event->activeReportImports()->firstOrFail();
+
+        $rows = [
+            ['document_number' => '1', 'total' => '2.0000', 'discount' => '5.0000'],
+            ['document_number' => '2', 'total' => '0.0000', 'discount' => '0.0000'],
+            ['document_number' => '3', 'total' => '7.0000', 'discount' => '0.0000'],
+        ];
+
+        foreach ($rows as $index => $row) {
+            EventReportRow::create([
+                'event_id' => $event->id,
+                'event_report_import_id' => $activeImport->id,
+                'source_sheet' => 'zonesoft:partial-offer-test',
+                'source_row_number' => 300 + $index,
+                'store_code' => '190',
+                'store_name' => 'Bar Desconto - POS 1',
+                'sale_date' => '2026-03-14',
+                'sale_datetime' => '2026-03-14 14:00:00',
+                'doc_type' => 'FS',
+                'document_series' => 'OFFER2026',
+                'document_number' => $row['document_number'],
+                'value' => '7.0000',
+                'total' => $row['total'],
+                'discount' => $row['discount'],
+                'quantity' => '1.0000',
+                'product_code' => 'PARTIAL-OFFER',
+                'description' => 'Cerveja com oferta',
+                'raw_row' => ['index' => 300 + $index],
+            ]);
+        }
+
+        app(EventReportSyncService::class)->refreshRowAggregates($event->id, [null]);
+
+        $assertProductQuantities = fn ($products): bool => collect($products)->contains(
+            fn (array $product): bool => $product['code'] === 'PARTIAL-OFFER'
+                && (float) $product['quantity_total'] === 3.0
+                && (float) $product['offered_quantity'] === 2.0
+                && (float) $product['sold_quantity'] === 1.0,
+        );
+
+        // Plain request exercises the precomputed aggregate path.
+        $this->actingAs($admin)
+            ->get(route('admin.events.products', $event))
+            ->assertOk()
+            ->assertInertia(fn (AssertableInertia $page) => $page
+                ->loadDeferredProps('dashboard-products', fn (AssertableInertia $details) => $details
+                    ->where('productBreakdowns.total', $assertProductQuantities)));
+
+        // Product filtering exercises the direct event_report_rows fallback.
+        $this->actingAs($admin)
+            ->get(route('admin.events.products', $event).'?product=PARTIAL-OFFER')
+            ->assertOk()
+            ->assertInertia(fn (AssertableInertia $page) => $page
+                ->loadDeferredProps('dashboard-products', fn (AssertableInertia $details) => $details
+                    ->where('productBreakdowns.total', $assertProductQuantities)));
+    }
+
+    public function test_partial_offer_migration_rebuilds_existing_aggregates(): void
+    {
+        [$admin, , $event] = $this->makeDashboardContext();
+        $this->seedSyncedRows($event, $admin);
+        $activeImport = $event->activeReportImports()->firstOrFail();
+        $row = EventReportRow::query()
+            ->where('event_id', $event->id)
+            ->where('document_number', '1')
+            ->firstOrFail();
+
+        $aggregate = EventReportRowAggregate::query()
+            ->where('event_id', $event->id)
+            ->where('machine_id', $row->machine_id)
+            ->where('store_name', $row->store_name)
+            ->where('product_code', $row->product_code)
+            ->firstOrFail();
+
+        $this->assertSame(0.0, (float) $aggregate->offered_quantity_total);
+        $this->assertSame(1.0, (float) $aggregate->sold_quantity_total);
+
+        // Simulate production before this deployment: the raw discount is
+        // present, while the stored aggregate still has the old classification.
+        $row->update(['discount' => '1.0000']);
+        CarbonImmutable::setTestNow('2026-03-14 12:01:00');
+
+        $migration = require database_path('migrations/2026_09_24_000000_reclassify_discounted_event_report_quantities.php');
+        $migration->up();
+
+        $aggregate = EventReportRowAggregate::query()
+            ->where('event_id', $event->id)
+            ->where('machine_id', $row->machine_id)
+            ->where('store_name', $row->store_name)
+            ->where('product_code', $row->product_code)
+            ->firstOrFail();
+        $this->assertSame(1.0, (float) $aggregate->offered_quantity_total);
+        $this->assertSame(0.0, (float) $aggregate->sold_quantity_total);
+        $this->assertSame('2026-03-14 12:01:00', $activeImport->fresh()->updated_at->format('Y-m-d H:i:s'));
+    }
+
     public function test_client_can_not_view_dashboard_of_other_client_event(): void
     {
         [, , $event] = $this->makeDashboardContext();

@@ -2666,8 +2666,10 @@ class EventReportSyncService
             ->selectRaw('COALESCE(SUM(value), 0) as value_total')
             ->selectRaw('COALESCE(SUM(discount), 0) as discount_total')
             ->selectRaw('COALESCE(SUM(total), 0) as total_sum')
-            ->selectRaw('COALESCE(SUM(CASE WHEN total = 0 THEN quantity ELSE 0 END), 0) as offered_quantity_total')
-            ->selectRaw('COALESCE(SUM(CASE WHEN total != 0 THEN quantity ELSE 0 END), 0) as sold_quantity_total')
+            // A partially discounted product is still an offered unit for the
+            // client's operational count, even when the remaining balance was paid.
+            ->selectRaw('COALESCE(SUM(CASE WHEN total = 0 OR COALESCE(discount, 0) > 0 THEN quantity ELSE 0 END), 0) as offered_quantity_total')
+            ->selectRaw('COALESCE(SUM(CASE WHEN total != 0 AND COALESCE(discount, 0) <= 0 THEN quantity ELSE 0 END), 0) as sold_quantity_total')
             ->groupByRaw($dayExpression)
             ->groupByRaw($calendarDayExpression)
             ->groupByRaw($hourExpression)
