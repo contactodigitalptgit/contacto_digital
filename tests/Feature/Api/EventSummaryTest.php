@@ -37,6 +37,25 @@ class EventSummaryTest extends TestCase
         $titles = collect($response->json('events'))->pluck('title');
         $this->assertEquals(['Evento Proprio'], $titles->all());
         $this->assertSame($ownEvent->id, $response->json('events.0.id'));
+        $response
+            ->assertJsonPath('events.0.report_starts_at', $ownEvent->report_starts_at->toISOString())
+            ->assertJsonPath('events.0.report_ends_at', $ownEvent->report_ends_at->toISOString());
+    }
+
+    public function test_mobile_filters_reject_dates_outside_the_event_period(): void
+    {
+        [$user, $client] = $this->makeClient();
+        $event = $this->makeEvent($client, 'Evento com limite');
+
+        $this->authenticated($user)
+            ->getJson("/api/events/{$event->id}/dashboard?date_from=2026-06-19&date_to=2026-06-20")
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('date_from');
+
+        $this->authenticated($user)
+            ->getJson("/api/events/{$event->id}/dashboard?date_from=2026-06-20&date_to=2026-06-21")
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('date_to');
     }
 
     public function test_admin_lists_all_active_events_and_can_open_them(): void

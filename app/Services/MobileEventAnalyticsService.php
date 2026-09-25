@@ -90,9 +90,6 @@ class MobileEventAnalyticsService
     public function filterOptions(Event $event): array
     {
         $rows = $this->salesRows($event->id);
-        $dates = (clone $rows)
-            ->selectRaw('MIN(sale_date) as minimum, MAX(sale_date) as maximum')
-            ->first();
 
         $stores = (clone $rows)
             ->whereNotNull('store_name')
@@ -164,8 +161,8 @@ class MobileEventAnalyticsService
             'stores' => $stores,
             'products' => $products,
             'date_bounds' => [
-                'from' => $this->dateString($dates?->minimum),
-                'to' => $this->dateString($dates?->maximum),
+                'from' => ($event->report_starts_at ?? $event->event_date)->toDateString(),
+                'to' => ($event->report_ends_at ?? $event->report_starts_at ?? $event->event_date)->toDateString(),
             ],
             'hours' => collect(range(0, 23))->map(fn (int $hour): array => [
                 'value' => $hour,

@@ -108,6 +108,47 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets(
+      'date picker only shows event days and keeps the range on navigation',
+      (WidgetTester tester) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final apiClient = _FakeApiClient();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: AppTheme.dark,
+        home: EventSummaryScreen(apiClient: apiClient),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const ValueKey('dashboard-date-range')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Início'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('17/09'), findsOneWidget);
+    expect(find.text('21/09'), findsOneWidget);
+    expect(find.text('16/09'), findsNothing);
+    expect(find.text('22/09'), findsNothing);
+
+    await tester.ensureVisible(find.text('19/09'));
+    await tester.tap(find.text('19/09'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Aplicar período'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Produtos').last);
+    await tester.pumpAndSettle();
+
+    expect(
+        apiClient.sectionRequests.last['filters']['date_from'], '2026-09-19');
+    expect(apiClient.sectionRequests.last['filters']['date_to'], '2026-09-19');
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('client can switch between available events',
       (WidgetTester tester) async {
     tester.view.physicalSize = const Size(390, 844);
@@ -317,12 +358,16 @@ class _FakeApiClient extends ApiClient {
         {
           'id': 9,
           'title': 'Festival de Verão',
-          'event_date': '2026-08-30T00:00:00.000000Z',
+          'event_date': '2026-09-21T00:00:00.000000Z',
+          'report_starts_at': '2026-09-17T00:00:00.000000Z',
+          'report_ends_at': '2026-09-21T23:59:59.000000Z',
         },
         {
           'id': 8,
           'title': 'Festival Antigo',
           'event_date': '2026-08-10T00:00:00.000000Z',
+          'report_starts_at': '2026-08-09T00:00:00.000000Z',
+          'report_ends_at': '2026-08-10T23:59:59.000000Z',
         },
       ];
 
@@ -430,6 +475,10 @@ class _FakeApiClient extends ApiClient {
       'section': section,
       'filters': filters,
     });
+
+    if (section == 'dashboard') {
+      return fetchDashboard(eventId);
+    }
 
     if (section == 'products') {
       return {

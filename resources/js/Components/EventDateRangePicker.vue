@@ -4,9 +4,8 @@ import { computed, ref, watch } from 'vue';
 interface CalendarDay {
     iso: string;
     day: number;
-    inMonth: boolean;
+    weekday: string;
     isToday: boolean;
-    isEventDay: boolean;
     isInSelection: boolean;
     isRangeStart: boolean;
     isRangeEnd: boolean;
@@ -56,7 +55,16 @@ function parseDate(value: string): Date {
 const today = toIsoDate(new Date());
 const eventStartDate = computed(() => normalizeDate(props.eventStart));
 const eventEndDate = computed(() => normalizeDate(props.eventEnd) || eventStartDate.value);
-const initialVisibleDate = props.dateFrom || eventStartDate.value || today;
+const minDate = (left: string, right: string): string => left < right ? left : right;
+const maxDate = (left: string, right: string): string => left > right ? left : right;
+const clampToEvent = (value: string): string => {
+    if (!eventStartDate.value || !eventEndDate.value) {
+        return value;
+    }
+
+    return minDate(eventEndDate.value, maxDate(eventStartDate.value, value));
+};
+const initialVisibleDate = clampToEvent(props.dateFrom || eventStartDate.value || today);
 const visibleMonth = ref(new Date(
     parseDate(initialVisibleDate).getFullYear(),
     parseDate(initialVisibleDate).getMonth(),
@@ -86,30 +94,28 @@ const eventPeriodLabel = computed(() => {
         : format(eventStartDate.value);
 });
 
+const firstEventMonth = computed(() => eventStartDate.value.slice(0, 7));
+const lastEventMonth = computed(() => eventEndDate.value.slice(0, 7));
+const visibleMonthKey = computed(() => toIsoDate(visibleMonth.value).slice(0, 7));
+const canShowPreviousMonth = computed(() => !firstEventMonth.value || visibleMonthKey.value > firstEventMonth.value);
+const canShowNextMonth = computed(() => !lastEventMonth.value || visibleMonthKey.value < lastEventMonth.value);
+
 const calendarDays = computed<CalendarDay[]>(() => {
     const year = visibleMonth.value.getFullYear();
     const month = visibleMonth.value.getMonth();
-    const first = new Date(year, month, 1, 12);
-    const mondayOffset = (first.getDay() + 6) % 7;
-    const gridStart = new Date(year, month, 1 - mondayOffset, 12);
+    const daysInMonth = new Date(year, month + 1, 0, 12).getDate();
 
-    return Array.from({ length: 42 }, (_, index) => {
-        const date = new Date(
-            gridStart.getFullYear(),
-            gridStart.getMonth(),
-            gridStart.getDate() + index,
-            12,
-        );
+    return Array.from({ length: daysInMonth }, (_, index) => {
+        const date = new Date(year, month, index + 1, 12);
         const iso = toIsoDate(date);
 
         return {
             iso,
             day: date.getDate(),
-            inMonth: date.getMonth() === month,
+            weekday: new Intl.DateTimeFormat('pt-PT', { weekday: 'short' })
+                .format(date)
+                .replace('.', ''),
             isToday: iso === today,
-            isEventDay: eventStartDate.value !== ''
-                && iso >= eventStartDate.value
-                && iso <= eventEndDate.value,
             isInSelection: props.dateFrom !== ''
                 && props.dateTo !== ''
                 && iso >= props.dateFrom
@@ -117,7 +123,9 @@ const calendarDays = computed<CalendarDay[]>(() => {
             isRangeStart: iso === props.dateFrom,
             isRangeEnd: iso === props.dateTo,
         };
-    });
+    }).filter((day) => eventStartDate.value === '' || (
+        day.iso >= eventStartDate.value && day.iso <= eventEndDate.value
+    ));
 });
 
 watch(() => props.dateFrom, (value) => {
@@ -134,6 +142,10 @@ watch(() => props.dateFrom, (value) => {
 });
 
 function changeMonth(offset: number): void {
+    if ((offset < 0 && !canShowPreviousMonth.value) || (offset > 0 && !canShowNextMonth.value)) {
+        return;
+    }
+
     visibleMonth.value = new Date(
         visibleMonth.value.getFullYear(),
         visibleMonth.value.getMonth() + offset,
@@ -152,6 +164,10 @@ function showEventMonth(): void {
 }
 
 function selectDay(iso: string): void {
+    if (eventStartDate.value && (iso < eventStartDate.value || iso > eventEndDate.value)) {
+        return;
+    }
+
     if (!selectingEnd.value || props.dateFrom === '') {
         emit('update:dateFrom', iso);
         emit('update:dateTo', iso);
@@ -170,7 +186,8 @@ function selectDay(iso: string): void {
 }
 
 function onDateFromInput(event: Event): void {
-    const value = (event.target as HTMLInputElement).value;
+    const rawValue = (event.target as HTMLInputElement).value;
+    const value = rawValue === '' ? '' : clampToEvent(rawValue);
     emit('update:dateFrom', value);
 
     if (value !== '' && props.dateTo !== '' && props.dateTo < value) {
@@ -179,7 +196,8 @@ function onDateFromInput(event: Event): void {
 }
 
 function onDateToInput(event: Event): void {
-    emit('update:dateTo', (event.target as HTMLInputElement).value);
+    const rawValue = (event.target as HTMLInputElement).value;
+    emit('update:dateTo', rawValue === '' ? '' : clampToEvent(rawValue));
 }
 </script>
 
@@ -193,7 +211,8 @@ function onDateToInput(event: Event): void {
                     :value="dateFrom"
                     type="date"
                     class="dash-input"
-                    :max="dateTo || undefined"
+                    :min="eventStartDate || undefined"
+                    :max="dateTo ? minDate(dateTo, eventEndDate) : (eventEndDate || undefined)"
                     @input="onDateFromInput"
                 />
             </label>
@@ -204,7 +223,8 @@ function onDateToInput(event: Event): void {
                     :value="dateTo"
                     type="date"
                     class="dash-input"
-                    :min="dateFrom || undefined"
+                    :min="dateFrom ? maxDate(dateFrom, eventStartDate) : (eventStartDate || undefined)"
+                    :max="eventEndDate || undefined"
                     @input="onDateToInput"
                 />
             </label>
@@ -212,19 +232,9 @@ function onDateToInput(event: Event): void {
 
         <div class="event-date-calendar">
             <div class="event-date-calendar-header">
-                <button type="button" aria-label="Mês anterior" @click="changeMonth(-1)">‹</button>
+                <button type="button" aria-label="Mês anterior" :disabled="!canShowPreviousMonth" @click="changeMonth(-1)">‹</button>
                 <strong>{{ monthLabel }}</strong>
-                <button type="button" aria-label="Mês seguinte" @click="changeMonth(1)">›</button>
-            </div>
-
-            <div class="event-date-calendar-weekdays" aria-hidden="true">
-                <span>Seg</span>
-                <span>Ter</span>
-                <span>Qua</span>
-                <span>Qui</span>
-                <span>Sex</span>
-                <span>Sáb</span>
-                <span>Dom</span>
+                <button type="button" aria-label="Mês seguinte" :disabled="!canShowNextMonth" @click="changeMonth(1)">›</button>
             </div>
 
             <div class="event-date-calendar-grid" role="grid" :aria-label="`Calendário de ${monthLabel}`">
@@ -233,9 +243,7 @@ function onDateToInput(event: Event): void {
                     :key="day.iso"
                     type="button"
                     :class="{
-                        'is-outside-month': !day.inMonth,
                         'is-today': day.isToday,
-                        'is-event-day': day.isEventDay,
                         'is-in-selection': day.isInSelection,
                         'is-range-start': day.isRangeStart,
                         'is-range-end': day.isRangeEnd,
@@ -244,8 +252,9 @@ function onDateToInput(event: Event): void {
                     :aria-pressed="day.isRangeStart || day.isRangeEnd"
                     @click="selectDay(day.iso)"
                 >
+                    <small>{{ day.weekday }}</small>
                     <span>{{ day.day }}</span>
-                    <i v-if="day.isEventDay" aria-hidden="true" />
+                    <i aria-hidden="true" />
                 </button>
             </div>
 
@@ -324,58 +333,56 @@ function onDateToInput(event: Event): void {
     line-height: 1;
 }
 
-.event-date-calendar-header button:hover,
+.event-date-calendar-header button:not(:disabled):hover,
 .event-date-calendar-header button:focus-visible {
     border-color: rgba(231, 255, 73, 0.5);
     outline: none;
 }
 
-.event-date-calendar-weekdays,
+.event-date-calendar-header button:disabled {
+    opacity: 0.25;
+    cursor: not-allowed;
+}
+
 .event-date-calendar-grid {
     display: grid;
-    grid-template-columns: repeat(7, minmax(0, 1fr));
-}
-
-.event-date-calendar-grid {
-    grid-auto-rows: clamp(2rem, 4vw, 2.45rem);
-}
-
-.event-date-calendar-weekdays span {
-    padding-block: 0.25rem;
-    color: #71879b;
-    font-size: 0.55rem;
-    font-weight: 700;
-    text-align: center;
-    text-transform: uppercase;
+    grid-template-columns: repeat(auto-fit, minmax(3.5rem, 1fr));
+    gap: 0.35rem;
 }
 
 .event-date-calendar-grid button {
     position: relative;
     display: inline-flex;
     min-width: 0;
+    min-height: 3.5rem;
+    flex-direction: column;
+    gap: 0.15rem;
     align-items: center;
     justify-content: center;
     border: 0;
     border-radius: 0.45rem;
     color: #c6d1dc;
-    background: transparent;
+    background: rgba(231, 255, 73, 0.08);
     font-size: 0.68rem;
     cursor: pointer;
+}
+
+.event-date-calendar-grid button small {
+    color: #91a6ba;
+    font-size: 0.5rem;
+    font-weight: 700;
+    text-transform: uppercase;
+}
+
+.event-date-calendar-grid button span {
+    color: #edf6cf;
+    font-size: 0.78rem;
 }
 
 .event-date-calendar-grid button:hover,
 .event-date-calendar-grid button:focus-visible {
     background: #103b60;
     outline: 1px solid rgba(231, 255, 73, 0.45);
-}
-
-.event-date-calendar-grid button.is-outside-month {
-    color: #50667a;
-}
-
-.event-date-calendar-grid button.is-event-day {
-    color: #edf6cf;
-    background: rgba(231, 255, 73, 0.08);
 }
 
 .event-date-calendar-grid button.is-in-selection {
@@ -390,6 +397,13 @@ function onDateToInput(event: Event): void {
     color: #03182b;
     background: #e7ff49;
     font-weight: 800;
+}
+
+.event-date-calendar-grid button.is-range-start small,
+.event-date-calendar-grid button.is-range-end small,
+.event-date-calendar-grid button.is-range-start span,
+.event-date-calendar-grid button.is-range-end span {
+    color: #03182b;
 }
 
 .event-date-calendar-grid button.is-today:not(.is-range-start):not(.is-range-end) {

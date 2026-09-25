@@ -948,16 +948,14 @@ extension _EventPortalSections on _EventSummaryScreenState {
                       label: 'Início',
                       value: dateFrom,
                       onTap: () async {
-                        final picked = await showDatePicker(
-                          context: context,
-                          firstDate: DateTime(2020),
-                          lastDate: DateTime(2035, 12, 31),
-                          initialDate: dateFrom ?? dateTo ?? DateTime.now(),
+                        final picked = await _showEventDayPicker(
+                          initialDate: dateFrom ?? dateTo,
+                          title: 'Data inicial',
                         );
                         if (picked != null) {
                           setModalState(() {
                             dateFrom = picked;
-                            if (dateTo != null && dateTo!.isBefore(picked)) {
+                            if (dateTo == null || dateTo!.isBefore(picked)) {
                               dateTo = picked;
                             }
                           });
@@ -971,11 +969,10 @@ extension _EventPortalSections on _EventSummaryScreenState {
                       label: 'Fim',
                       value: dateTo,
                       onTap: () async {
-                        final picked = await showDatePicker(
-                          context: context,
-                          firstDate: dateFrom ?? DateTime(2020),
-                          lastDate: DateTime(2035, 12, 31),
-                          initialDate: dateTo ?? dateFrom ?? DateTime.now(),
+                        final picked = await _showEventDayPicker(
+                          initialDate: dateTo ?? dateFrom,
+                          firstAllowedDate: dateFrom,
+                          title: 'Data final',
                         );
                         if (picked != null) {
                           setModalState(() => dateTo = picked);
@@ -1028,6 +1025,150 @@ extension _EventPortalSections on _EventSummaryScreenState {
 
   Future<void> _clearDateRange() => _applyFilters(
         _filters.copyWith(clearDateFrom: true, clearDateTo: true),
+      );
+
+  DateTime? _plainDate(dynamic value) {
+    final match =
+        RegExp(r'^(\d{4})-(\d{2})-(\d{2})').firstMatch(value?.toString() ?? '');
+    if (match == null) return null;
+
+    return DateTime(
+      int.parse(match.group(1)!),
+      int.parse(match.group(2)!),
+      int.parse(match.group(3)!),
+    );
+  }
+
+  DateTimeRange get _eventDateRange {
+    final start = _plainDate(_event?['report_starts_at']) ??
+        _plainDate(_event?['event_date']) ??
+        DateUtils.dateOnly(DateTime.now());
+    final configuredEnd = _plainDate(_event?['report_ends_at']) ?? start;
+
+    return DateTimeRange(
+      start: start,
+      end: configuredEnd.isBefore(start) ? start : configuredEnd,
+    );
+  }
+
+  DateTime _clampToEvent(DateTime? value, DateTimeRange range) {
+    final date = DateUtils.dateOnly(value ?? DateTime.now());
+    if (date.isBefore(range.start)) return range.start;
+    if (date.isAfter(range.end)) return range.end;
+    return date;
+  }
+
+  Future<DateTime?> _showEventDayPicker({
+    required String title,
+    DateTime? initialDate,
+    DateTime? firstAllowedDate,
+  }) {
+    final range = _eventDateRange;
+    final firstDate = firstAllowedDate == null
+        ? range.start
+        : _clampToEvent(firstAllowedDate, range);
+    final days = <DateTime>[];
+    for (var day = firstDate;
+        !day.isAfter(range.end);
+        day = day.add(const Duration(days: 1))) {
+      days.add(day);
+    }
+    final selected = _clampToEvent(initialDate, range);
+
+    return showModalBottomSheet<DateTime>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: AppColors.surface,
+      showDragHandle: true,
+      useSafeArea: true,
+      builder: (context) => ConstrainedBox(
+        constraints: BoxConstraints(
+          maxWidth: 680,
+          maxHeight: MediaQuery.sizeOf(context).height * 0.78,
+        ),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 2, 20, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                title,
+                style:
+                    const TextStyle(fontSize: 22, fontWeight: FontWeight.w700),
+              ),
+              const SizedBox(height: 5),
+              Text(
+                'Escolha um dos ${days.length} dias do evento.',
+                style: const TextStyle(color: AppColors.textMuted),
+              ),
+              const SizedBox(height: 18),
+              Flexible(
+                child: SingleChildScrollView(
+                  child: Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: days.map((day) {
+                      final isSelected = DateUtils.isSameDay(day, selected);
+
+                      return SizedBox(
+                        width: 62,
+                        height: 62,
+                        child: isSelected
+                            ? FilledButton(
+                                style: FilledButton.styleFrom(
+                                  padding: EdgeInsets.zero,
+                                ),
+                                onPressed: () => Navigator.of(context).pop(day),
+                                child: _eventDayLabel(day, selected: true),
+                              )
+                            : OutlinedButton(
+                                style: OutlinedButton.styleFrom(
+                                  padding: EdgeInsets.zero,
+                                ),
+                                onPressed: () => Navigator.of(context).pop(day),
+                                child: _eventDayLabel(day),
+                              ),
+                      );
+                    }).toList(),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _eventDayLabel(DateTime day, {bool selected = false}) => Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Text(
+            const [
+              'SEG',
+              'TER',
+              'QUA',
+              'QUI',
+              'SEX',
+              'SÁB',
+              'DOM'
+            ][day.weekday - 1],
+            style: TextStyle(
+              color: selected ? AppColors.navy : AppColors.textMuted,
+              fontSize: 10,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 3),
+          Text(
+            DateFormat('dd/MM').format(day),
+            style: TextStyle(
+              color: selected ? AppColors.navy : AppColors.white,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
       );
 
   Future<void> _showFilters() async {
@@ -1163,16 +1304,14 @@ extension _EventPortalSections on _EventSummaryScreenState {
                         label: 'Início',
                         value: dateFrom,
                         onTap: () async {
-                          final picked = await showDatePicker(
-                            context: context,
-                            firstDate: DateTime(2020),
-                            lastDate: DateTime(2035),
-                            initialDate: dateFrom ?? DateTime.now(),
+                          final picked = await _showEventDayPicker(
+                            initialDate: dateFrom ?? dateTo,
+                            title: 'Data inicial',
                           );
                           if (picked != null) {
                             setModalState(() {
                               dateFrom = picked;
-                              if (dateTo != null && dateTo!.isBefore(picked)) {
+                              if (dateTo == null || dateTo!.isBefore(picked)) {
                                 dateTo = picked;
                               }
                             });
@@ -1186,11 +1325,10 @@ extension _EventPortalSections on _EventSummaryScreenState {
                         label: 'Fim',
                         value: dateTo,
                         onTap: () async {
-                          final picked = await showDatePicker(
-                            context: context,
-                            firstDate: dateFrom ?? DateTime(2020),
-                            lastDate: DateTime(2035),
-                            initialDate: dateTo ?? dateFrom ?? DateTime.now(),
+                          final picked = await _showEventDayPicker(
+                            initialDate: dateTo ?? dateFrom,
+                            firstAllowedDate: dateFrom,
+                            title: 'Data final',
                           );
                           if (picked != null) {
                             setModalState(() => dateTo = picked);

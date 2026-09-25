@@ -1200,6 +1200,26 @@ const todayFilterDate = () => {
 
     return `${year}-${month}-${day}`;
 };
+const normalizedEventDate = (value: string | null | undefined): string => value?.match(/^(\d{4}-\d{2}-\d{2})/)?.[1] ?? '';
+const eventStartFilterDate = computed(() => normalizedEventDate(
+    props.event.report_starts_at || props.event.event_date,
+));
+const eventEndFilterDate = computed(() => normalizedEventDate(
+    props.event.report_ends_at || props.event.report_starts_at || props.event.event_date,
+));
+const closestEventDate = (): string => {
+    const today = todayFilterDate();
+
+    if (today < eventStartFilterDate.value) {
+        return eventStartFilterDate.value;
+    }
+
+    if (today > eventEndFilterDate.value) {
+        return eventEndFilterDate.value;
+    }
+
+    return today;
+};
 const eventStatusLabel = computed(() => hasProcessingSync.value || props.autoSync.enabled
     ? 'Em curso'
     : 'Concluído');
@@ -1537,9 +1557,9 @@ const applyDateRange = () => {
 };
 
 const resetDateRangeToToday = () => {
-    const today = todayFilterDate();
-    localFilters.value.date_from = today;
-    localFilters.value.date_to = today;
+    const date = closestEventDate();
+    localFilters.value.date_from = date;
+    localFilters.value.date_to = date;
     submitFilters(false);
 };
 
@@ -1556,21 +1576,21 @@ const applyBarGroupFilter = (barGroup: string) => {
 };
 
 const clearFilters = () => {
-    const today = todayFilterDate();
+    const date = closestEventDate();
     localFilters.value = {
         bar_groups: [],
         store: '',
         product: '',
-        date_from: today,
-        date_to: today,
+        date_from: date,
+        date_to: date,
         hour_from: '',
         hour_to: '',
         total_min: '',
         total_max: '',
     };
     router.get(getDashboardPath(), {
-        date_from: today,
-        date_to: today,
+        date_from: date,
+        date_to: date,
     }, {
         preserveState: true,
         preserveScroll: true,
@@ -2184,9 +2204,9 @@ function getDifferenceClass(value: number | null) {
 
                         <div class="contacto-report-filterbar-period">
                             <span class="contacto-label">Período</span>
-                            <input v-model="localFilters.date_from" type="date" class="contacto-report-select" @change="applyFilters" />
+                            <input v-model="localFilters.date_from" type="date" class="contacto-report-select" :min="eventStartFilterDate" :max="localFilters.date_to || eventEndFilterDate" @change="applyFilters" />
                             <span>até</span>
-                            <input v-model="localFilters.date_to" type="date" class="contacto-report-select" @change="applyFilters" />
+                            <input v-model="localFilters.date_to" type="date" class="contacto-report-select" :min="localFilters.date_from || eventStartFilterDate" :max="eventEndFilterDate" @change="applyFilters" />
                             <span class="contacto-label contacto-report-hour-label">Hora</span>
                             <select v-model="localFilters.hour_from" class="contacto-report-select" @change="applyFilters">
                                 <option value="">Início</option>

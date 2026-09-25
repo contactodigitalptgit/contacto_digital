@@ -57,6 +57,11 @@ class EventSummaryController extends Controller
                 'id' => $event->id,
                 'title' => $event->title,
                 'event_date' => $event->event_date->toISOString(),
+                'report_starts_at' => $event->report_starts_at?->toISOString()
+                    ?? $event->event_date->copy()->startOfDay()->toISOString(),
+                'report_ends_at' => $event->report_ends_at?->toISOString()
+                    ?? $event->report_starts_at?->copy()->endOfDay()->toISOString()
+                    ?? $event->event_date->copy()->endOfDay()->toISOString(),
                 'client_name' => $event->client?->business_name ?: $event->client?->name,
             ]);
 
@@ -92,7 +97,7 @@ class EventSummaryController extends Controller
     {
         $event = $this->authorizeEventForUser($request, $event);
 
-        return response()->json($this->analytics->dashboard($event, $this->validatedFilters($request)));
+        return response()->json($this->analytics->dashboard($event, $this->validatedFilters($request, $event)));
     }
 
     public function configuration(Request $request, Event $event): JsonResponse
@@ -115,28 +120,28 @@ class EventSummaryController extends Controller
     {
         $event = $this->authorizeEventForUser($request, $event);
 
-        return response()->json($this->analytics->products($event, $this->validatedFilters($request)));
+        return response()->json($this->analytics->products($event, $this->validatedFilters($request, $event)));
     }
 
     public function payments(Request $request, Event $event): JsonResponse
     {
         $event = $this->authorizeEventForUser($request, $event);
 
-        return response()->json($this->analytics->payments($event, $this->validatedFilters($request)));
+        return response()->json($this->analytics->payments($event, $this->validatedFilters($request, $event)));
     }
 
     public function zones(Request $request, Event $event): JsonResponse
     {
         $event = $this->authorizeEventForUser($request, $event);
 
-        return response()->json($this->analytics->zones($event, $this->validatedFilters($request)));
+        return response()->json($this->analytics->zones($event, $this->validatedFilters($request, $event)));
     }
 
     public function performance(Request $request, Event $event): JsonResponse
     {
         $event = $this->authorizeEventForUser($request, $event);
 
-        return response()->json($this->analytics->performance($event, $this->validatedFilters($request)));
+        return response()->json($this->analytics->performance($event, $this->validatedFilters($request, $event)));
     }
 
     public function comparison(Request $request, Event $event): JsonResponse
@@ -269,7 +274,7 @@ class EventSummaryController extends Controller
     /**
      * @return array<string, mixed>
      */
-    private function validatedFilters(Request $request): array
+    private function validatedFilters(Request $request, Event $event): array
     {
         $validated = $request->validate([
             'bar_groups' => ['sometimes', 'array', 'max:50'],
@@ -285,6 +290,19 @@ class EventSummaryController extends Controller
             'hour_from' => ['nullable', 'integer', 'between:0,23'],
             'hour_to' => ['nullable', 'integer', 'between:0,23'],
         ]);
+
+        $eventStart = ($event->report_starts_at ?? $event->event_date)->toDateString();
+        $eventEnd = ($event->report_ends_at ?? $event->report_starts_at ?? $event->event_date)->toDateString();
+
+        foreach (['date_from', 'date_to'] as $dateField) {
+            $date = trim((string) ($validated[$dateField] ?? ''));
+
+            if ($date !== '' && ($date < $eventStart || $date > $eventEnd)) {
+                throw \Illuminate\Validation\ValidationException::withMessages([
+                    $dateField => "A data deve estar entre {$eventStart} e {$eventEnd}, o período do evento.",
+                ]);
+            }
+        }
 
         return [
             'bar_groups' => collect($validated['bar_groups'] ?? [])

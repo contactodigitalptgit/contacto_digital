@@ -149,7 +149,7 @@ class EventDashboardController extends Controller
         $eventOptions = $this->buildEventOptions($event, $previewMode, $initialSection);
         $dashboardConfiguration = $this->dashboardConfiguration->resolve($event);
 
-        $filters = $this->normalizeFilters($request);
+        $filters = $this->normalizeFilters($request, $event);
         $usesRowLevelFilters = $this->usesRowLevelFilters($filters);
         $dashboardCacheVersion = $this->dashboardCacheVersion($event);
         $rememberDashboardValue = fn (
@@ -572,7 +572,7 @@ class EventDashboardController extends Controller
     /**
      * @return array{bar_groups: array<int, string>, store: string, product: string, date_from: string, date_to: string, hour_from: string, hour_to: string, total_min: string, total_max: string}
      */
-    private function normalizeFilters(Request $request): array
+    private function normalizeFilters(Request $request, Event $event): array
     {
         $validated = $request->validate([
             'bar_group' => ['nullable', 'string', 'max:255'],
@@ -603,9 +603,22 @@ class EventDashboardController extends Controller
             ->values()
             ->all();
 
+        $eventStart = ($event->report_starts_at ?? $event->event_date)->toDateString();
+        $eventEnd = ($event->report_ends_at ?? $event->report_starts_at ?? $event->event_date)->toDateString();
+        $today = now('Europe/Lisbon')->toDateString();
         $defaultDate = ! $request->exists('date_from') && ! $request->exists('date_to')
-            ? now('Europe/Lisbon')->toDateString()
+            ? min($eventEnd, max($eventStart, $today))
             : '';
+
+        foreach (['date_from', 'date_to'] as $dateField) {
+            $date = trim((string) ($validated[$dateField] ?? ''));
+
+            if ($date !== '' && ($date < $eventStart || $date > $eventEnd)) {
+                throw \Illuminate\Validation\ValidationException::withMessages([
+                    $dateField => "A data deve estar entre {$eventStart} e {$eventEnd}, o período do evento.",
+                ]);
+            }
+        }
 
         return [
             'bar_groups' => $barGroups,
