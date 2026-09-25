@@ -244,6 +244,55 @@ class EventReportImportTest extends TestCase
                 ->where('machines.1.is_selected', false));
     }
 
+    public function test_admin_tpa_panel_exposes_latest_reconciliation_for_the_machine(): void
+    {
+        [$admin, $client] = $this->makeAdminClientContext();
+        $application = $this->makeApplication();
+        $event = $this->makeEvent($client);
+        $machine = $event->zonesoftMachines()->create([
+            'client_id' => $client->id,
+            'zonesoft_application_id' => $application->id,
+            'zs_client_id' => 'RECONCILIATION-CLIENT',
+            'license' => 'RECONCILIATION-LICENSE',
+            'store_id' => 271,
+            'store_label' => 'Merch',
+            'permissions' => 'API + All document interfaces',
+            'is_active' => true,
+        ]);
+        EventReportImport::create([
+            'event_id' => $event->id,
+            'uploaded_by_user_id' => $admin->id,
+            'import_strategy' => 'replace',
+            'original_filename' => 'zonesoft-api',
+            'stored_path' => 'zonesoft://sync',
+            'mime_type' => 'application/json',
+            'file_hash' => hash('sha256', 'reconciliation-panel'),
+            'headers' => ['source' => 'zonesoft_api'],
+            'summary' => [
+                'machine_reconciliations' => [[
+                    'machine_id' => $machine->id,
+                    'excluded_rows_count' => 2,
+                    'excluded_sales_total' => '60.0000',
+                    'excluded_documents' => [],
+                ]],
+            ],
+            'imported_rows_count' => 0,
+            'imported_at' => '2026-09-23 18:00:00',
+            'is_active' => true,
+            'status' => 'completed',
+        ]);
+
+        $this
+            ->actingAs($admin)
+            ->get(route('admin.events.tpas.manage', $event))
+            ->assertOk()
+            ->assertInertia(fn (AssertableInertia $page) => $page
+                ->component('Admin/Events/ManageTpas')
+                ->where('machines.0.id', $machine->id)
+                ->where('machines.0.sync_diagnostics.excluded_rows_count', 2)
+                ->where('machines.0.sync_diagnostics.excluded_sales_total', '60.0000'));
+    }
+
     public function test_admin_can_discover_stores_for_client_id(): void
     {
         [$admin, $client] = $this->makeAdminClientContext();
@@ -1707,7 +1756,7 @@ class EventReportImportTest extends TestCase
         }
     }
 
-    public function test_sync_uses_event_date_as_start_when_only_report_end_is_configured(): void
+    public function test_sync_uses_start_of_event_day_when_only_report_end_is_configured(): void
     {
         CarbonImmutable::setTestNow('2026-08-14 12:00:00');
 
@@ -1782,7 +1831,7 @@ class EventReportImportTest extends TestCase
             $this->assertSame('completed', $import->status);
             $this->assertSame(1, $import->summary['api_requests_count'] ?? null);
             $this->assertSame(['full' => 1, 'incremental' => 0], $import->summary['document_fetch_mode_counts'] ?? null);
-            $this->assertSame('2026-08-10T12:31:00+00:00', $import->summary['sync_range']['start'] ?? null);
+            $this->assertSame('2026-08-10T00:00:00+00:00', $import->summary['sync_range']['start'] ?? null);
         } finally {
             CarbonImmutable::setTestNow();
         }
@@ -2129,6 +2178,28 @@ class EventReportImportTest extends TestCase
             'event_id' => $event->id,
             'product_code' => '731',
         ]);
+        $reconciliation = $import->summary['machine_reconciliations'][0] ?? [];
+        $this->assertSame('full', $reconciliation['sync_mode'] ?? null);
+        $this->assertSame(3, $reconciliation['source_rows_count'] ?? null);
+        $this->assertSame('8.5000', $reconciliation['source_sales_total'] ?? null);
+        $this->assertSame(1, $reconciliation['in_range_rows_count'] ?? null);
+        $this->assertSame('5.5000', $reconciliation['in_range_sales_total'] ?? null);
+        $this->assertSame(2, $reconciliation['excluded_rows_count'] ?? null);
+        $this->assertSame('3.0000', $reconciliation['excluded_sales_total'] ?? null);
+        $this->assertFalse($reconciliation['matches'] ?? true);
+        $this->assertTrue($reconciliation['published_matches_in_range'] ?? false);
+        $this->assertSame(
+            ['before_start', 'after_end'],
+            $reconciliation['excluded_documents'][0]['reasons'] ?? [],
+        );
+        $this->assertSame([
+            'has_exclusions' => true,
+            'machines_count' => 1,
+            'rows_count' => 2,
+            'documents_count' => 1,
+            'sales_total' => '3.0000',
+            'quantity_total' => '2.0000',
+        ], $import->summary['excluded_sales'] ?? null);
     }
 
     /**

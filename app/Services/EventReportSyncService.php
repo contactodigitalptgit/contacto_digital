@@ -116,8 +116,7 @@ class EventReportSyncService
         ?array $machineIds,
         ?User $uploadedBy,
         bool $forceDocumentSales = false,
-    ): EventReportImport
-    {
+    ): EventReportImport {
         $syncLog = Cache::lock(self::GLOBAL_SYNC_START_LOCK, 30)->get(
             fn (): EventReportImport => DB::transaction(function () use ($event, $machineIds, $uploadedBy, $forceDocumentSales): EventReportImport {
                 $lockedEvent = Event::query()
@@ -341,6 +340,13 @@ class EventReportSyncService
                 // machine) pivot row (EventZoneSoftMachine).
                 $summary['document_fetch_mode_counts'] = $machineSync['document_fetch_mode_counts'];
                 $summary['machine_document_cursors'] = $machineSync['machine_document_cursors'];
+                $summary['machine_reconciliations'] = $this->attachPublishedMachineTotals(
+                    $event->id,
+                    $machineSync['machine_reconciliations'],
+                );
+                $summary['excluded_sales'] = $this->summarizeExcludedSales(
+                    $summary['machine_reconciliations'],
+                );
                 $summary['sync_scope'] = $lockedSyncLog->headers['sync_scope'] ?? 'event';
                 $summary['synced_machines_count'] = $successfulMachinesCount;
 
@@ -480,8 +486,7 @@ class EventReportSyncService
         string $syncScope,
         bool $forceFull,
         bool $forceDocumentSales,
-    ): EventReportImport
-    {
+    ): EventReportImport {
         $startedAt = now();
 
         return $event->reportImports()->create([
@@ -535,6 +540,7 @@ class EventReportSyncService
      *     pending_reconciliations:list<array{machine_id:int,document_keys:list<array<string,string>>}>,
      *     sync_range:array{start:string,end:string},
      *     full_mode_machine_ids:list<int>,
+     *     machine_reconciliations:list<array<string,mixed>>,
      *     document_fetch_mode_counts:array{full:int,incremental:int},
      *     machine_document_cursors:array<string, array<string, mixed>>,
      *     metrics:array{documents_count:int,api_requests_count:int,machine_duration_ms:int,machine_timings:list<array<string, int|string|null>>}
@@ -620,6 +626,8 @@ class EventReportSyncService
         $pendingPaymentDocuments = [];
         /** @var list<array{machine_id:int,document_keys:list<array<string,string>>}> $pendingReconciliations */
         $pendingReconciliations = [];
+        /** @var list<array<string, mixed>> $machineReconciliations */
+        $machineReconciliations = [];
 
         foreach ($machineIds as $machineId) {
             $machine = $machinesById->get($machineId);
@@ -661,6 +669,15 @@ class EventReportSyncService
                 unset($result);
 
                 continue;
+            }
+
+            $machineFetchMode = $machineFetchModes[$machine->id] ?? 'full';
+
+            if (is_array($result['reconciliation'] ?? null)) {
+                $machineReconciliations[] = [
+                    ...$result['reconciliation'],
+                    'sync_mode' => $machineFetchMode,
+                ];
             }
 
             $documentKeys = is_array($result['document_keys'] ?? null)
@@ -716,8 +733,6 @@ class EventReportSyncService
                 $machineDocumentCursors[(string) $machine->id] = $documentCursor;
             }
 
-            $machineFetchMode = $machineFetchModes[$machine->id] ?? 'full';
-
             if ($machineFetchMode === 'full') {
                 $fullModeMachineIds[] = $machine->id;
             }
@@ -772,6 +787,7 @@ class EventReportSyncService
                 'end' => $syncRange['end']->toIso8601String(),
             ],
             'full_mode_machine_ids' => $fullModeMachineIds,
+            'machine_reconciliations' => $machineReconciliations,
             'document_fetch_mode_counts' => $documentFetchModeCounts,
             'machine_document_cursors' => $machineDocumentCursors,
             'metrics' => $metrics,
@@ -1190,6 +1206,7 @@ class EventReportSyncService
             'rows' => [],
             'payment_documents' => [],
             'document_keys' => [],
+            'reconciliation' => null,
             'document_cursor' => null,
             'should_retry_serially' => false,
             'metrics' => [],
@@ -1330,6 +1347,8 @@ class EventReportSyncService
         ));
 
         $rows = [];
+        $sourceRows = [];
+        $excludedRows = [];
         $documentWarnings = [];
         $paymentDocuments = [];
         $shouldRetrySerially = false;
@@ -1375,8 +1394,14 @@ class EventReportSyncService
 
             foreach ($sales as $saleIndex => $sale) {
                 $normalizedRow = $this->normalizeSaleRow($machine, $sale, $saleIndex + 1);
+                $sourceRows[] = $normalizedRow;
 
                 if (! $this->rowMatchesSyncRange($normalizedRow, $syncRange)) {
+                    $excludedRows[] = [
+                        ...$normalizedRow,
+                        'exclusion_reason' => $this->resolveRangeExclusionReason($normalizedRow, $syncRange),
+                    ];
+
                     continue;
                 }
 
@@ -1402,6 +1427,13 @@ class EventReportSyncService
             'rows' => $rows,
             'payment_documents' => $paymentDocuments,
             'document_keys' => $documentKeys,
+            'reconciliation' => $this->buildMachineReconciliation(
+                $machine,
+                $sourceRows,
+                $rows,
+                $excludedRows,
+                $syncRange,
+            ),
             'document_cursor' => [
                 'machine_id' => $machine->id,
                 'zs_client_id' => $machine->zs_client_id,
@@ -1945,7 +1977,7 @@ class EventReportSyncService
      * total (that distinction only matters for a failed import's admin
      * display, which was already best-effort before PERF-101).
      *
-     * @param  array{pending_rows:list<array<string,mixed>>,pending_payment_documents:list<array<string,mixed>>,sync_range:array{start:string,end:string},document_fetch_mode_counts:array{full:int,incremental:int},metrics:array{documents_count:int,api_requests_count:int,machine_duration_ms:int,machine_timings:list<array<string, int|string|null>>}}  $machineSync
+     * @param  array{pending_rows:list<array<string,mixed>>,pending_payment_documents:list<array<string,mixed>>,sync_range:array{start:string,end:string},document_fetch_mode_counts:array{full:int,incremental:int},machine_reconciliations:list<array<string,mixed>>,metrics:array{documents_count:int,api_requests_count:int,machine_duration_ms:int,machine_timings:list<array<string, int|string|null>>}}  $machineSync
      * @param  list<array{machine_id:int,zs_client_id:string,store_id:int,store_label:?string,message:string}>  $failedMachines
      * @param  list<array{machine_id:int,zs_client_id:string,store_id:int,store_label:?string,message:string}>  $machineWarnings
      * @return array<string, mixed>
@@ -1976,6 +2008,8 @@ class EventReportSyncService
             'stage' => 'failed',
             'sync_range' => $machineSync['sync_range'],
             'document_fetch_mode_counts' => $machineSync['document_fetch_mode_counts'],
+            'machine_reconciliations' => $machineSync['machine_reconciliations'],
+            'excluded_sales' => $this->summarizeExcludedSales($machineSync['machine_reconciliations']),
             'machines_total' => $successfulMachinesCount + count($failedMachines),
             'machines_processed' => $successfulMachinesCount + count($failedMachines),
             'documents_processed' => $metrics['documents_count'],
@@ -2877,7 +2911,7 @@ class EventReportSyncService
         }
 
         if ($start === null) {
-            $start = CarbonImmutable::instance($event->event_date);
+            $start = CarbonImmutable::instance($event->event_date)->startOfDay();
         }
 
         if ($end === null) {
@@ -2911,6 +2945,237 @@ class EventReportSyncService
 
         return ! $saleDate->startOfDay()->lt($syncRange['start']->startOfDay())
             && ! $saleDate->endOfDay()->gt($syncRange['end']->endOfDay());
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $sourceRows
+     * @param  list<array<string, mixed>>  $includedRows
+     * @param  list<array<string, mixed>>  $excludedRows
+     * @param  array{start:CarbonImmutable,end:CarbonImmutable}  $syncRange
+     * @return array<string, mixed>
+     */
+    private function buildMachineReconciliation(
+        ClientZoneSoftMachine $machine,
+        array $sourceRows,
+        array $includedRows,
+        array $excludedRows,
+        array $syncRange,
+    ): array {
+        $sourceRows = $this->deduplicateDiagnosticRows($machine, $sourceRows);
+        $includedRows = $this->deduplicateDiagnosticRows($machine, $includedRows);
+        $excludedRows = $this->deduplicateDiagnosticRows($machine, $excludedRows);
+        $sourceTotal = $this->sumDiagnosticColumn($sourceRows, 'total');
+        $includedTotal = $this->sumDiagnosticColumn($includedRows, 'total');
+
+        return [
+            'machine_id' => $machine->id,
+            'zs_client_id' => $machine->zs_client_id,
+            'store_id' => $machine->store_id,
+            'store_label' => $machine->store_label,
+            'range_start' => $syncRange['start']->toIso8601String(),
+            'range_end' => $syncRange['end']->toIso8601String(),
+            'source_rows_count' => count($sourceRows),
+            'source_sales_total' => number_format($sourceTotal, 4, '.', ''),
+            'source_quantity_total' => number_format($this->sumDiagnosticColumn($sourceRows, 'quantity'), 4, '.', ''),
+            'in_range_rows_count' => count($includedRows),
+            'in_range_sales_total' => number_format($includedTotal, 4, '.', ''),
+            'in_range_quantity_total' => number_format($this->sumDiagnosticColumn($includedRows, 'quantity'), 4, '.', ''),
+            'excluded_rows_count' => count($excludedRows),
+            'excluded_sales_total' => number_format($this->sumDiagnosticColumn($excludedRows, 'total'), 4, '.', ''),
+            'excluded_quantity_total' => number_format($this->sumDiagnosticColumn($excludedRows, 'quantity'), 4, '.', ''),
+            'difference_total' => number_format($sourceTotal - $includedTotal, 4, '.', ''),
+            'matches' => abs($sourceTotal - $includedTotal) < 0.0001,
+            ...$this->summarizeExcludedDocuments($excludedRows),
+        ];
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $rows
+     * @return list<array<string, mixed>>
+     */
+    private function deduplicateDiagnosticRows(ClientZoneSoftMachine $machine, array $rows): array
+    {
+        $deduplicated = [];
+
+        foreach ($rows as $row) {
+            $deduplicated[$this->buildRowDedupeKey($machine, $row)] = $row;
+        }
+
+        return array_values($deduplicated);
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $rows
+     */
+    private function sumDiagnosticColumn(array $rows, string $column): float
+    {
+        return array_reduce(
+            $rows,
+            fn (float $total, array $row): float => $total + (float) ($row[$column] ?? 0),
+            0.0,
+        );
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $excludedRows
+     * @return array{excluded_documents:list<array<string,mixed>>,excluded_documents_count:int,excluded_documents_omitted:int}
+     */
+    private function summarizeExcludedDocuments(array $excludedRows): array
+    {
+        $documents = [];
+
+        foreach ($excludedRows as $row) {
+            $key = implode('|', [
+                (string) ($row['doc_type'] ?? ''),
+                (string) ($row['document_series'] ?? ''),
+                (string) ($row['document_number'] ?? ''),
+            ]);
+
+            if (! isset($documents[$key])) {
+                $documents[$key] = [
+                    'doc_type' => $row['doc_type'] ?? null,
+                    'document_series' => $row['document_series'] ?? null,
+                    'document_number' => $row['document_number'] ?? null,
+                    'sale_datetime' => $row['sale_datetime'] ?? $row['sale_date'] ?? null,
+                    'rows_count' => 0,
+                    'sales_total' => 0.0,
+                    'quantity_total' => 0.0,
+                    'reasons' => [],
+                    'products' => [],
+                ];
+            }
+
+            $documents[$key]['rows_count']++;
+            $documents[$key]['sales_total'] += (float) ($row['total'] ?? 0);
+            $documents[$key]['quantity_total'] += (float) ($row['quantity'] ?? 0);
+            $reason = (string) ($row['exclusion_reason'] ?? 'outside_range');
+            $documents[$key]['reasons'][$reason] = true;
+            $product = trim((string) ($row['description'] ?? $row['product_code'] ?? ''));
+
+            if ($product !== '') {
+                $documents[$key]['products'][$product] = true;
+            }
+        }
+
+        $summaries = array_values(array_map(function (array $document): array {
+            return [
+                ...$document,
+                'sales_total' => number_format((float) $document['sales_total'], 4, '.', ''),
+                'quantity_total' => number_format((float) $document['quantity_total'], 4, '.', ''),
+                'reasons' => array_keys($document['reasons']),
+                'products' => array_slice(array_keys($document['products']), 0, 5),
+            ];
+        }, $documents));
+        $limit = 50;
+
+        return [
+            'excluded_documents' => array_slice($summaries, 0, $limit),
+            'excluded_documents_count' => count($summaries),
+            'excluded_documents_omitted' => max(0, count($summaries) - $limit),
+        ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $row
+     * @param  array{start:CarbonImmutable,end:CarbonImmutable}  $syncRange
+     */
+    private function resolveRangeExclusionReason(array $row, array $syncRange): string
+    {
+        $saleDateTime = $this->parseCarbon($row['sale_datetime'] ?? null)
+            ?? $this->parseCarbon($row['sale_date'] ?? null);
+
+        if ($saleDateTime?->lt($syncRange['start'])) {
+            return 'before_start';
+        }
+
+        if ($saleDateTime?->gt($syncRange['end'])) {
+            return 'after_end';
+        }
+
+        return 'outside_range';
+    }
+
+    /**
+     * Adds the values actually published in event_report_rows after the
+     * transaction's upsert/reconciliation. A full sync can therefore prove
+     * that the TPA total in the report matches the accepted ZoneSoft rows.
+     *
+     * @param  list<array<string, mixed>>  $reconciliations
+     * @return list<array<string, mixed>>
+     */
+    private function attachPublishedMachineTotals(int $eventId, array $reconciliations): array
+    {
+        $machineIds = collect($reconciliations)
+            ->pluck('machine_id')
+            ->map(fn (mixed $id): int => (int) $id)
+            ->filter()
+            ->unique()
+            ->values();
+
+        $publishedByMachine = EventReportRow::query()
+            ->where('event_id', $eventId)
+            ->whereIn('machine_id', $machineIds)
+            ->select('machine_id')
+            ->selectRaw('COUNT(*) as rows_count')
+            ->selectRaw('COALESCE(SUM(total), 0) as sales_total')
+            ->selectRaw('COALESCE(SUM(quantity), 0) as quantity_total')
+            ->groupBy('machine_id')
+            ->get()
+            ->keyBy('machine_id');
+
+        return array_map(function (array $reconciliation) use ($publishedByMachine): array {
+            $published = $publishedByMachine->get((int) ($reconciliation['machine_id'] ?? 0));
+            $publishedRowsCount = (int) ($published?->rows_count ?? 0);
+            $publishedSalesTotal = (float) ($published?->sales_total ?? 0);
+            $publishedQuantityTotal = (float) ($published?->quantity_total ?? 0);
+            $isFull = ($reconciliation['sync_mode'] ?? null) === 'full';
+            $expectedRowsCount = (int) ($reconciliation['in_range_rows_count'] ?? 0);
+            $expectedSalesTotal = (float) ($reconciliation['in_range_sales_total'] ?? 0);
+
+            return [
+                ...$reconciliation,
+                'published_rows_count' => $publishedRowsCount,
+                'published_sales_total' => number_format($publishedSalesTotal, 4, '.', ''),
+                'published_quantity_total' => number_format($publishedQuantityTotal, 4, '.', ''),
+                'published_matches_in_range' => $isFull
+                    ? ($publishedRowsCount === $expectedRowsCount
+                        && abs($publishedSalesTotal - $expectedSalesTotal) < 0.0001)
+                    : null,
+            ];
+        }, $reconciliations);
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $reconciliations
+     * @return array<string, mixed>
+     */
+    private function summarizeExcludedSales(array $reconciliations): array
+    {
+        $withExclusions = array_values(array_filter(
+            $reconciliations,
+            fn (array $item): bool => (int) ($item['excluded_rows_count'] ?? 0) > 0,
+        ));
+
+        return [
+            'has_exclusions' => $withExclusions !== [],
+            'machines_count' => count($withExclusions),
+            'rows_count' => array_sum(array_map(
+                fn (array $item): int => (int) ($item['excluded_rows_count'] ?? 0),
+                $withExclusions,
+            )),
+            'documents_count' => array_sum(array_map(
+                fn (array $item): int => (int) ($item['excluded_documents_count'] ?? 0),
+                $withExclusions,
+            )),
+            'sales_total' => number_format(array_sum(array_map(
+                fn (array $item): float => (float) ($item['excluded_sales_total'] ?? 0),
+                $withExclusions,
+            )), 4, '.', ''),
+            'quantity_total' => number_format(array_sum(array_map(
+                fn (array $item): float => (float) ($item['excluded_quantity_total'] ?? 0),
+                $withExclusions,
+            )), 4, '.', ''),
+        ];
     }
 
     private function normalizeDate(mixed $value): ?string

@@ -94,6 +94,9 @@ class EventZoneManagementTest extends TestCase
 
     public function test_day_cannot_be_confirmed_with_a_missing_tpa_or_overlapping_period(): void
     {
+        CarbonImmutable::setTestNow('2026-09-19 12:00:00');
+        $this->beforeApplicationDestroyed(static fn () => CarbonImmutable::setTestNow());
+
         [$admin, $client, $event] = $this->eventContext();
         $event->update(['report_ends_at' => '2026-09-20 06:00:00']);
         $this->machine($client, $event, 191, 'Bilheteira');

@@ -101,6 +101,33 @@ class AdminManagementTest extends TestCase
         ]);
     }
 
+    public function test_event_report_period_defaults_to_the_full_event_day(): void
+    {
+        $admin = User::factory()->create(['role' => 'admin']);
+        $clientUser = User::factory()->create(['role' => 'client']);
+        $client = Client::create([
+            'user_id' => $clientUser->id,
+            'name' => 'Cliente Dia Completo',
+            'business_name' => null,
+            'address' => 'Rua do Evento',
+            'phone' => '+351 920000001',
+        ]);
+
+        $this
+            ->actingAs($admin)
+            ->post(route('admin.events.store'), [
+                'client_id' => $client->id,
+                'title' => 'Evento Dia Completo',
+                'event_date' => '2026-09-23 22:04:00',
+            ])
+            ->assertRedirect(route('admin.events.index'));
+
+        $event = Event::query()->where('title', 'Evento Dia Completo')->firstOrFail();
+
+        $this->assertSame('2026-09-23 00:00:00', $event->report_starts_at?->format('Y-m-d H:i:s'));
+        $this->assertSame('2026-09-23 23:59:59', $event->report_ends_at?->format('Y-m-d H:i:s'));
+    }
+
     public function test_admin_can_update_event_zt_card_visibility(): void
     {
         $admin = User::factory()->create([

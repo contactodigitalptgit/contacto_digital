@@ -307,7 +307,9 @@ class EventZoneManagementService
 
     private function effectiveNow(Event $event): CarbonImmutable
     {
-        $startsAt = CarbonImmutable::instance($event->report_starts_at ?? $event->event_date);
+        $startsAt = $event->report_starts_at
+            ? CarbonImmutable::instance($event->report_starts_at)
+            : CarbonImmutable::instance($event->event_date)->startOfDay();
         $endsAt = $event->report_ends_at ? CarbonImmutable::instance($event->report_ends_at) : null;
         $localNow = CarbonImmutable::now(self::BUSINESS_TIMEZONE);
         $now = CarbonImmutable::parse($localNow->format('Y-m-d H:i:s'));

@@ -75,9 +75,9 @@ class EventController extends Controller
                             'event_date' => $event->event_date->toISOString(),
                             'event_date_input' => $event->event_date->format('Y-m-d\TH:i'),
                             'report_starts_at' => $event->report_starts_at?->toISOString(),
-                            'report_starts_at_input' => $event->report_starts_at?->format('Y-m-d\TH:i') ?? '',
+                            'report_starts_at_input' => $event->report_starts_at?->format('Y-m-d\TH:i:s') ?? '',
                             'report_ends_at' => $event->report_ends_at?->toISOString(),
-                            'report_ends_at_input' => $event->report_ends_at?->format('Y-m-d\TH:i') ?? '',
+                            'report_ends_at_input' => $event->report_ends_at?->format('Y-m-d\TH:i:s') ?? '',
                             'show_zt_card' => $event->show_zt_card,
                             'client_name' => $event->client->name,
                             'client_id' => $event->client_id,
@@ -168,10 +168,11 @@ class EventController extends Controller
             'description' => ['nullable', 'string'],
             'event_date' => ['required', 'date'],
             'report_starts_at' => ['nullable', 'date'],
-            'report_ends_at' => ['required', 'date', 'after_or_equal:event_date', 'after_or_equal:report_starts_at'],
+            'report_ends_at' => ['nullable', 'date'],
             'show_zt_card' => ['sometimes', 'boolean'],
         ]);
 
+        $validated = $this->normalizeReportPeriod($validated);
         $validated['show_zt_card'] = $request->boolean('show_zt_card', true);
         $additionalClientIds = $validated['additional_client_ids'] ?? [];
         unset($validated['additional_client_ids']);
@@ -197,8 +198,8 @@ class EventController extends Controller
                 'title' => $event->title,
                 'description' => $event->description,
                 'event_date' => $event->event_date->format('Y-m-d\TH:i'),
-                'report_starts_at' => $event->report_starts_at?->format('Y-m-d\TH:i'),
-                'report_ends_at' => $event->report_ends_at?->format('Y-m-d\TH:i'),
+                'report_starts_at' => $event->report_starts_at?->format('Y-m-d\TH:i:s'),
+                'report_ends_at' => $event->report_ends_at?->format('Y-m-d\TH:i:s'),
                 'show_zt_card' => $event->show_zt_card,
             ],
             'clients' => Client::query()
@@ -217,15 +218,16 @@ class EventController extends Controller
             'description' => ['nullable', 'string'],
             'event_date' => ['required', 'date'],
             'report_starts_at' => ['nullable', 'date'],
-            'report_ends_at' => ['required', 'date', 'after_or_equal:event_date', 'after_or_equal:report_starts_at'],
+            'report_ends_at' => ['nullable', 'date'],
             'show_zt_card' => ['sometimes', 'boolean'],
         ]);
 
+        $validated = $this->normalizeReportPeriod($validated);
         $validated['show_zt_card'] = $request->boolean('show_zt_card', true);
         $newAdditionalClientIds = $validated['additional_client_ids'] ?? [];
         unset($validated['additional_client_ids']);
 
-        $newStart = CarbonImmutable::parse($validated['report_starts_at'] ?? $validated['event_date']);
+        $newStart = CarbonImmutable::parse($validated['report_starts_at']);
         $newEnd = CarbonImmutable::parse($validated['report_ends_at']);
         if ($event->zoneDays()->where('starts_at', '<', $newStart)->exists()
             || $event->zoneDays()->where('ends_at', '>', $newEnd)->exists()
@@ -339,5 +341,41 @@ class EventController extends Controller
         }
 
         return route('admin.events.index');
+    }
+
+    /**
+     * A hora apresentada no campo "Data do evento" identifica o evento, mas
+     * não deve, por omissão, cortar vendas desse mesmo dia. Quando o período
+     * não é indicado explicitamente, o relatório cobre o dia civil completo.
+     *
+     * @param  array<string, mixed>  $validated
+     * @return array<string, mixed>
+     */
+    private function normalizeReportPeriod(array $validated): array
+    {
+        $eventDate = CarbonImmutable::parse($validated['event_date']);
+        $start = filled($validated['report_starts_at'] ?? null)
+            ? CarbonImmutable::parse($validated['report_starts_at'])
+            : $eventDate->startOfDay();
+        $end = filled($validated['report_ends_at'] ?? null)
+            ? CarbonImmutable::parse($validated['report_ends_at'])
+            : $eventDate->endOfDay();
+
+        if ($end->lt($start)) {
+            throw ValidationException::withMessages([
+                'report_ends_at' => 'O fim do relatório deve ser igual ou posterior ao início.',
+            ]);
+        }
+
+        if ($end->lt($eventDate)) {
+            throw ValidationException::withMessages([
+                'report_ends_at' => 'O fim do relatório deve ser igual ou posterior à data do evento.',
+            ]);
+        }
+
+        $validated['report_starts_at'] = $start->toDateTimeString();
+        $validated['report_ends_at'] = $end->toDateTimeString();
+
+        return $validated;
     }
 }

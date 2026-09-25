@@ -4,7 +4,9 @@ import InputLabel from '@/Components/InputLabel.vue';
 import PrimaryButton from '@/Components/PrimaryButton.vue';
 import TextInput from '@/Components/TextInput.vue';
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout.vue';
+import { reportDayBoundary, shouldFollowEventDay } from '@/lib/eventReportPeriod';
 import { Head, useForm } from '@inertiajs/vue3';
+import { watch } from 'vue';
 
 interface ClientOption {
     id: number;
@@ -24,6 +26,16 @@ const form = useForm({
     report_starts_at: '',
     report_ends_at: '',
     show_zt_card: true,
+});
+
+watch(() => form.event_date, (eventDate, previousEventDate) => {
+    if (shouldFollowEventDay(form.report_starts_at, previousEventDate, 'start')) {
+        form.report_starts_at = reportDayBoundary(eventDate, 'start');
+    }
+
+    if (shouldFollowEventDay(form.report_ends_at, previousEventDate, 'end')) {
+        form.report_ends_at = reportDayBoundary(eventDate, 'end');
+    }
 });
 
 const submit = () => {
@@ -116,13 +128,15 @@ const submit = () => {
                         </div>
 
                         <div>
-                            <InputLabel for="report_starts_at" value="Início do relatório (opcional)" />
+                            <InputLabel for="report_starts_at" value="Início do relatório" />
                             <TextInput
                                 id="report_starts_at"
                                 type="datetime-local"
                                 v-model="form.report_starts_at"
                                 class="mt-1 block w-full"
+                                step="1"
                             />
+                            <p class="mt-1 text-xs text-gray-500">Por defeito, começa às 00:00:00 do dia do evento.</p>
                             <InputError
                                 class="mt-2"
                                 :message="form.errors.report_starts_at"
@@ -136,8 +150,9 @@ const submit = () => {
                                 type="datetime-local"
                                 v-model="form.report_ends_at"
                                 class="mt-1 block w-full"
-                                required
+                                step="1"
                             />
+                            <p class="mt-1 text-xs text-gray-500">Por defeito, termina às 23:59:59 do dia do evento.</p>
                             <InputError
                                 class="mt-2"
                                 :message="form.errors.report_ends_at"

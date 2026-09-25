@@ -227,7 +227,7 @@ class AutomaticEventReportSyncTest extends TestCase
         }
     }
 
-    public function test_event_end_time_is_required_when_creating_an_event(): void
+    public function test_event_end_time_defaults_to_end_of_event_day_when_omitted(): void
     {
         $admin = User::factory()->create(['role' => 'admin']);
         $clientUser = User::factory()->create(['role' => 'client']);
@@ -243,11 +243,13 @@ class AutomaticEventReportSyncTest extends TestCase
             ->post(route('admin.events.store'), [
                 'client_id' => $client->id,
                 'title' => 'Evento sem fim',
-                'event_date' => now()->addDay()->toDateTimeString(),
+                'event_date' => '2026-10-10 18:00:00',
             ])
-            ->assertSessionHasErrors(['report_ends_at']);
+            ->assertRedirect(route('admin.events.index'));
 
-        $this->assertDatabaseCount('events', 0);
+        $event = Event::query()->where('title', 'Evento sem fim')->firstOrFail();
+        $this->assertSame('2026-10-10 00:00:00', $event->report_starts_at?->format('Y-m-d H:i:s'));
+        $this->assertSame('2026-10-10 23:59:59', $event->report_ends_at?->format('Y-m-d H:i:s'));
     }
 
     private function makeConfiguredEvent(): Event

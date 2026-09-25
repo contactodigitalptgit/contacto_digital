@@ -4,13 +4,46 @@ import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout.vue';
 import { showErrorToast, showSuccessToast } from '@/lib/swal';
 import axios from 'axios';
 import { Head, Link, router, useForm } from '@inertiajs/vue3';
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 
 interface EventData {
     id: number;
     title: string;
     event_date: string;
+    report_starts_at: string | null;
+    report_ends_at: string | null;
     requires_explicit_zones: boolean;
+}
+
+interface ExcludedDocument {
+    doc_type: string | null;
+    document_series: string | null;
+    document_number: string | null;
+    sale_datetime: string | null;
+    rows_count: number;
+    sales_total: string;
+    quantity_total: string;
+    reasons: string[];
+    products: string[];
+}
+
+interface MachineSyncDiagnostics {
+    sync_mode: 'full' | 'incremental';
+    synced_at: string | null;
+    range_start: string;
+    range_end: string;
+    source_rows_count: number;
+    source_sales_total: string;
+    in_range_rows_count: number;
+    in_range_sales_total: string;
+    excluded_rows_count: number;
+    excluded_sales_total: string;
+    excluded_documents_count: number;
+    excluded_documents_omitted: number;
+    excluded_documents: ExcludedDocument[];
+    published_rows_count: number;
+    published_sales_total: string;
+    published_matches_in_range: boolean | null;
 }
 
 interface ClientData {
@@ -29,6 +62,7 @@ interface MachineItem {
     last_validated_at: string | null;
     last_error: string | null;
     is_selected: boolean;
+    sync_diagnostics: MachineSyncDiagnostics | null;
 }
 
 interface MachineSessionStatus {
@@ -46,6 +80,12 @@ interface MachineSessionStatus {
     } | null;
 }
 
+interface SyncStatus {
+    status: 'idle' | 'processing' | 'completed' | 'failed';
+    started_at: string | null;
+    completed_at: string | null;
+}
+
 type SalesSyncMode = 'complete-documents' | 'document-sales';
 
 const props = defineProps<{
@@ -53,6 +93,7 @@ const props = defineProps<{
     client: ClientData;
     machines: MachineItem[];
     unassigned_machine_ids: number[];
+    sync_status: SyncStatus;
 }>();
 
 const initialSelectedMachines = props.machines.filter((machine) => machine.is_selected);
@@ -81,6 +122,8 @@ const sessionStatus = ref<MachineSessionStatus | null>(null);
 const loadingSessionStatus = ref(false);
 const syncingSalesMode = ref<SalesSyncMode | null>(null);
 const validatingMachines = ref(false);
+const syncPollerId = ref<number | null>(null);
+const refreshingSyncStatus = ref(false);
 const form = useForm({ machine_ids: selectedMachineIds.value });
 
 const licenseMachines = computed(() => props.machines.filter(
@@ -140,6 +183,20 @@ const formatShortDateTime = (date: string | null) => date
         timeStyle: 'short',
     }).format(new Date(date))
     : 'Sem registo';
+const formatMoney = (value: string | number) => new Intl.NumberFormat('pt-PT', {
+    style: 'currency',
+    currency: 'EUR',
+}).format(Number(value));
+const exclusionReason = (reason: string) => ({
+    before_start: 'antes do início do relatório',
+    after_end: 'depois do fim do relatório',
+    outside_range: 'fora do período do relatório',
+}[reason] ?? 'fora do período do relatório');
+const documentLabel = (document: ExcludedDocument) => [
+    document.doc_type,
+    document.document_series,
+    document.document_number,
+].filter(Boolean).join(' ') || 'Documento sem número';
 
 const changeLicense = () => {
     selectedMachineIds.value = props.machines
@@ -230,7 +287,7 @@ const syncMachineSales = async (mode: SalesSyncMode = 'complete-documents') => {
 
         void showSuccessToast(message ?? 'Sincronização iniciada. O dashboard vai atualizar automaticamente.');
         router.reload({
-            only: ['machines'],
+            only: ['machines', 'sync_status'],
         });
     } catch (error: unknown) {
         const responseMessage = axios.isAxiosError(error)
@@ -242,6 +299,51 @@ const syncMachineSales = async (mode: SalesSyncMode = 'complete-documents') => {
         syncingSalesMode.value = null;
     }
 };
+
+const stopSyncPolling = () => {
+    if (syncPollerId.value === null) {
+        return;
+    }
+
+    window.clearInterval(syncPollerId.value);
+    syncPollerId.value = null;
+};
+
+const startSyncPolling = () => {
+    if (syncPollerId.value !== null) {
+        return;
+    }
+
+    syncPollerId.value = window.setInterval(() => {
+        if (props.sync_status.status !== 'processing' || refreshingSyncStatus.value) {
+            return;
+        }
+
+        refreshingSyncStatus.value = true;
+        router.reload({
+            only: ['machines', 'sync_status'],
+            onFinish: () => {
+                refreshingSyncStatus.value = false;
+            },
+        });
+    }, 5000);
+};
+
+watch(() => props.sync_status.status, (status) => {
+    if (status === 'processing') {
+        startSyncPolling();
+    } else {
+        stopSyncPolling();
+    }
+});
+
+watch(() => props.machines, (machines) => {
+    if (!detailMachine.value) {
+        return;
+    }
+
+    detailMachine.value = machines.find((machine) => machine.id === detailMachine.value?.id) ?? null;
+});
 
 const handlePointerDown = (event: MouseEvent) => {
     if (
@@ -255,10 +357,15 @@ const handlePointerDown = (event: MouseEvent) => {
 
 onMounted(() => {
     document.addEventListener('mousedown', handlePointerDown);
+
+    if (props.sync_status.status === 'processing') {
+        startSyncPolling();
+    }
 });
 
 onBeforeUnmount(() => {
     document.removeEventListener('mousedown', handlePointerDown);
+    stopSyncPolling();
 });
 
 const saveSelection = () => {
@@ -558,6 +665,12 @@ const validateEventMachineLabels = async () => {
                                     <p class="mt-1 text-xs text-current/55">
                                         Store {{ machine.store_id }} · {{ machine.zs_client_id }}
                                     </p>
+                                    <span
+                                        v-if="machine.sync_diagnostics && machine.sync_diagnostics.excluded_rows_count > 0"
+                                        class="mt-2 inline-flex rounded-full bg-amber-400/15 px-2 py-1 text-[11px] font-semibold text-amber-200"
+                                    >
+                                        {{ machine.sync_diagnostics.excluded_rows_count }} venda(s) fora do período
+                                    </span>
                                 </button>
                             </div>
 
@@ -643,6 +756,12 @@ const validateEventMachineLabels = async () => {
                         >
                             Ver painel do TPA
                         </button>
+                        <p
+                            v-if="machine.sync_diagnostics && machine.sync_diagnostics.excluded_rows_count > 0"
+                            class="mt-3 text-sm font-semibold text-amber-500"
+                        >
+                            Atenção: {{ formatMoney(machine.sync_diagnostics.excluded_sales_total) }} fora do período
+                        </p>
                     </article>
                 </section>
 
@@ -670,7 +789,15 @@ const validateEventMachineLabels = async () => {
                                         @change="toggleMachine(machine.id)"
                                     />
                                 </td>
-                                <td class="admin-clients-text">{{ machine.store_label || `TPA ${machine.store_id}` }}</td>
+                                <td class="admin-clients-text">
+                                    {{ machine.store_label || `TPA ${machine.store_id}` }}
+                                    <span
+                                        v-if="machine.sync_diagnostics && machine.sync_diagnostics.excluded_rows_count > 0"
+                                        class="mt-1 block text-xs font-semibold text-amber-500"
+                                    >
+                                        {{ formatMoney(machine.sync_diagnostics.excluded_sales_total) }} fora do período
+                                    </span>
+                                </td>
                                 <td class="admin-clients-text">{{ machine.store_id }}</td>
                                 <td class="admin-clients-text">{{ machine.zs_client_id }}</td>
                                 <td class="admin-clients-text">
@@ -778,6 +905,120 @@ const validateEventMachineLabels = async () => {
                         </article>
                     </section>
 
+                    <section
+                        v-if="detailMachine.sync_diagnostics"
+                        class="rounded-2xl border p-5"
+                        :class="detailMachine.sync_diagnostics.excluded_rows_count > 0
+                            || detailMachine.sync_diagnostics.published_matches_in_range === false
+                            ? 'border-amber-400/30 bg-amber-500/[0.08]'
+                            : 'border-emerald-400/25 bg-emerald-500/[0.06]'"
+                    >
+                        <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                            <div>
+                                <p class="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
+                                    Reconciliação administrativa
+                                </p>
+                                <h4 class="mt-2 text-lg font-semibold text-white">
+                                    {{ detailMachine.sync_diagnostics.excluded_rows_count > 0
+                                        ? 'Existem vendas fora do período'
+                                        : detailMachine.sync_diagnostics.published_matches_in_range === false
+                                            ? 'O total publicado precisa de revisão'
+                                            : detailMachine.sync_diagnostics.sync_mode === 'full'
+                                                ? 'Sincronização conciliada'
+                                                : 'Sem vendas excluídas nesta execução' }}
+                                </h4>
+                                <p class="mt-2 text-sm text-slate-300">
+                                    Período: {{ formatShortDateTime(detailMachine.sync_diagnostics.range_start) }}
+                                    — {{ formatShortDateTime(detailMachine.sync_diagnostics.range_end) }}
+                                </p>
+                            </div>
+                            <span
+                                class="self-start rounded-full px-3 py-1 text-xs font-semibold"
+                                :class="detailMachine.sync_diagnostics.excluded_rows_count > 0
+                                    || detailMachine.sync_diagnostics.published_matches_in_range === false
+                                    ? 'bg-amber-400/15 text-amber-200'
+                                    : 'bg-emerald-400/15 text-emerald-200'"
+                            >
+                                {{ detailMachine.sync_diagnostics.sync_mode === 'full' ? 'Verificação completa' : 'Verificação incremental' }}
+                            </span>
+                        </div>
+
+                        <dl class="mt-5 grid gap-3 text-sm sm:grid-cols-3">
+                            <div class="rounded-xl bg-black/15 p-3">
+                                <dt class="text-slate-400">
+                                    {{ detailMachine.sync_diagnostics.sync_mode === 'full'
+                                        ? 'Recebido da ZoneSoft'
+                                        : 'Alterações recebidas' }}
+                                </dt>
+                                <dd class="mt-1 font-semibold text-white">
+                                    {{ formatMoney(detailMachine.sync_diagnostics.source_sales_total) }}
+                                </dd>
+                                <dd class="mt-1 text-xs text-slate-400">
+                                    {{ detailMachine.sync_diagnostics.source_rows_count }} linha(s)
+                                </dd>
+                            </div>
+                            <div class="rounded-xl bg-black/15 p-3">
+                                <dt class="text-slate-400">Dentro do período</dt>
+                                <dd class="mt-1 font-semibold text-white">
+                                    {{ formatMoney(detailMachine.sync_diagnostics.in_range_sales_total) }}
+                                </dd>
+                                <dd class="mt-1 text-xs text-slate-400">
+                                    {{ detailMachine.sync_diagnostics.in_range_rows_count }} linha(s)
+                                </dd>
+                            </div>
+                            <div class="rounded-xl bg-black/15 p-3">
+                                <dt class="text-slate-400">Publicado no relatório</dt>
+                                <dd class="mt-1 font-semibold text-white">
+                                    {{ formatMoney(detailMachine.sync_diagnostics.published_sales_total) }}
+                                </dd>
+                                <dd class="mt-1 text-xs text-slate-400">
+                                    {{ detailMachine.sync_diagnostics.published_rows_count }} linha(s)
+                                </dd>
+                            </div>
+                        </dl>
+
+                        <div
+                            v-if="detailMachine.sync_diagnostics.excluded_rows_count > 0"
+                            class="mt-5 rounded-xl border border-amber-300/20 bg-amber-950/20 p-4"
+                        >
+                            <p class="font-semibold text-amber-100">
+                                {{ detailMachine.sync_diagnostics.excluded_rows_count }} linha(s),
+                                {{ formatMoney(detailMachine.sync_diagnostics.excluded_sales_total) }},
+                                não entraram no relatório por causa do horário configurado.
+                            </p>
+                            <div class="mt-4 space-y-3">
+                                <article
+                                    v-for="document in detailMachine.sync_diagnostics.excluded_documents"
+                                    :key="`${document.doc_type}-${document.document_series}-${document.document_number}`"
+                                    class="rounded-lg bg-black/15 p-3 text-sm"
+                                >
+                                    <div class="flex flex-wrap items-center justify-between gap-2">
+                                        <strong class="text-white">{{ documentLabel(document) }}</strong>
+                                        <span class="font-semibold text-amber-100">{{ formatMoney(document.sales_total) }}</span>
+                                    </div>
+                                    <p class="mt-1 text-slate-300">
+                                        {{ formatShortDateTime(document.sale_datetime) }} ·
+                                        {{ document.reasons.map(exclusionReason).join(', ') }}
+                                    </p>
+                                    <p v-if="document.products.length" class="mt-1 text-xs text-slate-400">
+                                        {{ document.products.join(', ') }}
+                                    </p>
+                                </article>
+                            </div>
+                            <p
+                                v-if="detailMachine.sync_diagnostics.excluded_documents_omitted > 0"
+                                class="mt-3 text-xs text-amber-100/75"
+                            >
+                                Mais {{ detailMachine.sync_diagnostics.excluded_documents_omitted }} documento(s) no registo da sincronização.
+                            </p>
+                        </div>
+
+                        <p class="mt-4 text-xs text-slate-400">
+                            Última verificação: {{ formatShortDateTime(detailMachine.sync_diagnostics.synced_at) }}.
+                            Estes dados são visíveis apenas na administração.
+                        </p>
+                    </section>
+
                     <section class="rounded-2xl border border-white/10 bg-white/[0.03] p-5">
                         <div class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                             <div>
@@ -785,6 +1026,9 @@ const validateEventMachineLabels = async () => {
                                 <h4 class="mt-2 text-lg font-semibold text-white">Sincronização deste TPA</h4>
                                 <p class="mt-2 text-sm text-slate-300">
                                     Atualiza apenas as vendas deste TPA, sem voltar a consultar os restantes dispositivos do evento.
+                                </p>
+                                <p v-if="props.sync_status.status === 'processing'" class="mt-2 text-sm font-medium text-sky-200">
+                                    Sincronização em curso. A reconciliação será atualizada automaticamente quando terminar.
                                 </p>
                             </div>
 

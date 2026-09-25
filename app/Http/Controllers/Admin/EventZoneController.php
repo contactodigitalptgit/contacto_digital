@@ -103,7 +103,9 @@ class EventZoneController extends Controller
                 ? $referenceAt
                 : ($event->activeReportImports()->exists()
                 ? $this->defaultEffectiveAt($event)
-                : CarbonImmutable::instance($event->report_starts_at ?? $event->event_date)))
+                : ($event->report_starts_at
+                    ? CarbonImmutable::instance($event->report_starts_at)
+                    : CarbonImmutable::instance($event->event_date)->startOfDay())))
                 ->format('Y-m-d\TH:i'),
             'zones' => $zones->map(fn (EventZone $zone): array => [
                 'id' => $zone->id,
@@ -457,7 +459,9 @@ class EventZoneController extends Controller
         ]);
         $startsAt = CarbonImmutable::parse($validated['starts_at']);
         $endsAt = CarbonImmutable::parse($validated['ends_at']);
-        $eventStart = CarbonImmutable::instance($event->report_starts_at ?? $event->event_date);
+        $eventStart = $event->report_starts_at
+            ? CarbonImmutable::instance($event->report_starts_at)
+            : CarbonImmutable::instance($event->event_date)->startOfDay();
         $eventEnd = $event->report_ends_at ? CarbonImmutable::instance($event->report_ends_at) : null;
 
         if ($startsAt->lessThan($eventStart) || ($eventEnd && $endsAt->greaterThan($eventEnd))) {
@@ -545,7 +549,9 @@ class EventZoneController extends Controller
     private function validatedEffectiveAt(Event $event, string $value): CarbonImmutable
     {
         $effectiveAt = CarbonImmutable::parse($value);
-        $startsAt = CarbonImmutable::instance($event->report_starts_at ?? $event->event_date);
+        $startsAt = $event->report_starts_at
+            ? CarbonImmutable::instance($event->report_starts_at)
+            : CarbonImmutable::instance($event->event_date)->startOfDay();
         $endsAt = $event->report_ends_at ? CarbonImmutable::instance($event->report_ends_at) : null;
 
         if ($effectiveAt->lessThan($startsAt) || ($endsAt && $effectiveAt->greaterThan($endsAt))) {
@@ -582,7 +588,9 @@ class EventZoneController extends Controller
 
     private function defaultEffectiveAt(Event $event): CarbonImmutable
     {
-        $startsAt = CarbonImmutable::instance($event->report_starts_at ?? $event->event_date);
+        $startsAt = $event->report_starts_at
+            ? CarbonImmutable::instance($event->report_starts_at)
+            : CarbonImmutable::instance($event->event_date)->startOfDay();
         $endsAt = $event->report_ends_at ? CarbonImmutable::instance($event->report_ends_at) : null;
         $localNow = CarbonImmutable::now(self::BUSINESS_TIMEZONE);
         $now = CarbonImmutable::parse($localNow->format('Y-m-d H:i:s'));

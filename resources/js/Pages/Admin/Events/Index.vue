@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import Modal from '@/Components/Modal.vue';
 import { confirmAction, showErrorToast, showSuccessToast } from '@/lib/swal';
+import { reportDayBoundary, shouldFollowEventDay } from '@/lib/eventReportPeriod';
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout.vue';
 import { Head, Link, router, useForm } from '@inertiajs/vue3';
 import { computed, onBeforeUnmount, onMounted, onUnmounted, ref, watch } from 'vue';
@@ -110,6 +111,38 @@ const editEventForm = useForm({
     report_ends_at: '',
     show_zt_card: true,
 });
+
+const keepReportPeriodOnEventDay = (
+    form: typeof createEventForm | typeof editEventForm,
+    eventDate: string,
+    previousEventDate: string | undefined,
+) => {
+    if (shouldFollowEventDay(form.report_starts_at, previousEventDate, 'start')) {
+        form.report_starts_at = reportDayBoundary(eventDate, 'start');
+    }
+
+    if (shouldFollowEventDay(form.report_ends_at, previousEventDate, 'end')) {
+        form.report_ends_at = reportDayBoundary(eventDate, 'end');
+    }
+};
+
+watch(
+    () => createEventForm.event_date,
+    (eventDate, previousEventDate) => keepReportPeriodOnEventDay(
+        createEventForm,
+        eventDate,
+        previousEventDate,
+    ),
+);
+
+watch(
+    () => editEventForm.event_date,
+    (eventDate, previousEventDate) => keepReportPeriodOnEventDay(
+        editEventForm,
+        eventDate,
+        previousEventDate,
+    ),
+);
 
 const toggleAdditionalClient = (form: typeof createEventForm | typeof editEventForm, clientId: number) => {
     form.additional_client_ids = form.additional_client_ids.includes(clientId)
@@ -1029,14 +1062,16 @@ const deleteEvent = async (event: EventItem) => {
 
                     <div class="dash-modal-field dash-modal-field-full">
                         <label class="dash-modal-label" for="event_report_starts_at_create">
-                            Início do relatório (opcional)
+                            Início do relatório
                         </label>
                         <input
                             id="event_report_starts_at_create"
                             v-model="createEventForm.report_starts_at"
                             class="dash-modal-input"
                             type="datetime-local"
+                            step="1"
                         />
+                        <p class="mt-1 text-xs text-slate-500">Padrão: 00:00:00 do dia do evento.</p>
                         <p
                             v-if="createEventForm.errors.report_starts_at"
                             class="dash-modal-error"
@@ -1054,8 +1089,9 @@ const deleteEvent = async (event: EventItem) => {
                             v-model="createEventForm.report_ends_at"
                             class="dash-modal-input"
                             type="datetime-local"
-                            required
+                            step="1"
                         />
+                        <p class="mt-1 text-xs text-slate-500">Padrão: 23:59:59 do dia do evento.</p>
                         <p
                             v-if="createEventForm.errors.report_ends_at"
                             class="dash-modal-error"
@@ -1247,14 +1283,16 @@ const deleteEvent = async (event: EventItem) => {
 
                     <div class="dash-modal-field dash-modal-field-full">
                         <label class="dash-modal-label" for="event_report_starts_at_edit">
-                            Início do relatório (opcional)
+                            Início do relatório
                         </label>
                         <input
                             id="event_report_starts_at_edit"
                             v-model="editEventForm.report_starts_at"
                             class="dash-modal-input"
                             type="datetime-local"
+                            step="1"
                         />
+                        <p class="mt-1 text-xs text-slate-500">O padrão cobre o dia completo.</p>
                         <p
                             v-if="editEventForm.errors.report_starts_at"
                             class="dash-modal-error"
@@ -1272,7 +1310,7 @@ const deleteEvent = async (event: EventItem) => {
                             v-model="editEventForm.report_ends_at"
                             class="dash-modal-input"
                             type="datetime-local"
-                            required
+                            step="1"
                         />
                         <p
                             v-if="editEventForm.errors.report_ends_at"

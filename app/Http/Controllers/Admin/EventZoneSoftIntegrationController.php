@@ -594,6 +594,19 @@ class EventZoneSoftIntegrationController extends Controller
     {
         $event->load('client');
         $selectedMachineIds = $event->zonesoftMachines()->pluck('client_zonesoft_machines.id');
+        $latestCompletedImport = $event->reportImports()
+            ->where('status', 'completed')
+            ->latest('id')
+            ->first(['id', 'event_id', 'summary', 'imported_at']);
+        $latestImport = $event->reportImports()
+            ->latest('id')
+            ->first(['id', 'event_id', 'status', 'created_at', 'imported_at']);
+        $latestCompletedSummary = is_array($latestCompletedImport?->summary)
+            ? $latestCompletedImport->summary
+            : [];
+        $machineReconciliations = collect($latestCompletedSummary['machine_reconciliations'] ?? [])
+            ->filter(fn (mixed $item): bool => is_array($item))
+            ->keyBy(fn (array $item): int => (int) ($item['machine_id'] ?? 0));
         $unassignedIds = app(EventZoneReadinessService::class)
             ->unassignedMachines($event)
             ->pluck('id')
@@ -604,6 +617,8 @@ class EventZoneSoftIntegrationController extends Controller
                 'id' => $event->id,
                 'title' => $event->title,
                 'event_date' => $event->event_date->toISOString(),
+                'report_starts_at' => $event->report_starts_at?->toISOString(),
+                'report_ends_at' => $event->report_ends_at?->toISOString(),
                 'requires_explicit_zones' => $event->requires_explicit_zones,
             ],
             'client' => [
@@ -611,6 +626,11 @@ class EventZoneSoftIntegrationController extends Controller
                 'name' => $event->client->name,
             ],
             'unassigned_machine_ids' => $unassignedIds,
+            'sync_status' => [
+                'status' => $latestImport?->status ?? 'idle',
+                'started_at' => $latestImport?->created_at?->toISOString(),
+                'completed_at' => $latestImport?->imported_at?->toISOString(),
+            ],
             'machines' => $event->client->zonesoftMachines()
                 ->orderBy('license')
                 ->orderBy('store_id')
@@ -626,6 +646,10 @@ class EventZoneSoftIntegrationController extends Controller
                     'last_validated_at' => $machine->last_validated_at?->toISOString(),
                     'last_error' => $machine->last_error,
                     'is_selected' => $selectedMachineIds->contains($machine->id),
+                    'sync_diagnostics' => $machineReconciliations->has($machine->id) ? [
+                        ...$machineReconciliations->get($machine->id),
+                        'synced_at' => $latestCompletedImport?->imported_at?->toISOString(),
+                    ] : null,
                 ])
                 ->values(),
         ]);
