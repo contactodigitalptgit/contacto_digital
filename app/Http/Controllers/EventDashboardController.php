@@ -605,10 +605,7 @@ class EventDashboardController extends Controller
 
         $eventStart = ($event->report_starts_at ?? $event->event_date)->toDateString();
         $eventEnd = ($event->report_ends_at ?? $event->report_starts_at ?? $event->event_date)->toDateString();
-        $today = now('Europe/Lisbon')->toDateString();
-        $defaultDate = ! $request->exists('date_from') && ! $request->exists('date_to')
-            ? min($eventEnd, max($eventStart, $today))
-            : '';
+        $useEventPeriodByDefault = ! $request->exists('date_from') && ! $request->exists('date_to');
 
         foreach (['date_from', 'date_to'] as $dateField) {
             $date = trim((string) ($validated[$dateField] ?? ''));
@@ -624,8 +621,8 @@ class EventDashboardController extends Controller
             'bar_groups' => $barGroups,
             'store' => trim((string) ($validated['store'] ?? '')),
             'product' => trim((string) ($validated['product'] ?? '')),
-            'date_from' => trim((string) ($validated['date_from'] ?? $defaultDate)),
-            'date_to' => trim((string) ($validated['date_to'] ?? $defaultDate)),
+            'date_from' => trim((string) ($validated['date_from'] ?? ($useEventPeriodByDefault ? $eventStart : ''))),
+            'date_to' => trim((string) ($validated['date_to'] ?? ($useEventPeriodByDefault ? $eventEnd : ''))),
             'hour_from' => isset($validated['hour_from']) ? (string) $validated['hour_from'] : '',
             'hour_to' => isset($validated['hour_to']) ? (string) $validated['hour_to'] : '',
             'total_min' => $this->normalizeDecimalString($validated['total_min'] ?? null),

@@ -37,7 +37,7 @@ class EventDashboardTest extends TestCase
         parent::tearDown();
     }
 
-    public function test_dashboard_defaults_the_date_range_to_the_current_lisbon_day(): void
+    public function test_dashboard_defaults_the_date_range_to_the_full_event_period(): void
     {
         [, $clientUser, $event] = $this->makeDashboardContext();
 
@@ -46,10 +46,10 @@ class EventDashboardTest extends TestCase
             ->assertOk()
             ->assertInertia(fn (AssertableInertia $page) => $page
                 ->where('filters.date_from', '2026-03-14')
-                ->where('filters.date_to', '2026-03-14'));
+                ->where('filters.date_to', '2026-03-15'));
     }
 
-    public function test_dashboard_defaults_to_the_nearest_event_day_outside_the_event_period(): void
+    public function test_dashboard_defaults_to_the_full_event_period_outside_the_event_period(): void
     {
         [, $clientUser, $event] = $this->makeDashboardContext();
         CarbonImmutable::setTestNow('2026-03-20 12:00:00');
@@ -58,7 +58,7 @@ class EventDashboardTest extends TestCase
             ->get(route('events.dashboard', $event))
             ->assertOk()
             ->assertInertia(fn (AssertableInertia $page) => $page
-                ->where('filters.date_from', '2026-03-15')
+                ->where('filters.date_from', '2026-03-14')
                 ->where('filters.date_to', '2026-03-15'));
     }
 
