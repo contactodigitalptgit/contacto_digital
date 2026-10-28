@@ -92,6 +92,11 @@ class ZoneSoftStoreNameTest extends TestCase
         app(EventZoneManagementService::class)
             ->moveMachine($event, $zone, $machine, CarbonImmutable::parse('2026-09-18 18:00:00'), $admin, 'Ana Caldas');
         Http::fake([
+            'https://api.zonesoft.org/v3/stores/getInstance' => Http::response([
+                'Response' => ['StatusCode' => 200, 'Content' => ['store' => [
+                    'codigo' => 103, 'descricao' => 'Loja 103', 'morada' => 'Rua A', 'pais' => 'PT',
+                ]]],
+            ], 200),
             'https://api.zonesoft.org/v3/stores/saveInstances' => Http::response([
                 'Response' => ['StatusCode' => 201, 'StatusMessage' => 'Created', 'Content' => []],
             ], 201),
@@ -101,7 +106,9 @@ class ZoneSoftStoreNameTest extends TestCase
 
         $this->assertSame(['pushed' => 1, 'unchanged' => 0, 'failed' => 0], $result);
         Http::assertSent(fn (HttpRequest $request): bool => $request->url() === 'https://api.zonesoft.org/v3/stores/saveInstances'
-            && $request->data() === ['store' => [['codigo' => 103, 'descricao' => 'Bar 1 - Ana Caldas']]]);
+            && $request->data() === ['store' => [[
+                'codigo' => 103, 'descricao' => 'Bar 1 - Ana Caldas', 'morada' => 'Rua A', 'pais' => 'PT',
+            ]]]);
         $machine->refresh();
         $this->assertSame('Bar 1 - Ana Caldas', $machine->store_label);
         $this->assertNotNull($machine->zonesoft_name_synced_at);
@@ -109,7 +116,7 @@ class ZoneSoftStoreNameTest extends TestCase
 
         $again = app(ZoneSoftStoreNameService::class)->push($event, CarbonImmutable::parse('2026-09-18 21:00:00'));
         $this->assertSame(['pushed' => 0, 'unchanged' => 1, 'failed' => 0], $again);
-        Http::assertSentCount(1);
+        Http::assertSentCount(2);
     }
 
     public function test_failed_push_keeps_the_name_and_records_the_error(): void
@@ -139,7 +146,10 @@ class ZoneSoftStoreNameTest extends TestCase
         $zone = EventZone::create(['event_id' => $event->id, 'name' => 'Bilheteira', 'sort_order' => 1]);
         app(EventZoneManagementService::class)
             ->moveMachine($event, $zone, $machine, CarbonImmutable::parse('2026-09-18 18:00:00'), $admin);
-        Http::fake(['*' => Http::response(['Response' => ['StatusCode' => 201, 'Content' => []]], 201)]);
+        Http::fake([
+            '*/stores/getInstance' => Http::response(['Response' => ['StatusCode' => 200, 'Content' => ['store' => ['codigo' => 1]]]], 200),
+            '*' => Http::response(['Response' => ['StatusCode' => 201, 'Content' => []]], 201),
+        ]);
 
         (new PushZoneSoftStoreNamesJob($event->id))->handle(app(ZoneSoftStoreNameService::class));
         Http::assertNothingSent();
@@ -158,7 +168,10 @@ class ZoneSoftStoreNameTest extends TestCase
         $zone = EventZone::create(['event_id' => $event->id, 'name' => 'Bar 1', 'sort_order' => 1]);
         app(EventZoneManagementService::class)
             ->moveMachine($event, $zone, $machine, CarbonImmutable::parse('2026-09-18 18:00:00'), $admin);
-        Http::fake(['*' => Http::response(['Response' => ['StatusCode' => 201, 'Content' => []]], 201)]);
+        Http::fake([
+            '*/stores/getInstance' => Http::response(['Response' => ['StatusCode' => 200, 'Content' => ['store' => ['codigo' => 1]]]], 200),
+            '*' => Http::response(['Response' => ['StatusCode' => 201, 'Content' => []]], 201),
+        ]);
 
         (new PushZoneSoftStoreNamesJob($event->id))->handle(app(ZoneSoftStoreNameService::class));
         Http::assertNothingSent();
