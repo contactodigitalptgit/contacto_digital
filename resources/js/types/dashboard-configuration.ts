@@ -30,16 +30,8 @@ export interface DashboardConfiguration {
     metrics: DashboardConfigurationItem[];
 }
 
-export interface DashboardPreset {
-    key: string;
-    label: string;
-    description: string;
-    configuration: DashboardConfiguration;
-}
-
 export interface DashboardEditorMeta {
     enabled: boolean;
-    edit_url: string;
     manage_tpas_url: string;
     manage_zones_url: string;
 }

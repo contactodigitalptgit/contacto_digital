@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import Modal from '@/Components/Modal.vue';
+import EventSidebarNavigation from '@/Components/EventSidebarNavigation.vue';
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout.vue';
 import { confirmAction, showErrorToast, showSuccessToast } from '@/lib/swal';
 import { Head, Link, router, useForm } from '@inertiajs/vue3';
@@ -290,6 +291,10 @@ const assignSelected = () => {
     <Head :title="`Gerir zonas - ${props.event.title}`" />
 
     <AuthenticatedLayout>
+        <template #sidebar-navigation="{ isAdmin }">
+            <EventSidebarNavigation :event-id="props.event.id" :is-admin="isAdmin" active="zones-manage" />
+        </template>
+
         <template #header>
             <div class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
                 <div>
