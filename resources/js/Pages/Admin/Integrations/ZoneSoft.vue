@@ -207,7 +207,7 @@ const closeImportModal = () => {
 
 const parseImportPayload = (): Record<string, unknown> => {
     if (importClientId.value === '') {
-        throw new Error('Selecione o cliente que será proprietário das integrações.');
+        throw new Error('Selecione o cliente que será dono destes TPAs.');
     }
 
     if (!importPayload.value.trim()) {
@@ -260,8 +260,8 @@ const importMachines = async () => {
     }
 
     const confirmed = await confirmAction({
-        title: 'Importar integrações globais?',
-        text: `${importPreview.value.summary.new} novas integrações serão adicionadas a ${importPreview.value.client.name}.`,
+        title: 'Importar TPAs?',
+        text: `${importPreview.value.summary.new} novos TPAs serão adicionados a ${importPreview.value.client.name}.`,
         confirmButtonText: 'Importar lote',
     });
 
@@ -428,7 +428,7 @@ const submitMachine = () => {
             closeMachineModal();
             void showSuccessToast('Integração global guardada com sucesso.');
         },
-        onError: () => void showErrorToast('Não foi possível guardar a integração global.'),
+        onError: () => void showErrorToast('Não foi possível guardar o TPA.'),
     };
 
     if (editingMachineId.value) {
@@ -458,8 +458,8 @@ const validateMachines = async () => {
         router.reload({ only: ['machines'] });
     } catch (error: unknown) {
         const message = axios.isAxiosError(error)
-            ? (error.response?.data?.message as string | undefined) ?? 'Não foi possível validar as integrações.'
-            : 'Não foi possível validar as integrações.';
+            ? (error.response?.data?.message as string | undefined) ?? 'Não foi possível validar os TPAs.'
+            : 'Não foi possível validar os TPAs.';
         void showErrorToast(message);
     } finally {
         validatingMachines.value = false;
@@ -468,7 +468,7 @@ const validateMachines = async () => {
 
 const deleteMachine = async (machine: MachineItem) => {
     const confirmed = await confirmAction({
-        title: 'Eliminar integração global?',
+        title: 'Eliminar TPA?',
         text: machine.events.length
             ? 'Este TPA está associado a eventos e não pode ser eliminado.'
             : `A loja ${machine.store_id} será removida do catálogo global.`,
@@ -482,20 +482,20 @@ const deleteMachine = async (machine: MachineItem) => {
     router.delete(integrationRoute('machines.destroy', machine.id), {
         preserveScroll: true,
         onSuccess: () => void showSuccessToast('Integração global eliminada.'),
-        onError: () => void showErrorToast('Não foi possível eliminar a integração global.'),
+        onError: () => void showErrorToast('Não foi possível eliminar o TPA.'),
     });
 };
 </script>
 
 <template>
-    <Head title="Integrações ZoneSoft" />
+    <Head title="Catálogo ZoneSoft" />
 
     <AuthenticatedLayout>
         <template #header>
             <div class="flex w-full flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                 <div>
-                    <h2 class="dash-page-title">Integrações ZoneSoft</h2>
-                    <p class="dash-muted-text">Catálogo global de licenças, Client IDs e TPAs</p>
+                    <h2 class="dash-page-title">Catálogo ZoneSoft</h2>
+                    <p class="dash-muted-text">Todos os TPAs ligados à ZoneSoft, por licença e cliente</p>
                 </div>
                 <Link :href="route('admin.events.index')" class="dash-link-button w-full justify-center sm:w-auto">Ver eventos</Link>
             </div>
@@ -563,7 +563,7 @@ const deleteMachine = async (machine: MachineItem) => {
             <section class="dash-card space-y-4">
                 <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                     <div>
-                        <h3 class="dash-card-title mb-0">Integrações globais</h3>
+                        <h3 class="dash-card-title mb-0">TPAs</h3>
                         <p class="dash-recent-subtitle">Cadastre a licença e cada Store ID uma única vez.</p>
                     </div>
                     <button
@@ -840,7 +840,7 @@ const deleteMachine = async (machine: MachineItem) => {
         <Modal :show="showMachineModal" max-width="2xl" @close="closeMachineModal">
             <form class="dash-modal" @submit.prevent="submitMachine">
                 <div class="dash-modal-header">
-                    <h3 class="dash-modal-title">{{ editingMachineId ? 'Editar integração global' : 'Nova integração global' }}</h3>
+                    <h3 class="dash-modal-title">{{ editingMachineId ? 'Editar TPA' : 'Novo TPA' }}</h3>
                     <button type="button" class="dash-modal-close" @click="closeMachineModal">
                         <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <path d="M18 6L6 18M6 6l12 12" />
@@ -949,7 +949,7 @@ const deleteMachine = async (machine: MachineItem) => {
                             @input="clearImportPreview"
                         />
                         <p class="admin-event-input-hint">
-                            A pré-visualização não grava dados. São aceitas até 500 integrações por lote.
+                            A pré-visualização não grava dados. São aceitas até 500 TPAs por lote.
                         </p>
                     </div>
                     <div class="dash-modal-actions dash-modal-field-full">
@@ -1017,7 +1017,7 @@ const deleteMachine = async (machine: MachineItem) => {
                             :disabled="!importPreview.can_import || importingMachines"
                             @click="importMachines"
                         >
-                            {{ importingMachines ? 'A importar...' : `Importar ${importPreview.summary.new} integrações` }}
+                            {{ importingMachines ? 'A importar...' : `Importar ${importPreview.summary.new} TPAs` }}
                         </button>
                     </div>
                 </div>

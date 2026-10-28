@@ -149,15 +149,6 @@ class EventController extends Controller
         }, $issues)));
     }
 
-    public function create(): Response
-    {
-        return Inertia::render('Admin/Events/Create', [
-            'clients' => Client::query()
-                ->orderBy('name')
-                ->get(['id', 'name', 'business_name']),
-        ]);
-    }
-
     public function store(Request $request): RedirectResponse
     {
         $validated = $request->validate([
@@ -184,28 +175,6 @@ class EventController extends Controller
         }
 
         return to_route('admin.events.index');
-    }
-
-    public function edit(Event $event): Response
-    {
-        $event->load('additionalClients:id');
-
-        return Inertia::render('Admin/Events/Edit', [
-            'event' => [
-                'id' => $event->id,
-                'client_id' => $event->client_id,
-                'additional_client_ids' => $event->additionalClients->pluck('id'),
-                'title' => $event->title,
-                'description' => $event->description,
-                'event_date' => $event->event_date->format('Y-m-d\TH:i'),
-                'report_starts_at' => $event->report_starts_at?->format('Y-m-d\TH:i:s'),
-                'report_ends_at' => $event->report_ends_at?->format('Y-m-d\TH:i:s'),
-                'show_zt_card' => $event->show_zt_card,
-            ],
-            'clients' => Client::query()
-                ->orderBy('name')
-                ->get(['id', 'name', 'business_name']),
-        ]);
     }
 
     public function update(Request $request, Event $event): RedirectResponse

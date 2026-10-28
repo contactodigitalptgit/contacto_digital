@@ -296,14 +296,14 @@ const submitReportImport = () => {
         preserveScroll: true,
         onSuccess: () => {
             closeImportReportModal();
-            void showSuccessToast('Sincronizacao iniciada. Pode continuar a usar o sistema.');
+            void showSuccessToast('Sincronização iniciada. Pode continuar a usar o sistema.');
         },
         onError: (errors) => {
             reportSyncIntegrationError.value =
                 (errors.integration as string | undefined) ?? '';
 
             if (!reportSyncIntegrationError.value) {
-                void showErrorToast('Nao foi possivel sincronizar o relatorio.');
+                void showErrorToast('Não foi possível sincronizar as vendas.');
             }
         },
         onFinish: () => {
@@ -437,7 +437,7 @@ const deleteEvent = async (event: EventItem) => {
                                     v-if="event.report_summary?.status === 'processing'"
                                     class="admin-event-report-meta"
                                 >
-                                    Sincronizacao em andamento desde
+                                    A sincronizar desde
                                     {{ event.report_summary.started_at ? formatDate(event.report_summary.started_at) : 'agora' }}.
                                 </p>
                                 <p
@@ -512,7 +512,7 @@ const deleteEvent = async (event: EventItem) => {
                                     v-if="!event.report_summary"
                                     class="admin-event-report-empty"
                                 >
-                                    Sem relatorio sincronizado.
+                                    Ainda não sincronizado.
                                 </p>
                             </div>
                             <span
@@ -559,10 +559,10 @@ const deleteEvent = async (event: EventItem) => {
                             </Link>
 
                             <Link
-                                :href="route('admin.events.integrations.show', event.id)"
+                                :href="route('admin.events.tpas.manage', event.id)"
                                 class="admin-event-icon-btn"
-                                title="Gerir integrações deste evento"
-                                aria-label="Gerir integrações deste evento"
+                                title="Gerir TPA do evento"
+                                aria-label="Gerir TPA do evento"
                             >
                                 <svg
                                     class="h-4 w-4"
@@ -580,8 +580,8 @@ const deleteEvent = async (event: EventItem) => {
                             <button
                                 type="button"
                                 class="admin-event-icon-btn"
-                                title="Sincronizar relatorio"
-                                aria-label="Sincronizar relatorio"
+                                title="Sincronizar agora"
+                                aria-label="Sincronizar agora"
                                 @click="openImportReportModal(event)"
                             >
                                 <svg
@@ -707,7 +707,7 @@ const deleteEvent = async (event: EventItem) => {
                                         v-if="event.report_summary?.status === 'processing'"
                                         class="admin-event-report-meta"
                                     >
-                                        Sincronizacao em andamento desde
+                                        A sincronizar desde
                                         {{ event.report_summary.started_at ? formatDate(event.report_summary.started_at) : 'agora' }}.
                                     </p>
                                     <p
@@ -782,7 +782,7 @@ const deleteEvent = async (event: EventItem) => {
                                         v-if="!event.report_summary"
                                         class="admin-event-report-empty"
                                     >
-                                        Sem relatorio sincronizado.
+                                        Ainda não sincronizado.
                                     </p>
                                 </td>
                                 <td class="admin-events-text">
@@ -822,10 +822,10 @@ const deleteEvent = async (event: EventItem) => {
                                         </Link>
 
                                         <Link
-                                            :href="route('admin.events.integrations.show', event.id)"
+                                            :href="route('admin.events.tpas.manage', event.id)"
                                             class="admin-event-icon-btn"
-                                            title="Gerir integrações deste evento"
-                                            aria-label="Gerir integrações deste evento"
+                                            title="Gerir TPA do evento"
+                                            aria-label="Gerir TPA do evento"
                                         >
                                             <svg
                                                 class="h-4 w-4"
@@ -843,8 +843,8 @@ const deleteEvent = async (event: EventItem) => {
                                         <button
                                             type="button"
                                             class="admin-event-icon-btn"
-                                            title="Sincronizar relatorio"
-                                            aria-label="Sincronizar relatorio"
+                                            title="Sincronizar agora"
+                                            aria-label="Sincronizar agora"
                                             @click="openImportReportModal(event)"
                                         >
                                             <svg
@@ -1396,7 +1396,7 @@ const deleteEvent = async (event: EventItem) => {
             <form class="dash-modal" @submit.prevent="submitReportImport">
                 <div class="dash-modal-header">
                     <div>
-                        <h3 class="dash-modal-title">Sincronizar relatorio do evento</h3>
+                        <h3 class="dash-modal-title">Sincronizar vendas do evento</h3>
                         <p
                             v-if="selectedReportEvent"
                             class="admin-event-modal-subtitle"
@@ -1426,7 +1426,7 @@ const deleteEvent = async (event: EventItem) => {
                     class="admin-event-import-highlight"
                 >
                     <p class="admin-event-import-highlight-title">
-                        Estado atual do relatorio
+                        Estado da sincronização
                     </p>
                     <div class="admin-event-report-summary">
                         <span>{{ selectedReportEvent.report_summary.active_syncs_count }} sync(s)</span>
@@ -1438,7 +1438,7 @@ const deleteEvent = async (event: EventItem) => {
                         v-if="selectedReportEvent.report_summary.status === 'processing'"
                         class="admin-event-report-meta"
                     >
-                        Sincronizacao em andamento desde
+                        A sincronizar desde
                         {{ selectedReportEvent.report_summary.started_at ? formatDate(selectedReportEvent.report_summary.started_at) : 'agora' }}.
                     </p>
                     <p
@@ -1524,7 +1524,7 @@ const deleteEvent = async (event: EventItem) => {
                         :disabled="isSyncingReport || (selectedReportEvent?.available_machine_count ?? 0) === 0 || selectedReportEvent?.report_summary?.status === 'processing'"
                         :class="{ 'opacity-60': isSyncingReport || (selectedReportEvent?.available_machine_count ?? 0) === 0 || selectedReportEvent?.report_summary?.status === 'processing' }"
                     >
-                        {{ isSyncingReport ? 'Iniciando...' : selectedReportEvent?.report_summary?.status === 'processing' ? 'Sincronizacao em andamento' : 'Sincronizar relatorio' }}
+                        {{ isSyncingReport ? 'Iniciando...' : selectedReportEvent?.report_summary?.status === 'processing' ? 'A sincronizar' : 'Sincronizar agora' }}
                     </button>
                 </div>
             </form>

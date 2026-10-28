@@ -1850,60 +1850,68 @@ function getDifferenceClass(value: number | null) {
                         </Link>
                     </template>
 
-                    <span v-if="isAdmin" class="contacto-sidebar-menu-title">Administração</span>
+                    <template v-if="comparisonSidebarSection">
+                        <span class="contacto-sidebar-menu-title">Fecho</span>
 
-                    <Link
-                        v-if="isAdmin"
-                        :href="route('admin.events.index')"
-                        prefetch
-                        class="contacto-sidebar-menu-item"
-                    >
-                        <AppSidebarIcon name="events" />
-                        <span>Eventos</span>
-                    </Link>
+                        <Link
+                            :href="sidebarSectionUrl(comparisonSidebarSection.key) || '#'"
+                            class="contacto-sidebar-menu-item"
+                            :class="{ 'is-active': sidebarSectionIsActive(comparisonSidebarSection.key) }"
+                        >
+                            <AppSidebarIcon :name="comparisonSidebarSection.icon" />
+                            <span>{{ comparisonSidebarSection.label }}</span>
+                        </Link>
+                    </template>
 
-                    <span v-if="comparisonSidebarSection" class="contacto-sidebar-menu-title">Fecho</span>
+                    <template v-if="props.dashboardEditor?.enabled">
+                        <span class="contacto-sidebar-menu-title">Configurar evento</span>
 
-                    <Link
-                        v-if="isAdmin"
-                        :href="route('admin.clients.index')"
-                        prefetch
-                        class="contacto-sidebar-menu-item"
-                    >
-                        <AppSidebarIcon name="clients" />
-                        <span>Clientes</span>
-                    </Link>
+                        <Link
+                            :href="props.dashboardEditor.manage_tpas_url"
+                            class="contacto-sidebar-menu-item"
+                        >
+                            <AppSidebarIcon name="tpa" />
+                            <span>Gerir TPA</span>
+                        </Link>
 
-                    <span v-if="props.dashboardEditor?.enabled" class="contacto-sidebar-menu-title">Configuração</span>
+                        <Link
+                            :href="props.dashboardEditor.manage_zones_url"
+                            class="contacto-sidebar-menu-item"
+                        >
+                            <AppSidebarIcon name="zones" />
+                            <span>Gerir zonas</span>
+                        </Link>
 
-                    <Link
-                        v-if="comparisonSidebarSection"
-                        :href="sidebarSectionUrl(comparisonSidebarSection.key) || '#'"
-                        class="contacto-sidebar-menu-item"
-                        :class="{ 'is-active': sidebarSectionIsActive(comparisonSidebarSection.key) }"
-                    >
-                        <AppSidebarIcon :name="comparisonSidebarSection.icon" />
-                        <span>{{ comparisonSidebarSection.label }}</span>
-                    </Link>
+                        <Link
+                            :href="props.dashboardEditor.edit_url"
+                            class="contacto-sidebar-menu-item"
+                        >
+                            <AppSidebarIcon name="edit" />
+                            <span>Editar página</span>
+                        </Link>
+                    </template>
 
-                    <Link
-                        v-if="props.dashboardEditor?.enabled"
-                        :href="props.dashboardEditor.edit_url"
-                        class="contacto-sidebar-menu-item contacto-sidebar-editor-link"
-                    >
-                        <AppSidebarIcon name="edit" />
-                        <span>Editar página</span>
-                    </Link>
+                    <template v-if="isAdmin">
+                        <span class="contacto-sidebar-menu-title">Administração</span>
 
-                    <Link
-                        v-if="props.dashboardEditor?.enabled"
-                        :href="props.dashboardEditor.manage_tpas_url"
-                        class="contacto-sidebar-menu-item"
-                    >
-                        <AppSidebarIcon name="tpa" />
-                        <span>Gerir TPA</span>
-                    </Link>
+                        <Link
+                            :href="route('admin.events.index')"
+                            prefetch
+                            class="contacto-sidebar-menu-item"
+                        >
+                            <AppSidebarIcon name="events" />
+                            <span>Eventos</span>
+                        </Link>
 
+                        <Link
+                            :href="route('admin.clients.index')"
+                            prefetch
+                            class="contacto-sidebar-menu-item"
+                        >
+                            <AppSidebarIcon name="clients" />
+                            <span>Clientes</span>
+                        </Link>
+                    </template>
                 </div>
 
                 <div class="contacto-sidebar-sync">
