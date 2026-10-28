@@ -181,21 +181,37 @@ class ZoneSoftStoreNameService
         }
 
         try {
+            // A ZSAPI só aceita a loja completa: lê-se a loja atual e muda-se
+            // apenas a descrição.
+            $current = $this->client->post(
+                $machine->application,
+                $machine->zs_client_id,
+                'stores',
+                'getInstance',
+                'store',
+                ['codigo' => (int) $machine->store_id],
+                retryUnauthorized: true,
+            )['store'] ?? null;
+
+            if (! is_array($current) || ! isset($current['codigo'])) {
+                return $this->fail($machine, sprintf('A ZoneSoft não devolveu a loja %d.', $machine->store_id));
+            }
+
             $this->client->post(
                 $machine->application,
                 $machine->zs_client_id,
                 'stores',
                 'saveInstances',
                 'store',
-                [['codigo' => (int) $machine->store_id, 'descricao' => $name]],
+                [[...$current, 'codigo' => (int) $machine->store_id, 'descricao' => $name]],
                 retryUnauthorized: true,
             );
         } catch (ZoneSoftApiException $exception) {
             report($exception);
 
             return $this->fail($machine, in_array($exception->statusCode(), [401, 403], true)
-                ? 'A ZoneSoft não autorizou alterar o nome desta loja (Stores::saveInstances). Confirme as permissões da integração na ZoneSoft.'
-                : 'A ZoneSoft recusou o nome: '.$exception->getMessage());
+                ? sprintf('A ZoneSoft não autorizou esta chave (HTTP %d). Confirme o TPA na ZoneSoft.', $exception->statusCode())
+                : sprintf('A ZoneSoft recusou o nome (HTTP %d): %s', $exception->statusCode(), $exception->getMessage()));
         } catch (Throwable $exception) {
             report($exception);
 
