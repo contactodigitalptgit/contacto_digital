@@ -46,7 +46,7 @@ const primaryNavigation = computed<NavItem[]>(() => {
             },
             {
                 key: 'integrations',
-                label: 'Integrações',
+                label: 'Catálogo ZoneSoft',
                 href: route('admin.integrations.zonesoft.index'),
                 pattern: 'admin.integrations.*',
                 icon: 'tpa',

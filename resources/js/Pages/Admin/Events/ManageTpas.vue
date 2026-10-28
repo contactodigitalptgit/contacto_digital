@@ -500,7 +500,7 @@ const validateEventMachineLabels = async () => {
 
                 <div class="flex flex-wrap items-center gap-3">
                     <Link :href="route('admin.integrations.zonesoft.index')" class="dash-link-button">
-                        Catálogo global
+                        Catálogo ZoneSoft
                     </Link>
                     <Link :href="route('admin.events.dashboard', props.event.id)" class="dash-link-button">
                         Voltar ao dashboard
@@ -564,9 +564,9 @@ const validateEventMachineLabels = async () => {
             </section>
 
             <section v-if="!props.machines.length" class="event-dashboard-empty">
-                Este cliente ainda não possui TPAs no catálogo global.
+                Este cliente ainda não tem TPAs no Catálogo ZoneSoft.
                 <Link :href="route('admin.integrations.zonesoft.index')" class="font-semibold underline">
-                    Cadastrar integrações
+                    Importar TPAs
                 </Link>
             </section>
 

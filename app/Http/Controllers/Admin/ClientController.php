@@ -50,11 +50,6 @@ class ClientController extends Controller
         ]);
     }
 
-    public function create(): Response
-    {
-        return Inertia::render('Admin/Clients/Create');
-    }
-
     public function store(Request $request): RedirectResponse
     {
         $validated = $request->validate([
@@ -86,22 +81,6 @@ class ClientController extends Controller
         });
 
         return to_route('admin.clients.index');
-    }
-
-    public function edit(Client $client): Response
-    {
-        $client->load('user');
-
-        return Inertia::render('Admin/Clients/Edit', [
-            'client' => [
-                'id' => $client->id,
-                'name' => $client->name,
-                'business_name' => $client->business_name,
-                'address' => $client->address,
-                'phone' => $client->phone,
-                'email' => $client->user->email,
-            ],
-        ]);
     }
 
     public function dashboard(Client $client): RedirectResponse

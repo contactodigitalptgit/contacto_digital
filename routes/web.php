@@ -162,8 +162,8 @@ Route::middleware(['auth', 'active.client', 'admin'])
             ->name('integrations.zonesoft.machines.update');
         Route::delete('integrations/zonesoft/machines/{machine}', [ZoneSoftIntegrationController::class, 'destroyMachine'])
             ->name('integrations.zonesoft.machines.destroy');
-        Route::resource('clients', ClientController::class);
-        Route::resource('events', EventController::class);
+        Route::resource('clients', ClientController::class)->except(['create', 'show', 'edit']);
+        Route::resource('events', EventController::class)->except(['create', 'show', 'edit']);
         Route::resource('users', AdminUserController::class)->except(['show', 'create', 'edit']);
     });
 
