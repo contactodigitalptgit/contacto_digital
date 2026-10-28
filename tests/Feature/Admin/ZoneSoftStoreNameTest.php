@@ -128,7 +128,7 @@ class ZoneSoftStoreNameTest extends TestCase
         $this->assertSame(1, $result['failed']);
         $machine->refresh();
         $this->assertSame('Loja 103', $machine->store_label);
-        $this->assertStringContainsString('Sem permissão', (string) $machine->zonesoft_name_error);
+        $this->assertStringContainsString('não autorizou', (string) $machine->zonesoft_name_error);
     }
 
     public function test_manual_push_of_a_past_event_sends_the_last_names(): void
