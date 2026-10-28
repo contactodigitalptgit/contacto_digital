@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import AppSidebarIcon from '@/Components/AppSidebarIcon.vue';
+import EventSidebarNavigation from '@/Components/EventSidebarNavigation.vue';
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout.vue';
 import { showErrorToast, showSuccessToast } from '@/lib/swal';
 import axios from 'axios';
@@ -489,6 +490,10 @@ const validateEventMachineLabels = async () => {
     <Head :title="`Gerir TPA - ${props.event.title}`" />
 
     <AuthenticatedLayout>
+        <template #sidebar-navigation="{ isAdmin }">
+            <EventSidebarNavigation :event-id="props.event.id" :is-admin="isAdmin" active="tpas" />
+        </template>
+
         <template #header>
             <div class="flex w-full flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
                 <div>

@@ -3,7 +3,6 @@
 use App\Http\Controllers\Admin\AdminUserController;
 use App\Http\Controllers\Admin\ClientController;
 use App\Http\Controllers\Admin\EventController;
-use App\Http\Controllers\Admin\EventDashboardConfigurationController;
 use App\Http\Controllers\Admin\EventZoneController;
 use App\Http\Controllers\Admin\EventZoneSoftIntegrationController;
 use App\Http\Controllers\Admin\ZoneSoftIntegrationController;
@@ -94,10 +93,6 @@ Route::middleware(['auth', 'active.client', 'admin'])
             ->name('events.performance');
         Route::get('events/{event}/comparar', [EventDashboardController::class, 'previewComparison'])
             ->name('events.comparison');
-        Route::get('events/{event}/dashboard-configuration/edit', [EventDashboardConfigurationController::class, 'edit'])
-            ->name('events.dashboard-configuration.edit');
-        Route::patch('events/{event}/dashboard-configuration', [EventDashboardConfigurationController::class, 'update'])
-            ->name('events.dashboard-configuration.update');
         Route::get('events/{event}/gerir-tpa', [EventZoneSoftIntegrationController::class, 'manageTpas'])
             ->name('events.tpas.manage');
         Route::put('events/{event}/gerir-tpa', [EventZoneSoftIntegrationController::class, 'syncMachines'])

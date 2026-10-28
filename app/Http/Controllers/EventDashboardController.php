@@ -259,7 +259,6 @@ class EventDashboardController extends Controller
             'dashboardConfiguration' => $dashboardConfiguration,
             'dashboardEditor' => $previewMode ? [
                 'enabled' => true,
-                'edit_url' => route('admin.events.dashboard-configuration.edit', $event),
                 'manage_tpas_url' => route('admin.events.tpas.manage', $event),
                 'manage_zones_url' => route('admin.events.zones.manage', $event),
             ] : null,

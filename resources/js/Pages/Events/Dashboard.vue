@@ -1,6 +1,10 @@
 <script setup lang="ts">
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout.vue';
 import AppSidebarIcon from '@/Components/AppSidebarIcon.vue';
+import EventSidebarNavigation, {
+    EVENT_SIDEBAR_SECTIONS,
+    type EventSidebarSection,
+} from '@/Components/EventSidebarNavigation.vue';
 import EventDateRangePicker from '@/Components/EventDateRangePicker.vue';
 import { showErrorToast, showSuccessToast } from '@/lib/swal';
 import type {
@@ -308,12 +312,6 @@ interface SummaryHourlyPoint extends HourlySale {
     is_peak: boolean;
 }
 
-interface SidebarSectionItem {
-    key: DashboardSection;
-    label: string;
-    icon: 'dashboard' | 'products' | 'payments' | 'zones' | 'performance' | 'compare';
-}
-
 interface ChartOperationalItem {
     label: string;
     value: number;
@@ -422,16 +420,7 @@ const dashboardSections = computed(() => activeDashboardConfiguration.value.sect
         helper: section.helper,
     })));
 
-const sidebarSectionDefinitions: SidebarSectionItem[] = [
-    { key: 'summary', label: 'Dashboard', icon: 'dashboard' },
-    { key: 'products', label: 'Produtos', icon: 'products' },
-    { key: 'reconciliation', label: 'Pagamentos', icon: 'payments' },
-    { key: 'zones', label: 'Zonas', icon: 'zones' },
-    { key: 'highlights', label: 'Performance', icon: 'performance' },
-    { key: 'comparison', label: 'Comparar edições', icon: 'compare' },
-];
-
-const sidebarSections = computed<SidebarSectionItem[]>(() => sidebarSectionDefinitions
+const sidebarSections = computed<EventSidebarSection[]>(() => EVENT_SIDEBAR_SECTIONS
     .filter((definition) => dashboardSections.value.some((section) => section.key === definition.key))
     .map((definition) => {
         const configuredSection = dashboardSections.value.find((section) => section.key === definition.key);
@@ -443,8 +432,6 @@ const sidebarSections = computed<SidebarSectionItem[]>(() => sidebarSectionDefin
                 : definition.label,
         };
     }));
-const mainSidebarSections = computed(() => sidebarSections.value.filter((section) => section.key !== 'comparison'));
-const comparisonSidebarSection = computed(() => sidebarSections.value.find((section) => section.key === 'comparison') ?? null);
 const quickZoneOptions = computed(() => props.filterOptions.barGroups.slice(0, 6));
 const hiddenQuickZoneCount = computed(() => Math.max(0, props.filterOptions.barGroups.length - quickZoneOptions.value.length));
 const hourOptions = Array.from({ length: 24 }, (_, hour) => ({
@@ -1829,91 +1816,15 @@ function getDifferenceClass(value: number | null) {
 
     <AuthenticatedLayout>
         <template #sidebar-navigation="{ isAdmin }">
-            <section class="contacto-sidebar-navigation" aria-label="Navegação principal">
-                <div class="contacto-sidebar-menu">
-                    <template v-for="section in mainSidebarSections" :key="section.key">
-                        <span v-if="section.key === 'summary'" class="contacto-sidebar-menu-title">Operação</span>
-                        <span v-else-if="section.key === 'products'" class="contacto-sidebar-menu-title">Análise</span>
-                        <span v-else-if="section.key === 'reconciliation'" class="contacto-sidebar-menu-title">Financeiro</span>
-                        <span v-else-if="section.key === 'zones'" class="contacto-sidebar-menu-title">Análise operacional</span>
-
-                        <Link
-                            :href="sidebarSectionUrl(section.key) || '#'"
-                            class="contacto-sidebar-menu-item"
-                            :class="{
-                                'is-active': sidebarSectionIsActive(section.key),
-                                'is-dashboard': section.key === 'summary',
-                            }"
-                        >
-                            <AppSidebarIcon :name="section.icon" />
-                            <span>{{ section.label }}</span>
-                        </Link>
-                    </template>
-
-                    <template v-if="comparisonSidebarSection">
-                        <span class="contacto-sidebar-menu-title">Fecho</span>
-
-                        <Link
-                            :href="sidebarSectionUrl(comparisonSidebarSection.key) || '#'"
-                            class="contacto-sidebar-menu-item"
-                            :class="{ 'is-active': sidebarSectionIsActive(comparisonSidebarSection.key) }"
-                        >
-                            <AppSidebarIcon :name="comparisonSidebarSection.icon" />
-                            <span>{{ comparisonSidebarSection.label }}</span>
-                        </Link>
-                    </template>
-
-                    <template v-if="props.dashboardEditor?.enabled">
-                        <span class="contacto-sidebar-menu-title">Configurar evento</span>
-
-                        <Link
-                            :href="props.dashboardEditor.manage_tpas_url"
-                            class="contacto-sidebar-menu-item"
-                        >
-                            <AppSidebarIcon name="tpa" />
-                            <span>Gerir TPA</span>
-                        </Link>
-
-                        <Link
-                            :href="props.dashboardEditor.manage_zones_url"
-                            class="contacto-sidebar-menu-item"
-                        >
-                            <AppSidebarIcon name="zones" />
-                            <span>Gerir zonas</span>
-                        </Link>
-
-                        <Link
-                            :href="props.dashboardEditor.edit_url"
-                            class="contacto-sidebar-menu-item"
-                        >
-                            <AppSidebarIcon name="edit" />
-                            <span>Editar página</span>
-                        </Link>
-                    </template>
-
-                    <template v-if="isAdmin">
-                        <span class="contacto-sidebar-menu-title">Administração</span>
-
-                        <Link
-                            :href="route('admin.events.index')"
-                            prefetch
-                            class="contacto-sidebar-menu-item"
-                        >
-                            <AppSidebarIcon name="events" />
-                            <span>Eventos</span>
-                        </Link>
-
-                        <Link
-                            :href="route('admin.clients.index')"
-                            prefetch
-                            class="contacto-sidebar-menu-item"
-                        >
-                            <AppSidebarIcon name="clients" />
-                            <span>Clientes</span>
-                        </Link>
-                    </template>
-                </div>
-
+            <EventSidebarNavigation
+                :event-id="props.event.id"
+                :is-admin="isAdmin"
+                :active="activeSection"
+                :preview-mode="props.previewMode"
+                :show-configuration="Boolean(props.dashboardEditor?.enabled)"
+                :sections="sidebarSections"
+                :section-url="sidebarSectionUrl"
+            >
                 <div class="contacto-sidebar-sync">
                     <div>
                         <span :class="{ 'is-syncing': hasProcessingSync, 'is-failed': props.syncStatus.is_stale }" />
@@ -1922,7 +1833,7 @@ function getDifferenceClass(value: number | null) {
                     <small>Última atualização: {{ formatDateTime(props.summary.last_synced_at) }}</small>
                     <em>Cashless by Contacto Digital</em>
                 </div>
-            </section>
+            </EventSidebarNavigation>
         </template>
 
         <template #header>
