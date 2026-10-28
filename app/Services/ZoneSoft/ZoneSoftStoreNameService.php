@@ -180,6 +180,8 @@ class ZoneSoftStoreNameService
             return $this->fail($machine, 'Este TPA não tem aplicação ZoneSoft associada.');
         }
 
+        $step = 'stores/getInstance';
+
         try {
             // A ZSAPI só aceita a loja completa: lê-se a loja atual e muda-se
             // apenas a descrição.
@@ -197,6 +199,7 @@ class ZoneSoftStoreNameService
                 return $this->fail($machine, sprintf('A ZoneSoft não devolveu a loja %d.', $machine->store_id));
             }
 
+            $step = 'stores/saveInstances';
             $this->client->post(
                 $machine->application,
                 $machine->zs_client_id,
@@ -210,8 +213,8 @@ class ZoneSoftStoreNameService
             report($exception);
 
             return $this->fail($machine, in_array($exception->statusCode(), [401, 403], true)
-                ? sprintf('A ZoneSoft não autorizou esta chave (HTTP %d). Confirme o TPA na ZoneSoft.', $exception->statusCode())
-                : sprintf('A ZoneSoft recusou o nome (HTTP %d): %s', $exception->statusCode(), $exception->getMessage()));
+                ? sprintf('A ZoneSoft não autorizou esta chave em %s (HTTP %d). Confirme o TPA na ZoneSoft.', $step, $exception->statusCode())
+                : sprintf('A ZoneSoft recusou %s (HTTP %d): %s', $step, $exception->statusCode(), $exception->getMessage()));
         } catch (Throwable $exception) {
             report($exception);
 
