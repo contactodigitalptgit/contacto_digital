@@ -29,6 +29,8 @@ class ClientZoneSoftMachine extends Model
         'is_active',
         'last_validated_at',
         'last_error',
+        'zonesoft_name_synced_at',
+        'zonesoft_name_error',
     ];
 
     /**
@@ -39,6 +41,7 @@ class ClientZoneSoftMachine extends Model
         return [
             'is_active' => 'boolean',
             'last_validated_at' => 'datetime',
+            'zonesoft_name_synced_at' => 'datetime',
         ];
     }
 

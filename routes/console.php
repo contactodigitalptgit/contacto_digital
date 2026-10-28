@@ -1,10 +1,13 @@
 <?php
 
+use App\Jobs\PushZoneSoftStoreNamesJob;
 use App\Jobs\SyncEventReportJob;
+use App\Models\Event;
 use App\Models\EventReportImport;
 use App\Services\EventReportAutoSyncService;
 use App\Services\EventReportSyncService;
 use App\Services\SqliteToPostgresMigrator;
+use App\Services\ZoneSoft\ZoneSoftStoreNameService;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Schedule;
@@ -86,6 +89,27 @@ Artisan::command('events:sync-due-reports {--dry-run : Show the next due event w
 Schedule::command('events:sync-due-reports')
     ->everyMinute()
     ->withoutOverlapping(10);
+
+Artisan::command('zonesoft:push-store-names', function (ZoneSoftStoreNameService $storeNames) {
+    $events = Event::query()
+        ->where('is_active', true)
+        ->where('zonesoft_names_enabled', true)
+        ->whereHas('zones')
+        ->get();
+
+    foreach ($events as $event) {
+        if ($storeNames->automaticReferenceAt($event)) {
+            PushZoneSoftStoreNamesJob::dispatch($event->id);
+        }
+    }
+
+    return Command::SUCCESS;
+})->purpose('Send each TPA store name (zone - operator) to ZoneSoft for running events');
+
+// Uma mudança de zona marcada para mais tarde (ex.: 17:00) chega ao TPA nesse minuto.
+Schedule::command('zonesoft:push-store-names')
+    ->everyMinute()
+    ->withoutOverlapping(5);
 
 // PERF-501 (fase 1): ferramenta de ensaio para a migracao SQLite -> Postgres
 // — ver docs/PLANO_DE_PERFORMANCE_SINCRONIZACAO.md. Nao e chamada por
