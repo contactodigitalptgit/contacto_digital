@@ -188,7 +188,14 @@ class ZoneSoftStoreNameService
                 'saveInstances',
                 'store',
                 [['codigo' => (int) $machine->store_id, 'descricao' => $name]],
+                retryUnauthorized: true,
             );
+        } catch (ZoneSoftApiException $exception) {
+            report($exception);
+
+            return $this->fail($machine, in_array($exception->statusCode(), [401, 403], true)
+                ? 'A ZoneSoft não autorizou alterar o nome desta loja (Stores::saveInstances). Confirme as permissões da integração na ZoneSoft.'
+                : 'A ZoneSoft recusou o nome: '.$exception->getMessage());
         } catch (Throwable $exception) {
             report($exception);
 
