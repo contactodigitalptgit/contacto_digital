@@ -131,23 +131,93 @@ const licenseMachines = computed(() => props.machines.filter(
 ));
 const selectedCount = computed(() => selectedMachineIds.value.length);
 const pendingZoneCount = computed(() => props.unassigned_machine_ids.length);
-const matchesMachineSearch = (machine: MachineItem, normalizedSearch: string) => normalizedSearch === ''
-    || [
-        machine.store_label,
-        machine.store_id.toString(),
-        machine.zs_client_id,
-    ].some((value) => value?.toLocaleLowerCase('pt-PT').includes(normalizedSearch));
+// Aceita Store IDs em intervalo ou lista: "201-230", "201 à 230", "201..230", "201-210, 215".
+const STORE_RANGE_PART = /^(\d+)\s*(?:-|–|—|\.\.|a|à|ate|até)\s*(\d+)$/;
+const MAX_STORE_RANGE = 1000;
+const parseStoreIdSearch = (normalizedSearch: string): Set<number> | null => {
+    const parts = normalizedSearch.split(/[,;]+/).map((part) => part.trim()).filter(Boolean);
+    const isRangeSearch = parts.some((part) => STORE_RANGE_PART.test(part)) || parts.length > 1;
 
+    if (!isRangeSearch) {
+        return null;
+    }
+
+    const ids = new Set<number>();
+
+    for (const part of parts) {
+        const range = part.match(STORE_RANGE_PART);
+
+        if (range) {
+            const from = Math.min(Number(range[1]), Number(range[2]));
+            const to = Math.max(Number(range[1]), Number(range[2]));
+
+            if (to - from > MAX_STORE_RANGE) {
+                return null;
+            }
+
+            for (let id = from; id <= to; id++) {
+                ids.add(id);
+            }
+        } else if (/^\d+$/.test(part)) {
+            ids.add(Number(part));
+        } else {
+            return null;
+        }
+    }
+
+    return ids;
+};
+const matchesMachineSearch = (machine: MachineItem, normalizedSearch: string, storeIds: Set<number> | null = null) => {
+    if (storeIds) {
+        return storeIds.has(machine.store_id);
+    }
+
+    return normalizedSearch === ''
+        || [
+            machine.store_label,
+            machine.store_id.toString(),
+            machine.zs_client_id,
+        ].some((value) => value?.toLocaleLowerCase('pt-PT').includes(normalizedSearch));
+};
+
+const searchStoreIds = computed(() => parseStoreIdSearch(search.value.trim().toLocaleLowerCase('pt-PT')));
 const filteredMachines = computed(() => {
     const normalizedSearch = search.value.trim().toLocaleLowerCase('pt-PT');
 
-    return licenseMachines.value.filter((machine) => matchesMachineSearch(machine, normalizedSearch));
+    return licenseMachines.value.filter((machine) => matchesMachineSearch(machine, normalizedSearch, searchStoreIds.value));
+});
+const missingSearchStoreIds = computed(() => {
+    if (!searchStoreIds.value) {
+        return [];
+    }
+
+    const found = new Set(filteredMachines.value.map((machine) => machine.store_id));
+
+    return [...searchStoreIds.value].filter((id) => !found.has(id)).sort((left, right) => left - right);
+});
+const searchRangeSummary = computed(() => {
+    if (!searchStoreIds.value) {
+        return null;
+    }
+
+    const results = filteredMachines.value;
+    const inactive = results.filter((machine) => !machine.is_active).length;
+    const alreadySelected = results.filter((machine) => selectedMachineIds.value.includes(machine.id)).length;
+
+    return {
+        requested: searchStoreIds.value.size,
+        found: results.length,
+        inactive,
+        alreadySelected,
+        toSelect: results.filter((machine) => machine.is_active && !selectedMachineIds.value.includes(machine.id)).length,
+    };
 });
 const pickerMachines = computed(() => {
     const normalizedSearch = pickerSearch.value.trim().toLocaleLowerCase('pt-PT');
+    const storeIds = parseStoreIdSearch(normalizedSearch);
 
     return [...licenseMachines.value]
-        .filter((machine) => matchesMachineSearch(machine, normalizedSearch))
+        .filter((machine) => matchesMachineSearch(machine, normalizedSearch, storeIds))
         .sort((left, right) => {
             const leftSelected = selectedMachineIds.value.includes(left.id) ? 1 : 0;
             const rightSelected = selectedMachineIds.value.includes(right.id) ? 1 : 0;
@@ -220,6 +290,13 @@ const toggleAllMachines = () => {
             ...selectedMachineIds.value,
             ...filteredMachines.value.filter((machine) => machine.is_active).map((machine) => machine.id),
         ])];
+};
+
+const selectSearchResults = () => {
+    selectedMachineIds.value = [...new Set([
+        ...selectedMachineIds.value,
+        ...filteredMachines.value.filter((machine) => machine.is_active).map((machine) => machine.id),
+    ])];
 };
 
 const togglePicker = () => {
@@ -565,8 +642,38 @@ const validateEventMachineLabels = async () => {
                                     v-model="search"
                                     type="search"
                                     class="dash-modal-input"
-                                    placeholder="Pesquisar nome, Store ID ou Client ID..."
+                                    placeholder="Pesquisar nome, Store ID, Client ID ou intervalo (ex.: 201-230)..."
                                 />
+                                <p v-if="!searchRangeSummary" class="mt-2 text-xs text-current/50">
+                                    Dica: escreva um intervalo de Store ID, como <span class="font-semibold">201-230</span> ou <span class="font-semibold">201-210, 215</span>, para selecionar vários TPAs de uma vez.
+                                </p>
+                                <div
+                                    v-else
+                                    class="mt-3 flex flex-col gap-3 rounded-2xl border border-sky-400/30 bg-sky-500/5 px-4 py-3 sm:flex-row sm:items-center sm:justify-between"
+                                >
+                                    <div class="text-sm">
+                                        <p class="font-semibold text-current">
+                                            {{ searchRangeSummary.found }} de {{ searchRangeSummary.requested }} Store ID{{ searchRangeSummary.requested === 1 ? '' : 's' }} encontrados nesta licença
+                                        </p>
+                                        <p class="mt-1 text-xs text-current/60">
+                                            <template v-if="searchRangeSummary.alreadySelected">{{ searchRangeSummary.alreadySelected }} já selecionado{{ searchRangeSummary.alreadySelected === 1 ? '' : 's' }}. </template>
+                                            <template v-if="searchRangeSummary.inactive">{{ searchRangeSummary.inactive }} inativo{{ searchRangeSummary.inactive === 1 ? '' : 's' }} não ser{{ searchRangeSummary.inactive === 1 ? 'á' : 'ão' }} adicionado{{ searchRangeSummary.inactive === 1 ? '' : 's' }}. </template>
+                                            <template v-if="missingSearchStoreIds.length">
+                                                Não existem: {{ missingSearchStoreIds.slice(0, 12).join(', ') }}{{ missingSearchStoreIds.length > 12 ? '…' : '' }}.
+                                            </template>
+                                        </p>
+                                    </div>
+                                    <button
+                                        type="button"
+                                        class="dash-link-button shrink-0"
+                                        :disabled="!searchRangeSummary.toSelect"
+                                        @click="selectSearchResults"
+                                    >
+                                        {{ searchRangeSummary.toSelect
+                                            ? `Adicionar ${searchRangeSummary.toSelect} TPA${searchRangeSummary.toSelect === 1 ? '' : 's'}`
+                                            : 'Todos adicionados' }}
+                                    </button>
+                                </div>
                             </div>
 
                             <div ref="pickerContainer" class="relative">
