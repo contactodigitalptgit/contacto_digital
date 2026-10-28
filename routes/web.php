@@ -113,6 +113,14 @@ Route::middleware(['auth', 'active.client', 'admin'])
             ->name('events.zones.days.confirm');
         Route::post('events/{event}/gerir-zonas/fechar-antigas', [EventZoneController::class, 'closeLegacy'])
             ->name('events.zones.legacy.close');
+        Route::post('events/{event}/gerir-zonas/importar/pre-visualizar', [EventZoneController::class, 'previewImport'])
+            ->name('events.zones.import.preview');
+        Route::post('events/{event}/gerir-zonas/importar', [EventZoneController::class, 'applyImport'])
+            ->name('events.zones.import.store');
+        Route::patch('events/{event}/gerir-zonas/nomes-automaticos', [EventZoneController::class, 'toggleZoneSoftNames'])
+            ->name('events.zones.zonesoft-names.toggle');
+        Route::post('events/{event}/gerir-zonas/enviar-nomes', [EventZoneController::class, 'pushZoneSoftNames'])
+            ->name('events.zones.zonesoft-names.push');
         Route::post('events/{event}/gerir-zonas', [EventZoneController::class, 'store'])
             ->name('events.zones.store');
         Route::post('events/{event}/gerir-zonas/{zone}/tpas', [EventZoneController::class, 'assignMachines'])

@@ -85,8 +85,10 @@ class EventZoneManagementService
         ClientZoneSoftMachine $machine,
         CarbonInterface $effectiveAt,
         ?User $actor = null,
+        ?string $operatorName = null,
     ): void {
         abort_unless($zone->event_id === $event->id, 404);
+        $operatorName = trim((string) $operatorName) ?: null;
         abort_unless(
             $machine->client_id === $event->client_id
             && $event->zonesoftMachines()->whereKey($machine->id)->exists(),
@@ -101,7 +103,7 @@ class EventZoneManagementService
             }
         }
 
-        DB::transaction(function () use ($event, $zone, $machine, $effectiveAt, $actor): void {
+        DB::transaction(function () use ($event, $zone, $machine, $effectiveAt, $actor, $operatorName): void {
             Event::query()->whereKey($event->id)->lockForUpdate()->firstOrFail();
             $assignments = EventZoneAssignment::query()
                 ->where('event_id', $event->id)
@@ -116,9 +118,10 @@ class EventZoneManagementService
 
             $changed = false;
 
-            if ($atBoundary && $atBoundary->event_zone_id !== $zone->id) {
+            if ($atBoundary && ($atBoundary->event_zone_id !== $zone->id || $atBoundary->operator_name !== $operatorName)) {
                 $atBoundary->update([
                     'event_zone_id' => $zone->id,
+                    'operator_name' => $operatorName,
                     'ends_at' => $zone->day && (! $atBoundary->ends_at || $atBoundary->ends_at->greaterThan($zone->day->ends_at))
                         ? $zone->day->ends_at
                         : $atBoundary->ends_at,
@@ -134,7 +137,7 @@ class EventZoneManagementService
                         && ($assignment->ends_at === null || $assignment->ends_at->greaterThan($effectiveAt));
                 });
 
-                if ($current?->event_zone_id !== $zone->id) {
+                if ($current?->event_zone_id !== $zone->id || $current?->operator_name !== $operatorName) {
                     $next = $assignments->first(
                         fn (EventZoneAssignment $assignment): bool => $assignment->starts_at->greaterThan($effectiveAt),
                     );
@@ -147,6 +150,7 @@ class EventZoneManagementService
                         'event_id' => $event->id,
                         'event_zone_id' => $zone->id,
                         'machine_id' => $machine->id,
+                        'operator_name' => $operatorName,
                         'starts_at' => $effectiveAt,
                         'ends_at' => $zone->day
                             ? ($next && $next->starts_at->lessThan($zone->day->ends_at)

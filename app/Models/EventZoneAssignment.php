@@ -11,6 +11,7 @@ class EventZoneAssignment extends Model
         'event_id',
         'event_zone_id',
         'machine_id',
+        'operator_name',
         'starts_at',
         'ends_at',
         'assigned_by_user_id',

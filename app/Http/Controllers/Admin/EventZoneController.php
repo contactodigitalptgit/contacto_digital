@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Jobs\PushZoneSoftStoreNamesJob;
 use App\Models\ClientZoneSoftMachine;
 use App\Models\Event;
 use App\Models\EventReportPaymentDocument;
@@ -13,8 +14,11 @@ use App\Models\EventZoneAssignment;
 use App\Models\EventZoneDay;
 use App\Services\EventReportSyncService;
 use App\Services\EventZoneAttributionService;
+use App\Services\EventZoneImportService;
 use App\Services\EventZoneManagementService;
+use App\Services\ZoneSoft\ZoneSoftStoreNameService;
 use Carbon\CarbonImmutable;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
@@ -84,6 +88,7 @@ class EventZoneController extends Controller
                 'report_starts_at' => $event->report_starts_at?->toISOString(),
                 'report_ends_at' => $event->report_ends_at?->toISOString(),
                 'requires_explicit_zones' => $event->requires_explicit_zones,
+                'zonesoft_names_enabled' => $event->zonesoft_names_enabled,
                 'legacy_zone_ends_at' => $event->legacy_zone_ends_at?->format('Y-m-d\TH:i'),
             ],
             'client' => [
@@ -112,9 +117,9 @@ class EventZoneController extends Controller
                 'name' => $zone->name,
                 'sort_order' => $zone->sort_order,
                 'total_sales' => round((float) ($salesByZone[$zone->id] ?? 0), 4),
-                'machines' => $this->serializeMachines($machinesByZone->get($zone->id, collect())),
+                'machines' => $this->serializeMachines($machinesByZone->get($zone->id, collect()), $openAssignments, $zone->name),
             ])->values(),
-            'unassigned_machines' => $this->serializeMachines($machinesByZone->get(0, collect())),
+            'unassigned_machines' => $this->serializeMachines($machinesByZone->get(0, collect()), $openAssignments),
             'history' => EventZoneAssignment::query()
                 ->select('event_zone_assignments.*')
                 ->selectSub(
@@ -144,6 +149,7 @@ class EventZoneController extends Controller
                 ->map(fn (EventZoneAssignment $assignment): array => [
                     'id' => $assignment->id,
                     'zone' => $assignment->zone?->name ?? 'Zona arquivada',
+                    'operator_name' => $assignment->operator_name,
                     'machine' => $assignment->machine?->store_label
                         ?: 'Store '.($assignment->machine?->store_id ?? '—'),
                     'starts_at' => $assignment->starts_at->format('Y-m-d\TH:i:s'),
@@ -198,6 +204,7 @@ class EventZoneController extends Controller
 
         $zone->update(['name' => $name]);
         $this->zoneAttribution->forget($event->id);
+        PushZoneSoftStoreNamesJob::dispatch($event->id);
 
         return $this->redirectToDay($event, $zone->event_zone_day_id)
             ->with('success', 'Zona atualizada com sucesso.');
@@ -238,9 +245,11 @@ class EventZoneController extends Controller
         abort_if($zone->archived_at !== null, 404);
         $validated = $request->validate([
             'effective_at' => ['required', 'date'],
+            'operator_name' => ['nullable', 'string', 'max:50'],
         ]);
         $effectiveAt = $this->validatedEffectiveAt($event, $validated['effective_at']);
         $this->assertWithinZoneDay($zone, $effectiveAt);
+        $this->assertZoneSoftNameFits($zone->name, $validated['operator_name'] ?? null);
 
         $this->zoneManagement->moveMachine(
             $event,
@@ -248,7 +257,9 @@ class EventZoneController extends Controller
             $machine,
             $effectiveAt,
             $request->user(),
+            $validated['operator_name'] ?? null,
         );
+        $this->queueZoneSoftNames($event, [$machine->id]);
 
         return $this->redirectToDay($event, $zone->event_zone_day_id)
             ->with('success', $zone->day && ! $zone->day->confirmed_at
@@ -298,6 +309,7 @@ class EventZoneController extends Controller
                 $this->zoneManagement->moveMachine($event, $zone, $machine, $effectiveAt, $request->user());
             }
         });
+        $this->queueZoneSoftNames($event, $machineIds->all());
 
         return $this->redirectToDay($event, $zone->event_zone_day_id)
             ->with('success', 'TPAs atribuídos à zona.');
@@ -434,8 +446,164 @@ class EventZoneController extends Controller
         });
 
         $this->zoneAttribution->forget($event->id);
+        PushZoneSoftStoreNamesJob::dispatch($event->id);
 
         return $this->redirectToDay($event, $day->id)->with('success', 'Dia confirmado.');
+    }
+
+    public function previewImport(Request $request, Event $event, EventZoneImportService $importer): JsonResponse
+    {
+        $validated = $request->validate([
+            'file' => ['required', 'file', 'max:5120', 'mimes:xlsx,xls,csv,txt'],
+            'day_id' => ['nullable', 'integer'],
+        ]);
+        $day = $this->importDay($event, $validated['day_id'] ?? null);
+
+        return response()->json($importer->preview(
+            $event,
+            $day,
+            $importer->parse($request->file('file')),
+            $this->importDefaultStartsAt($event, $day),
+        ));
+    }
+
+    public function applyImport(Request $request, Event $event, EventZoneImportService $importer): RedirectResponse
+    {
+        $validated = $request->validate([
+            'day_id' => ['nullable', 'integer'],
+            'rows' => ['required', 'array', 'min:1', 'max:1000'],
+            'rows.*.store_id' => ['required', 'integer'],
+            'rows.*.zone' => ['required', 'string', 'max:120'],
+            'rows.*.operator' => ['nullable', 'string', 'max:50'],
+            'rows.*.starts_at' => ['nullable', 'string', 'max:40'],
+        ]);
+        $day = $this->importDay($event, $validated['day_id'] ?? null);
+        $preview = $importer->preview(
+            $event,
+            $day,
+            array_map(fn (array $row): array => [
+                'store_id' => (int) $row['store_id'],
+                'zone' => (string) $row['zone'],
+                'operator' => $row['operator'] ?? null,
+                'starts_at' => $row['starts_at'] ?? null,
+            ], $validated['rows']),
+            $this->importDefaultStartsAt($event, $day),
+        );
+        $rows = array_values(array_filter($preview['rows'], fn (array $row): bool => $row['errors'] === []));
+
+        if ($rows === []) {
+            throw ValidationException::withMessages(['rows' => 'Nenhuma linha válida para importar.']);
+        }
+
+        foreach ($rows as $row) {
+            $this->validatedEffectiveAt($event, $row['starts_at']);
+        }
+
+        $machineIds = DB::transaction(function () use ($event, $day, $rows, $request): array {
+            Event::query()->whereKey($event->id)->lockForUpdate()->firstOrFail();
+            $zones = EventZone::query()
+                ->where('event_id', $event->id)
+                ->where('event_zone_day_id', $day?->id)
+                ->whereNull('archived_at')
+                ->get()
+                ->keyBy(fn (EventZone $zone): string => mb_strtolower($zone->name));
+            $nextOrder = (int) EventZone::query()->where('event_id', $event->id)
+                ->where('event_zone_day_id', $day?->id)->max('sort_order');
+            $machines = $event->zonesoftMachines()->get()->keyBy('id');
+            $touched = [];
+
+            foreach ($rows as $row) {
+                $key = mb_strtolower($row['zone']);
+                $zone = $zones->get($key);
+
+                if (! $zone) {
+                    $this->ensureUniqueName($event, $row['zone'], null, $day);
+                    $zone = EventZone::create([
+                        'event_id' => $event->id,
+                        'event_zone_day_id' => $day?->id,
+                        'name' => $row['zone'],
+                        'sort_order' => ++$nextOrder,
+                    ]);
+                    $zones->put($key, $zone);
+                }
+
+                $this->zoneManagement->moveMachine(
+                    $event,
+                    $zone,
+                    $machines->get($row['machine_id']),
+                    CarbonImmutable::parse($row['starts_at']),
+                    $request->user(),
+                    $row['operator'],
+                );
+                $touched[] = (int) $row['machine_id'];
+            }
+
+            return $touched;
+        });
+
+        $this->zoneAttribution->forget($event->id);
+        $this->queueZoneSoftNames($event, $machineIds);
+
+        return $this->redirectToDay($event, $day?->id)->with('success', sprintf(
+            '%d TPAs importados%s.',
+            count($rows),
+            $preview['summary']['invalid'] ? sprintf(' (%d linhas com erro ignoradas)', $preview['summary']['invalid']) : '',
+        ));
+    }
+
+    private function importDay(Event $event, mixed $dayId): ?EventZoneDay
+    {
+        if ($dayId !== null) {
+            return $event->zoneDays()->findOrFail((int) $dayId);
+        }
+
+        if ($event->zoneDays()->exists()) {
+            throw ValidationException::withMessages(['day_id' => 'Selecione o dia operacional para importar.']);
+        }
+
+        return null;
+    }
+
+    private function importDefaultStartsAt(Event $event, ?EventZoneDay $day): CarbonImmutable
+    {
+        if ($day) {
+            return CarbonImmutable::instance($day->starts_at);
+        }
+
+        return $event->report_starts_at
+            ? CarbonImmutable::instance($event->report_starts_at)
+            : CarbonImmutable::instance($event->event_date)->startOfDay();
+    }
+
+    public function toggleZoneSoftNames(Request $request, Event $event): RedirectResponse
+    {
+        $validated = $request->validate(['enabled' => ['required', 'boolean']]);
+        $event->update(['zonesoft_names_enabled' => $validated['enabled']]);
+
+        if ($event->zonesoft_names_enabled) {
+            PushZoneSoftStoreNamesJob::dispatch($event->id);
+        }
+
+        return back()->with('success', $event->zonesoft_names_enabled
+            ? 'Os nomes dos TPAs passam a seguir as zonas automaticamente.'
+            : 'O envio automático de nomes para a ZoneSoft foi desligado.');
+    }
+
+    public function pushZoneSoftNames(Request $request, Event $event): RedirectResponse
+    {
+        $validated = $request->validate([
+            'day_id' => ['nullable', 'integer'],
+            'machine_id' => ['nullable', 'integer'],
+        ]);
+        $day = isset($validated['day_id']) ? $event->zoneDays()->findOrFail($validated['day_id']) : null;
+        $machineIds = isset($validated['machine_id'])
+            ? [(int) $event->zonesoftMachines()->findOrFail($validated['machine_id'])->id]
+            : null;
+
+        PushZoneSoftStoreNamesJob::dispatch($event->id, $day?->id, $machineIds, true);
+
+        return $this->redirectToDay($event, $day?->id)
+            ->with('success', 'Envio dos nomes para a ZoneSoft iniciado. O estado de cada TPA atualiza em instantes.');
     }
 
     public function closeLegacy(Request $request, Event $event): RedirectResponse
@@ -570,6 +738,32 @@ class EventZoneController extends Controller
         return $zone;
     }
 
+    /**
+     * Um nome novo merece nova tentativa: o erro anterior deixa de valer.
+     *
+     * @param  list<int>  $machineIds
+     */
+    private function queueZoneSoftNames(Event $event, array $machineIds): void
+    {
+        ClientZoneSoftMachine::query()->whereIn('id', $machineIds)->update(['zonesoft_name_error' => null]);
+        PushZoneSoftStoreNamesJob::dispatch($event->id, null, $machineIds);
+    }
+
+    private function assertZoneSoftNameFits(string $zoneName, ?string $operatorName): void
+    {
+        $name = ZoneSoftStoreNameService::nameFor($zoneName, $operatorName);
+
+        if (mb_strlen($name) > ZoneSoftStoreNameService::MAX_NAME_LENGTH) {
+            throw ValidationException::withMessages([
+                'operator_name' => sprintf(
+                    'O nome na ZoneSoft ("%s") passa de %d caracteres. Encurte a zona ou o operador.',
+                    $name,
+                    ZoneSoftStoreNameService::MAX_NAME_LENGTH,
+                ),
+            ]);
+        }
+    }
+
     private function ensureUniqueName(Event $event, string $name, ?EventZone $except = null, ?EventZoneDay $day = null): void
     {
         $exists = EventZone::query()
@@ -607,16 +801,27 @@ class EventZoneController extends Controller
     }
 
     /** @param Collection<int, ClientZoneSoftMachine> $machines */
-    private function serializeMachines(Collection $machines): Collection
+    /** @param Collection<int, EventZoneAssignment> $openAssignments */
+    private function serializeMachines(Collection $machines, Collection $openAssignments, ?string $zoneName = null): Collection
     {
         return $machines
-            ->map(fn (ClientZoneSoftMachine $machine): array => [
-                'id' => $machine->id,
-                'store_id' => $machine->store_id,
-                'store_label' => $machine->store_label,
-                'zs_client_id' => $machine->zs_client_id,
-                'is_active' => $machine->is_active,
-            ])
+            ->map(function (ClientZoneSoftMachine $machine) use ($openAssignments, $zoneName): array {
+                $operatorName = $openAssignments->get($machine->id)?->operator_name;
+
+                return [
+                    'id' => $machine->id,
+                    'store_id' => $machine->store_id,
+                    'store_label' => $machine->store_label,
+                    'zs_client_id' => $machine->zs_client_id,
+                    'is_active' => $machine->is_active,
+                    'operator_name' => $operatorName,
+                    'zonesoft_name' => $zoneName !== null
+                        ? ZoneSoftStoreNameService::nameFor($zoneName, $operatorName)
+                        : null,
+                    'zonesoft_name_synced_at' => $machine->zonesoft_name_synced_at?->toISOString(),
+                    'zonesoft_name_error' => $machine->zonesoft_name_error,
+                ];
+            })
             ->values();
     }
 }

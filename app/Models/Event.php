@@ -27,6 +27,7 @@ class Event extends Model
         'show_zt_card',
         'dashboard_configuration',
         'requires_explicit_zones',
+        'zonesoft_names_enabled',
         'legacy_zone_ends_at',
         'is_active',
     ];
@@ -43,6 +44,7 @@ class Event extends Model
             'show_zt_card' => 'boolean',
             'dashboard_configuration' => 'array',
             'requires_explicit_zones' => 'boolean',
+            'zonesoft_names_enabled' => 'boolean',
             'legacy_zone_ends_at' => 'datetime',
             'is_active' => 'boolean',
         ];
