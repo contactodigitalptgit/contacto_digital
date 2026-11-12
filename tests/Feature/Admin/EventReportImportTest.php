@@ -17,6 +17,7 @@ use App\Services\EventReportSyncService;
 use App\Services\ZoneSoft\ZoneSoftApiClient;
 use Carbon\CarbonImmutable;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\Client\Request as HttpRequest;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Validation\ValidationException;
@@ -291,6 +292,45 @@ class EventReportImportTest extends TestCase
                 ->where('machines.0.id', $machine->id)
                 ->where('machines.0.sync_diagnostics.excluded_rows_count', 2)
                 ->where('machines.0.sync_diagnostics.excluded_sales_total', '60.0000'));
+    }
+
+    public function test_discover_stores_pages_past_the_zonesoft_250_store_cap(): void
+    {
+        [$admin, $client] = $this->makeAdminClientContext();
+        $event = $this->makeEvent($client);
+        $this->makeApplication();
+
+        // A ZSAPI devolve no maximo 250 lojas por resposta: a loja 272 so
+        // aparece na segunda pagina.
+        $store = fn (int $code): array => ['codigo' => $code, 'descricao' => "Loja {$code}", 'pais' => 'PT'];
+        $page = fn (array $codes): array => [
+            'Response' => [
+                'StatusCode' => 200,
+                'StatusMessage' => 'OK',
+                'Content' => ['store' => array_map($store, $codes)],
+            ],
+        ];
+
+        Http::fake([
+            'https://api.zonesoft.org/v3/stores/getInstances' => function (HttpRequest $request) use ($page) {
+                $offset = (int) ($request->data()['store']['offset'] ?? 0);
+
+                return Http::response($page($offset === 0 ? range(0, 249) : range(250, 276)), 200);
+            },
+        ]);
+
+        $response = $this
+            ->actingAs($admin)
+            ->post(route('admin.events.integrations.discover-stores', $event), [
+                'zs_client_id' => 'B3FC7C254EBDD7505C9CFA30468213B0',
+            ]);
+
+        $response->assertOk();
+        $ids = collect($response->json('stores'))->pluck('id');
+        $this->assertCount(277, $ids);
+        $this->assertTrue($ids->contains(272));
+        $this->assertSame(276, $ids->last());
+        Http::assertSentCount(2);
     }
 
     public function test_admin_can_discover_stores_for_client_id(): void
