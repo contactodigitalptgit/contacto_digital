@@ -9,6 +9,16 @@ class ZoneSoftDiscoveryService
 {
     private const STORE_CACHE_TTL_MINUTES = 15;
 
+    /**
+     * A ZSAPI limita stores/getInstances a 250 lojas por resposta, mesmo com
+     * um "limit" maior: sem paginar, as lojas acima da 249 nunca aparecem e
+     * a validacao dizia que o Store ID nao existia. Pagina-se com "offset"
+     * ate vir uma pagina incompleta.
+     */
+    private const STORE_PAGE_SIZE = 250;
+
+    private const STORE_MAX_PAGES = 40;
+
     public function __construct(
         private readonly ZoneSoftApiClient $client,
     ) {}
@@ -37,19 +47,30 @@ class ZoneSoftDiscoveryService
      */
     private function fetchStores(ZoneSoftApplication $application, string $zsClientId): array
     {
-        $response = $this->client->post(
-            $application,
-            $zsClientId,
-            'stores',
-            'getInstances',
-            'store',
-            [
-                'limit' => 500,
-                'order' => 'codigo ASC',
-            ],
-        );
+        $stores = [];
 
-        return collect($response['store'] ?? [])
+        for ($page = 0; $page < self::STORE_MAX_PAGES; $page++) {
+            $response = $this->client->post(
+                $application,
+                $zsClientId,
+                'stores',
+                'getInstances',
+                'store',
+                [
+                    'limit' => self::STORE_PAGE_SIZE,
+                    'offset' => $page * self::STORE_PAGE_SIZE,
+                    'order' => 'codigo ASC',
+                ],
+            );
+            $batch = is_array($response['store'] ?? null) ? $response['store'] : [];
+            $stores = [...$stores, ...$batch];
+
+            if (count($batch) < self::STORE_PAGE_SIZE) {
+                break;
+            }
+        }
+
+        return collect($stores)
             ->filter(fn (mixed $store): bool => is_array($store) && isset($store['codigo']))
             ->map(function (array $store): array {
                 $id = (int) $store['codigo'];
